@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package device;
+
+option go_package = "github.com/pahuldeepp/grainguard/libs/proto;devicepb";
+service DeviceService {
+  rpc CreateDevice (CreateDeviceRequest) returns (CreateDeviceResponse);
+}
+
+message CreateDeviceRequest {
+  string tenant_id = 1;
+  string serial_number = 2;
+}
+
+message CreateDeviceResponse {
+  string device_id = 1;
+}
