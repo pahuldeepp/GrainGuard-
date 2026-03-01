@@ -22,10 +22,18 @@ var (
 		},
 	)
 
-EventsRetry = prometheus.NewCounter(
+	EventsRetry = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "events_retry_total",
 			Help: "Total retry attempts",
+		},
+	)
+
+	// 🔥 NEW: Kafka fetch errors metric
+	KafkaFetchErrors = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "kafka_fetch_errors_total",
+			Help: "Total Kafka fetch errors",
 		},
 	)
 
@@ -35,6 +43,7 @@ EventsRetry = prometheus.NewCounter(
 			Help: "0=closed, 1=open, 2=half-open",
 		},
 	)
+
 	KafkaConsumerLag = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "kafka_consumer_lag",
@@ -42,11 +51,13 @@ EventsRetry = prometheus.NewCounter(
 		},
 	)
 )
+
 func Init() {
 	prometheus.MustRegister(
 		EventsProcessed,
 		EventsDLQ,
 		EventsRetry,
+		KafkaFetchErrors, // 🔥 register new metric
 		CircuitBreakerState,
 		KafkaConsumerLag,
 	)
