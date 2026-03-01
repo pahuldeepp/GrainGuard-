@@ -58,7 +58,10 @@ func (s *RecordTelemetryService) Execute(
 		return err
 	}
 
-	payload, _ := json.Marshal(telemetry)
+	payload, err := json.Marshal(telemetry)
+	if err != nil {
+		return err
+	}
 
 	err = s.outboxRepo.Insert(
 		ctx,

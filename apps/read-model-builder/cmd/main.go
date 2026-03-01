@@ -86,8 +86,8 @@ func main() {
 
 	// 🔹 Database
 	dbURL := getenv(
-		"DATABASE_URL",
-		"postgres://postgres:postgres@localhost:5432/grainguard?sslmode=disable",
+		"READ_DB_URL",
+		"postgres://postgres:postgres@postgres-read:5432/grainguard_read?sslmode=disable",
 	)
 	pool, err := pgxpool.New(ctx, dbURL)
 	if err != nil {

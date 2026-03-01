@@ -4,7 +4,11 @@ import (
 	"context"
 
 	"github.com/pahuldeepp/grainguard/apps/telemetry-service/internal/application"
+	"github.com/pahuldeepp/grainguard/apps/telemetry-service/internal/grpc/interceptors"
 	devicepb "github.com/pahuldeepp/grainguard/libs/proto"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type DeviceServer struct {
@@ -21,9 +25,20 @@ func (s *DeviceServer) CreateDevice(
 	req *devicepb.CreateDeviceRequest,
 ) (*devicepb.CreateDeviceResponse, error) {
 
+	// 🔒 Extract verified JWT claims from interceptor
+	auth, ok := interceptors.GetAuthInfo(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "missing auth context")
+	}
+
+	// 🔒 Enforce tenant isolation
+	if req.TenantId != auth.TenantID {
+		return nil, status.Error(codes.PermissionDenied, "tenant mismatch")
+	}
+
 	device, err := s.service.Execute(
 		ctx,
-		req.TenantId,
+		auth.TenantID, // 🔥 trust JWT, not raw request
 		req.SerialNumber,
 	)
 	if err != nil {

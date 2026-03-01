@@ -13,7 +13,7 @@ type PostgresOutboxRepository struct {
 }
 
 func NewPostgresOutboxRepository(db *pgxpool.Pool) *PostgresOutboxRepository {
-	return &PostgresOutboxRepository{}
+	return &PostgresOutboxRepository{db: db}
 }
 
 func (r *PostgresOutboxRepository) Insert(

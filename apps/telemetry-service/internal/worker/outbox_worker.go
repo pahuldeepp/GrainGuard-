@@ -1,8 +1,11 @@
-package worker	
+package worker
 
 import (
 	"context"
+	"encoding/json"
 	"log"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -15,13 +18,19 @@ type OutboxWorker struct {
 }
 
 func NewOutboxWorker(pool *pgxpool.Pool) *OutboxWorker {
+	brokers := os.Getenv("KAFKA_BROKERS")
+	if brokers == "" {
+		brokers = "kafka:9092"
+	}
+
+	brokerList := strings.Split(brokers, ",")
 
 	writer := &kafka.Writer{
-		Addr:     kafka.TCP("localhost:9092"),
+		Addr:     kafka.TCP(brokerList...),
 		Topic:    "telemetry.events",
 		Balancer: &kafka.LeastBytes{},
 	}
-	
+
 	return &OutboxWorker{
 		pool:   pool,
 		writer: writer,
@@ -29,21 +38,20 @@ func NewOutboxWorker(pool *pgxpool.Pool) *OutboxWorker {
 }
 
 func (w *OutboxWorker) Start(ctx context.Context) {
-
 	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
 
 	for {
 		select {
-			case <-ticker.C:
-				w.processBatch(ctx)
-			case <-ctx.Done():
-				return
+		case <-ticker.C:
+			w.processBatch(ctx)
+		case <-ctx.Done():
+			return
 		}
 	}
 }
 
 func (w *OutboxWorker) processBatch(ctx context.Context) {
-
 	tx, err := w.pool.Begin(ctx)
 	if err != nil {
 		log.Println("tx begin error:", err)
@@ -58,7 +66,6 @@ func (w *OutboxWorker) processBatch(ctx context.Context) {
 		ORDER BY created_at
 		FOR UPDATE SKIP LOCKED
 		LIMIT 10`)
-		
 	if err != nil {
 		log.Println("query error:", err)
 		return
@@ -66,8 +73,9 @@ func (w *OutboxWorker) processBatch(ctx context.Context) {
 	defer rows.Close()
 
 	type event struct {
-		id      string
-		payload []byte
+		id        string
+		eventType string
+		payload   []byte
 	}
 
 	var events []event
@@ -78,10 +86,16 @@ func (w *OutboxWorker) processBatch(ctx context.Context) {
 		var payload []byte
 
 		if err := rows.Scan(&id, &eventType, &payload); err != nil {
+			log.Println("scan error:", err)
 			continue
 		}
 
-		events = append(events, event{id: id, payload: payload})
+		events = append(events, event{id: id, eventType: eventType, payload: payload})
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Println("rows iteration error:", err)
+		return
 	}
 
 	if len(events) == 0 {
@@ -89,11 +103,23 @@ func (w *OutboxWorker) processBatch(ctx context.Context) {
 	}
 
 	for _, e := range events {
+		// Extract DeviceID from payload for Kafka key (partition ordering)
+		var parsed struct {
+			DeviceID string `json:"DeviceID"`
+		}
+
+		if err := json.Unmarshal(e.payload, &parsed); err != nil {
+			log.Println("payload parse error:", err)
+			continue
+		}
 
 		err := w.writer.WriteMessages(ctx,
 			kafka.Message{
-				Key:   []byte(e.id),
+				Key:   []byte(parsed.DeviceID),
 				Value: e.payload,
+				Headers: []kafka.Header{
+					{Key: "event_type", Value: []byte(e.eventType)},
+				},
 			},
 		)
 		if err != nil {

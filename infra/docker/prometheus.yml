@@ -4,8 +4,4 @@ global:
 scrape_configs:
   - job_name: "read-model-builder"
     static_configs:
-      - targets: ["host.docker.internal:2112"]
-
-  - job_name: "telemetry-service"
-    static_configs:
-      - targets: ["host.docker.internal:2113"]
+      - targets: ["read-model-builder:2112"]

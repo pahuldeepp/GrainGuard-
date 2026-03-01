@@ -44,7 +44,7 @@ func NewKafkaConsumerFromEnv() *KafkaConsumer {
 		}),
 
 		dlqWriter: &kafka.Writer{
-			Addr:     kafka.TCP(brokerList[0]),
+			Addr:     kafka.TCP(brokerList...),
 			Topic:    "telemetry.events.dlq",
 			Balancer: &kafka.LeastBytes{},
 		},
@@ -55,28 +55,39 @@ func (c *KafkaConsumer) Start(ctx context.Context, handler func([]byte) error) {
 	tracer := otel.Tracer("read-model-builder.consumer")
 
 	for {
+		// Update consumer lag at top of loop
+		stats := c.reader.Stats()
+		observability.KafkaConsumerLag.Set(float64(stats.Lag))
 
-		// Circuit breaker gate
+		// Circuit breaker guard
 		if !c.breaker.Allow() {
 			log.Println("Circuit breaker OPEN — pausing consumption")
 			observability.CircuitBreakerState.Set(1)
-			time.Sleep(2 * time.Second)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(2 * time.Second):
+			}
 			continue
 		}
 
+		// Breaker allowed → HALF-OPEN or CLOSED
+		observability.CircuitBreakerState.Set(2)
+
 		msg, err := c.reader.FetchMessage(ctx)
 		if err != nil {
+			// Check if context was cancelled (graceful shutdown)
+			if ctx.Err() != nil {
+				log.Println("Consumer shutting down")
+				return
+			}
 			log.Println("Kafka fetch error:", err)
+			observability.KafkaFetchErrors.Inc()
 			c.breaker.Failure()
 			time.Sleep(1 * time.Second)
 			continue
 		}
 
-		// Update lag metric
-		stats := c.reader.Stats()
-		observability.KafkaConsumerLag.Set(float64(stats.Lag))
-
-		// Start tracing span
 		msgCtx, span := tracer.Start(ctx, "process_message")
 		span.SetAttributes(
 			attribute.String("kafka.topic", msg.Topic),
@@ -84,14 +95,14 @@ func (c *KafkaConsumer) Start(ctx context.Context, handler func([]byte) error) {
 			attribute.Int64("kafka.offset", msg.Offset),
 		)
 
-		// Retry handler
-		err = retryWithBackoff(func() error {
+		err = retryWithBackoff(ctx, func() error {
 			return handler(msg.Value)
 		})
 
 		if err != nil {
 			span.RecordError(err)
 			log.Println("Handler failed after retries. Sending to DLQ:", err)
+
 			observability.EventsDLQ.Inc()
 
 			dlqErr := c.dlqWriter.WriteMessages(msgCtx, kafka.Message{
@@ -106,15 +117,17 @@ func (c *KafkaConsumer) Start(ctx context.Context, handler func([]byte) error) {
 			if dlqErr != nil {
 				c.breaker.Failure()
 				span.RecordError(dlqErr)
+				log.Println("DLQ write failed:", dlqErr)
 				span.End()
-				panic(dlqErr)
+				continue
 			}
 
 			if commitErr := c.reader.CommitMessages(msgCtx, msg); commitErr != nil {
 				c.breaker.Failure()
 				span.RecordError(commitErr)
+				log.Println("Commit after DLQ failed:", commitErr)
 				span.End()
-				panic(commitErr)
+				continue
 			}
 
 			c.breaker.Failure()
@@ -126,8 +139,9 @@ func (c *KafkaConsumer) Start(ctx context.Context, handler func([]byte) error) {
 		if commitErr := c.reader.CommitMessages(msgCtx, msg); commitErr != nil {
 			c.breaker.Failure()
 			span.RecordError(commitErr)
+			log.Println("Commit failed:", commitErr)
 			span.End()
-			panic(commitErr)
+			continue
 		}
 
 		c.breaker.Success()
@@ -138,13 +152,17 @@ func (c *KafkaConsumer) Start(ctx context.Context, handler func([]byte) error) {
 	}
 }
 
-func retryWithBackoff(fn func() error) error {
+func retryWithBackoff(ctx context.Context, fn func() error) error {
 	maxAttempts := 5
 	baseDelay := 500 * time.Millisecond
 
 	var err error
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
 		err = fn()
 		if err == nil {
 			return nil
@@ -155,7 +173,11 @@ func retryWithBackoff(fn func() error) error {
 		exp := time.Duration(math.Pow(2, float64(attempt))) * baseDelay
 		jitter := time.Duration(rand.Int63n(int64(baseDelay)))
 
-		time.Sleep(exp + jitter)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(exp + jitter):
+		}
 	}
 
 	return err

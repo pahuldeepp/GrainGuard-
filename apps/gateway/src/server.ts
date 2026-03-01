@@ -1,56 +1,126 @@
+import "./tracing";
 import express, { Request, Response } from "express";
 import { createDevice } from "./services/device";
 import { getDeviceLatestTelemetry } from "./services/device-query";
-import { startCacheInvalidator } from "./events/cache-invalidator";
 import { redis } from "./cache/redis";
-import { pool } from "./db";
-import { metricsHandler } from "./observability/metrics";
+import { pool } from "./database/db";
+import { metricsHandler, requestLatency } from "./observability/metrics";
+import { requestIdMiddleware } from "./middleware/requestId";
+import { authMiddleware } from "./middleware/auth";
 
 const app = express();
+
+/* -----------------------------
+   Body Parser
+------------------------------*/
 app.use(express.json());
 
-// 🔹 Create Device (Write → gRPC)
-app.post("/devices", async (req: Request, res: Response) => {
-  try {
-    const { tenantId, serialNumber } = req.body;
+/* -----------------------------
+   Request ID
+------------------------------*/
+app.use(requestIdMiddleware);
 
-    if (!tenantId || !serialNumber) {
-      return res.status(400).json({ error: "Missing tenantId or serialNumber" });
+/* -----------------------------
+   Request Latency
+------------------------------*/
+app.use((req, res, next) => {
+  const end = requestLatency.startTimer();
+  res.on("finish", () => end());
+  next();
+});
+
+/* -----------------------------
+   Structured Logging
+------------------------------*/
+app.use((req, _res, next) => {
+  console.log(
+    `[gateway] request_id=${req.requestId} ${req.method} ${req.path}`
+  );
+  next();
+});
+
+/* =========================================================
+   🔐 PROTECTED ROUTES (JWT REQUIRED)
+========================================================= */
+
+/* -----------------------------
+   Create Device (Write → gRPC)
+------------------------------*/
+app.post("/devices", authMiddleware, async (req: Request, res: Response) => {
+  try {
+    const { serialNumber } = req.body;
+
+    if (!serialNumber) {
+      return res.status(400).json({ error: "Missing serialNumber" });
     }
 
-    const result = await createDevice(tenantId, serialNumber);
+    // 🔥 DO NOT trust tenantId from body — take it from the verified JWT
+    const tenantId = req.user!.tenantId;
+    const userId = req.user!.sub;
+    const token = req.headers.authorization;
+
+    const result = await createDevice(
+      tenantId,
+      serialNumber,
+      req.requestId,
+      userId,
+      token
+    );
+
     return res.json(result);
   } catch (err) {
-    console.error("Create device error:", err);
+    console.error(
+      `[gateway] request_id=${req.requestId} Create device error:`,
+      err
+    );
     return res.status(500).json({ error: "Failed to create device" });
   }
 });
 
-// 🔹 Latest Telemetry (Query Layer)
-app.get("/devices/:deviceId/latest", async (req: Request, res: Response) => {
-  try {
-    const data = await getDeviceLatestTelemetry(req.params.deviceId);
+/* -----------------------------
+   Latest Telemetry (Read side)
+------------------------------*/
+app.get(
+  "/devices/:deviceId/latest",
+  authMiddleware,
+  async (req: Request, res: Response) => {
+    try {
+      const data = await getDeviceLatestTelemetry(req.params.deviceId);
 
-    if (!data) {
-      return res.status(404).json({ error: "Not found" });
+      if (!data) {
+        return res.status(404).json({ error: "Not found" });
+      }
+
+      return res.json(data);
+    } catch (err) {
+      console.error(
+        `[gateway] request_id=${req.requestId} Read API error:`,
+        err
+      );
+      return res.status(500).json({ error: "Internal error" });
     }
-
-    return res.json(data);
-  } catch (err) {
-    console.error("Read API error:", err);
-    return res.status(500).json({ error: "Internal error" });
   }
-});
+);
 
-// 🔹 Health
+/* =========================================================
+   PUBLIC ROUTES
+========================================================= */
+
+/* -----------------------------
+   Health
+------------------------------*/
 app.get("/health", (_req: Request, res: Response) => {
   res.json({ status: "ok" });
 });
 
-// 🔹 Prometheus Metrics
+/* -----------------------------
+   Metrics
+------------------------------*/
 app.get("/metrics", metricsHandler());
 
-// 🔹 Graceful shutdown
+/* -----------------------------
+   Graceful Shutdown
+------------------------------*/
 process.on("SIGTERM", async () => {
   console.log("Shutting down gateway...");
   await redis.quit();
@@ -58,16 +128,8 @@ process.on("SIGTERM", async () => {
   process.exit(0);
 });
 
-// 🔹 Start server + Kafka invalidator AFTER boot
 const PORT = 3000;
 
-app.listen(PORT, async () => {
+app.listen(PORT, () => {
   console.log(`Gateway running on port ${PORT}`);
-
-  try {
-    await startCacheInvalidator();
-    console.log("Cache invalidator started");
-  } catch (err) {
-    console.error("Failed to start cache invalidator:", err);
-  }
 });
