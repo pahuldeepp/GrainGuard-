@@ -23,41 +23,43 @@ type TelemetryEvent struct {
 }
 
 func HandleTelemetry(pool *pgxpool.Pool, redisClient *redis.Client) func([]byte) error {
-
 	return func(payload []byte) error {
-
 		var event TelemetryEvent
 		if err := json.Unmarshal(payload, &event); err != nil {
 			return err
 		}
 
-		ctx := context.Background()
+		recordedAt, err := time.Parse(time.RFC3339, event.RecordedAt)
+		if err != nil {
+			return err
+		}
 
+		ctx := context.Background()
 		tx, err := pool.Begin(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback(ctx)
 
-		// Idempotency check
-		var exists uuid.UUID
+		var inserted uuid.UUID
 		err = tx.QueryRow(ctx,
-			`SELECT event_id FROM processed_events WHERE event_id=$1`,
+			`
+			INSERT INTO processed_events(event_id)
+			VALUES ($1)
+			ON CONFLICT DO NOTHING
+			RETURNING event_id
+			`,
 			event.ID,
-		).Scan(&exists)
+		).Scan(&inserted)
 
-		if err == nil {
-			// Duplicate event — already processed
+		if errors.Is(err, pgx.ErrNoRows) {
 			return tx.Commit(ctx)
 		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			// Real DB error (not just "no row found")
+		if err != nil {
 			return err
 		}
 
-		// 🔥 Versioned UPSERT
 		var newVersion int64
-
 		err = tx.QueryRow(ctx,
 			`
 			INSERT INTO device_telemetry_latest
@@ -70,23 +72,15 @@ func HandleTelemetry(pool *pgxpool.Pool, redisClient *redis.Client) func([]byte)
 				recorded_at = EXCLUDED.recorded_at,
 				updated_at = NOW(),
 				version = device_telemetry_latest.version + 1
+			WHERE EXCLUDED.recorded_at >= device_telemetry_latest.recorded_at
 			RETURNING version
 			`,
 			event.DeviceID,
 			event.Temperature,
 			event.Humidity,
-			event.RecordedAt,
+			recordedAt,
 		).Scan(&newVersion)
 
-		if err != nil {
-			return err
-		}
-
-		// Mark event processed
-		_, err = tx.Exec(ctx,
-			`INSERT INTO processed_events(event_id) VALUES ($1)`,
-			event.ID,
-		)
 		if err != nil {
 			return err
 		}
@@ -95,8 +89,6 @@ func HandleTelemetry(pool *pgxpool.Pool, redisClient *redis.Client) func([]byte)
 			return err
 		}
 
-		// 🔥 Versioned Redis Write (after commit)
-
 		versionKey := "device:" + event.DeviceID.String() + ":latest_version"
 		dataKey := fmt.Sprintf("device:%s:v%d", event.DeviceID.String(), newVersion)
 
@@ -104,16 +96,14 @@ func HandleTelemetry(pool *pgxpool.Pool, redisClient *redis.Client) func([]byte)
 			"device_id":   event.DeviceID,
 			"temperature": event.Temperature,
 			"humidity":    event.Humidity,
-			"recorded_at": event.RecordedAt,
+			"recorded_at": recordedAt,
 			"version":     newVersion,
 		})
 
-		// Write versioned value
 		if err := redisClient.Set(ctx, dataKey, cachePayload, 5*time.Minute).Err(); err != nil {
 			log.Println("Redis versioned write failed:", err)
 		}
 
-		// Update latest_version pointer
 		if err := redisClient.Set(ctx, versionKey, newVersion, 5*time.Minute).Err(); err != nil {
 			log.Println("Redis version pointer write failed:", err)
 		}

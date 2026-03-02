@@ -18,7 +18,6 @@ import (
 
 	"github.com/pahuldeepp/grainguard/apps/read-model-builder/internal/consumer"
 	"github.com/pahuldeepp/grainguard/apps/read-model-builder/internal/observability"
-	"github.com/pahuldeepp/grainguard/apps/read-model-builder/internal/projection"
 )
 
 func initTracer(ctx context.Context) (func(context.Context) error, error) {
@@ -95,11 +94,11 @@ func main() {
 	}
 	defer pool.Close()
 
-	// 🔹 Kafka consumer (prefer env-based if you have it)
+	// 🔹 Kafka consumer (env-based)
 	kafkaConsumer := consumer.NewKafkaConsumerFromEnv()
 
-	// handler now does: Postgres write + best-effort Redis write-through
-	handler := projection.HandleTelemetry(pool, redisClient)
+	// 🔥 Envelope-aware handler (does version routing → calls projection.HandleTelemetry internally)
+	handler := consumer.NewEnvelopeHandler(pool, redisClient)
 
 	log.Println("Read-model-builder started")
 
