@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package grainguard.events.v1;
+
+option go_package = "github.com/pahuldeepp/grainguard/libs/events/gen;eventspb";
+
+message EventEnvelope {
+  string event_id = 1;
+  string event_type = 2;
+  int32 schema_version = 3;
+  int64 occurred_at_unix_ms = 4;
+  string tenant_id = 5;
+  string aggregate_id = 6;
+
+  oneof payload {
+    TelemetryRecordedV1 telemetry_recorded_v1 = 100;
+    DeviceCreatedV1 device_created_v1 = 101;
+  }
+}
+
+message TelemetryRecordedV1 {
+  string id = 1;
+  string device_id = 2;
+  double temperature = 3;
+  double humidity = 4;
+  string recorded_at = 5;
+}
+
+message DeviceCreatedV1 {
+  string device_id = 1;
+  string tenant_id = 2;
+  string serial = 3;
+  string created_at = 4;
+}
