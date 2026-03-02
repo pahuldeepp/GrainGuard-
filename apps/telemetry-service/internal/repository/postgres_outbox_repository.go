@@ -15,7 +15,6 @@ type PostgresOutboxRepository struct {
 func NewPostgresOutboxRepository(db *pgxpool.Pool) *PostgresOutboxRepository {
 	return &PostgresOutboxRepository{db: db}
 }
-
 func (r *PostgresOutboxRepository) Insert(
 	ctx context.Context,
 	tx pgx.Tx,
@@ -29,16 +28,17 @@ func (r *PostgresOutboxRepository) Insert(
 	if err != nil {
 		return err
 	}
+
 	_, err = tx.Exec(ctx,
 		`INSERT INTO outbox_events
-		(id, aggregate_type, aggregate_id, event_type, payload)
-		VALUES ($1,$2,$3,$4,$5)`,
+		(id, aggregate_type, aggregate_id, event_type, payload_bytes, created_at)
+		VALUES ($1,$2,$3,$4,$5,NOW())`,
 		id,
 		aggregateType,
 		aggregateID,
 		eventType,
-		payload,
+		payload, // protobuf bytes
 	)
+
 	return err
 }
-

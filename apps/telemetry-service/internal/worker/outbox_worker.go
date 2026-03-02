@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"os"
 	"strings"
@@ -10,6 +9,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/segmentio/kafka-go"
+	"google.golang.org/protobuf/proto"
+
+	eventspb "github.com/pahuldeepp/grainguard/libs/events/gen"
 )
 
 type OutboxWorker struct {
@@ -60,7 +62,7 @@ func (w *OutboxWorker) processBatch(ctx context.Context) {
 	defer tx.Rollback(ctx)
 
 	rows, err := tx.Query(ctx, `
-		SELECT id, event_type, payload
+		SELECT id, event_type, payload_bytes
 		FROM outbox_events
 		WHERE published_at IS NULL
 		ORDER BY created_at
@@ -90,7 +92,11 @@ func (w *OutboxWorker) processBatch(ctx context.Context) {
 			continue
 		}
 
-		events = append(events, event{id: id, eventType: eventType, payload: payload})
+		events = append(events, event{
+			id:        id,
+			eventType: eventType,
+			payload:   payload,
+		})
 	}
 
 	if err := rows.Err(); err != nil {
@@ -103,22 +109,23 @@ func (w *OutboxWorker) processBatch(ctx context.Context) {
 	}
 
 	for _, e := range events {
-		// Extract DeviceID from payload for Kafka key (partition ordering)
-		var parsed struct {
-			DeviceID string `json:"DeviceID"`
-		}
 
-		if err := json.Unmarshal(e.payload, &parsed); err != nil {
-			log.Println("payload parse error:", err)
+		// 🔥 Unmarshal protobuf envelope (only to extract key)
+		var env eventspb.EventEnvelope
+		if err := proto.Unmarshal(e.payload, &env); err != nil {
+			log.Println("protobuf unmarshal error:", err)
 			continue
 		}
 
+		key := []byte(env.AggregateId)
+
 		err := w.writer.WriteMessages(ctx,
 			kafka.Message{
-				Key:   []byte(parsed.DeviceID),
-				Value: e.payload,
+				Key:   key,
+				Value: e.payload, // raw protobuf bytes
 				Headers: []kafka.Header{
 					{Key: "event_type", Value: []byte(e.eventType)},
+					{Key: "schema_version", Value: []byte("1")},
 				},
 			},
 		)
@@ -130,7 +137,8 @@ func (w *OutboxWorker) processBatch(ctx context.Context) {
 		_, err = tx.Exec(ctx,
 			`UPDATE outbox_events
 			 SET published_at = NOW()
-			 WHERE id = $1`, e.id)
+			 WHERE id = $1`,
+			e.id)
 		if err != nil {
 			log.Println("update error:", err)
 			return
