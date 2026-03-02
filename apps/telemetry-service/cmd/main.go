@@ -121,13 +121,13 @@ func main() {
 	}
 
 	grpcServer := grpc.NewServer(
-		grpc.Creds(creds), // ✅ mTLS enforced
-		grpc.ChainUnaryInterceptor(
-			verifier.UnaryAuthInterceptor(),      // 1️⃣ authenticate (JWT)
-			interceptors.RBACUnaryInterceptor(),  // 2️⃣ authorize (RBAC + tenant)
-			otelgrpc.UnaryServerInterceptor(),    // 3️⃣ tracing
-		),
-	)
+	grpc.Creds(creds), // ✅ mTLS enforced
+	grpc.StatsHandler(otelgrpc.NewServerHandler()), // 3️⃣ tracing
+	grpc.ChainUnaryInterceptor(
+		verifier.UnaryAuthInterceptor(),     // 1️⃣ authenticate (JWT)
+		interceptors.RBACUnaryInterceptor(), // 2️⃣ authorize (RBAC + tenant)
+	),
+)
 
 	devicepb.RegisterDeviceServiceServer(
 		grpcServer,

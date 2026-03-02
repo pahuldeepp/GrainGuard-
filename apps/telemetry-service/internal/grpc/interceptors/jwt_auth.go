@@ -2,20 +2,17 @@ package interceptors
 
 import (
 	"context"
+	
 	"strings"
 	"time"
 
 	"github.com/MicahParks/keyfunc"
-	"github.com/golang-jwt/jwt/v5"
+	"github.com/golang-jwt/jwt/v4"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
-
-/* =========================
-   Auth Context Types
-========================= */
 
 type AuthInfo struct {
 	Sub      string
@@ -25,7 +22,6 @@ type AuthInfo struct {
 }
 
 type ctxKey string
-
 const authInfoKey ctxKey = "authInfo"
 
 func GetAuthInfo(ctx context.Context) (*AuthInfo, bool) {
@@ -37,10 +33,6 @@ func GetAuthInfo(ctx context.Context) (*AuthInfo, bool) {
 	return a, ok
 }
 
-/* =========================
-   JWKS Verifier
-========================= */
-
 type JWTVerifier struct {
 	JWKS     *keyfunc.JWKS
 	Issuer   string
@@ -51,7 +43,7 @@ func NewJWTVerifier(jwksURL, issuer, audience string) (*JWTVerifier, error) {
 	jwks, err := keyfunc.Get(jwksURL, keyfunc.Options{
 		RefreshInterval: time.Hour,
 		RefreshErrorHandler: func(err error) {
-			// Keep running even if refresh fails (use last known keys)
+			// keep running using last-known keys
 		},
 	})
 	if err != nil {
@@ -65,12 +57,9 @@ func NewJWTVerifier(jwksURL, issuer, audience string) (*JWTVerifier, error) {
 	}, nil
 }
 
-/* =========================
-   gRPC Interceptor
-========================= */
-
 func (v *JWTVerifier) UnaryAuthInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+
 		md, ok := metadata.FromIncomingContext(ctx)
 		if !ok {
 			return nil, status.Error(codes.Unauthenticated, "missing metadata")
@@ -91,24 +80,32 @@ func (v *JWTVerifier) UnaryAuthInterceptor() grpc.UnaryServerInterceptor {
 			return nil, status.Error(codes.Unauthenticated, "empty token")
 		}
 
-		parsed, err := jwt.Parse(tokenStr, v.JWKS.Keyfunc,
-			jwt.WithIssuer(v.Issuer),
-			jwt.WithAudience(v.Audience),
-			jwt.WithValidMethods([]string{"RS256"}), // 🔥 enforce algorithm
-		)
-		if err != nil || !parsed.Valid {
+		claims := jwt.MapClaims{}
+
+		parser := jwt.Parser{
+			ValidMethods: []string{"RS256"}, // enforce alg
+		}
+
+		tok, err := parser.ParseWithClaims(tokenStr, claims, v.JWKS.Keyfunc)
+		if err != nil || tok == nil || !tok.Valid {
 			return nil, status.Error(codes.Unauthenticated, "invalid token")
 		}
 
-		claims, ok := parsed.Claims.(jwt.MapClaims)
-		if !ok {
-			return nil, status.Error(codes.Unauthenticated, "invalid claims")
+		// ✅ Issuer check
+		iss, _ := claims["iss"].(string)
+		if v.Issuer != "" && iss != v.Issuer {
+			return nil, status.Error(codes.Unauthenticated, "invalid issuer")
+		}
+
+		// ✅ Audience check (Keycloak can be string OR array)
+		if v.Audience != "" && !audMatches(claims["aud"], v.Audience) {
+			return nil, status.Error(codes.Unauthenticated, "invalid audience")
 		}
 
 		// Extract sub
 		sub, _ := claims["sub"].(string)
 
-		// Extract tenant_id (support custom namespace too)
+		// tenant_id
 		tenantID, _ := claims["tenant_id"].(string)
 		if tenantID == "" {
 			if ns, ok := claims["https://grainguard/tenant_id"].(string); ok {
@@ -119,13 +116,13 @@ func (v *JWTVerifier) UnaryAuthInterceptor() grpc.UnaryServerInterceptor {
 			return nil, status.Error(codes.PermissionDenied, "tenant_missing")
 		}
 
-		// Extract scopes (OIDC standard: "scope": "a b c")
+		// scopes
 		var scopes []string
 		if scopeStr, ok := claims["scope"].(string); ok && scopeStr != "" {
 			scopes = strings.Fields(scopeStr)
 		}
 
-		// Extract roles (optional: "roles": ["admin"])
+		// roles (optional)
 		var roles []string
 		if rs, ok := claims["roles"].([]any); ok {
 			for _, r := range rs {
@@ -135,21 +132,35 @@ func (v *JWTVerifier) UnaryAuthInterceptor() grpc.UnaryServerInterceptor {
 			}
 		}
 
-		// OPTIONAL: Tenant consistency check (metadata x-tenant-id)
-		// We'll make it strict in Step 2, but we can already validate here:
+		// strict tenant header check (optional)
 		if mdTenant := first(md.Get("x-tenant-id")); mdTenant != "" && mdTenant != tenantID {
 			return nil, status.Error(codes.PermissionDenied, "tenant_mismatch")
 		}
 
-		auth := &AuthInfo{
+		ctx = context.WithValue(ctx, authInfoKey, &AuthInfo{
 			Sub:      sub,
 			TenantID: tenantID,
 			Roles:    roles,
 			Scopes:   scopes,
-		}
+		})
 
-		ctx = context.WithValue(ctx, authInfoKey, auth)
 		return handler(ctx, req)
+	}
+}
+
+func audMatches(aud any, expected string) bool {
+	switch v := aud.(type) {
+	case string:
+		return v == expected
+	case []any:
+		for _, x := range v {
+			if s, ok := x.(string); ok && s == expected {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
 	}
 }
 
