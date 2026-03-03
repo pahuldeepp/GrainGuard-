@@ -47,16 +47,24 @@ services:
     container_name: grainguard-kafka
     restart: unless-stopped
     ports:
-      - "9092:9092"
+      - "9092:9092"   # PLAINTEXT — internal Docker use (services)
+      - "9093:9093"   # PLAINTEXT_HOST — host machine use (tooling / verify cmds)
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9094
+
+      # FIX: Use PLAINTEXT scheme names only — kafka-go (segmentio) fails on
+      # named schemes like INTERNAL:// or EXTERNAL:// during metadata resolution.
+      # PLAINTEXT   → used by all Docker-networked services  (kafka:9092)
+      # PLAINTEXT_HOST → used by host-side tooling           (localhost:9093)
+      # CONTROLLER  → internal KRaft controller traffic      (kafka:9094)
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:9093,CONTROLLER://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
@@ -65,7 +73,8 @@ services:
     networks:
       - grainguard-net
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      # Uses PLAINTEXT_HOST port (9093) — accessible from within the container
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9093"]
       interval: 15s
       timeout: 10s
       retries: 10
@@ -79,7 +88,6 @@ services:
     networks:
       - grainguard-net
 
-  # 🔥 TELEMETRY SERVICE (gRPC + mTLS) — built from repo root
   telemetry-service:
     build:
       context: ../..
@@ -90,10 +98,10 @@ services:
       - "50051:50051"
     environment:
       WRITE_DB_URL: postgres://postgres:postgres@postgres:5432/grainguard?sslmode=disable
-      KAFKA_BROKERS: kafka:9092
+      KAFKA_BROKERS: kafka:9092   # FIX: was kafka:29092
       JWKS_URL: http://keycloak:8080/realms/grainguard/protocol/openid-connect/certs
       JWT_ISSUER: http://keycloak:8080/realms/grainguard
-      JWT_AUDIENCE: grainguard-api
+      JWT_AUDIENCE: grainguard-gateway
     volumes:
       - ../certs:/certs
     depends_on:
@@ -111,7 +119,7 @@ services:
     container_name: grainguard-read-model-builder
     restart: unless-stopped
     environment:
-      KAFKA_BROKERS: kafka:9092
+      KAFKA_BROKERS: kafka:9092   # FIX: was kafka:29092
       READ_DB_URL: postgres://postgres:postgres@postgres-read:5432/grainguard_read?sslmode=disable
       REDIS_ADDR: redis:6379
       METRICS_PORT: "2112"
@@ -133,16 +141,53 @@ services:
     container_name: grainguard-dlq-reprocessor
     restart: unless-stopped
     environment:
-      KAFKA_BROKERS: kafka:9092
+      KAFKA_BROKERS: kafka:9092   # FIX: was kafka:29092
     depends_on:
       kafka:
         condition: service_healthy
     networks:
       - grainguard-net
 
+  saga-orchestrator:
+    build:
+      context: ../..
+      dockerfile: apps/saga-orchestrator/Dockerfile
+    container_name: grainguard-saga-orchestrator
+    restart: unless-stopped
+    environment:
+      KAFKA_BROKERS: kafka:9092   # FIX: was kafka:29092
+      SAGA_DB_URL: postgres://postgres:postgres@postgres:5432/grainguard?sslmode=disable
+      SAGA_EVENTS_TOPIC: device.events
+      SAGA_CONSUMER_GROUP: saga-orchestrator
+      SAGA_COMMANDS_TOPIC: device.commands
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - grainguard-net
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.6.1
+    container_name: grainguard-schema-registry
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8082:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:9092   # FIX: was INTERNAL://kafka:29092
+    networks:
+      - grainguard-net
+
   gateway:
     build:
-      context: ../../apps/gateway
+      context: ../..
+      dockerfile: apps/gateway/Dockerfile
     container_name: grainguard-gateway
     restart: unless-stopped
     environment:
@@ -152,7 +197,7 @@ services:
       GRPC_TARGET: telemetry-service:50051
       JWKS_URL: http://keycloak:8080/realms/grainguard/protocol/openid-connect/certs
       JWT_ISSUER: http://keycloak:8080/realms/grainguard
-      JWT_AUDIENCE: grainguard-api
+      JWT_AUDIENCE: grainguard-gateway
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     volumes:
       - ../certs:/certs
@@ -204,8 +249,13 @@ services:
     environment:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_HOSTNAME: keycloak
+      KC_HOSTNAME_PORT: 8080
+      KC_HOSTNAME_STRICT: "false"
     ports:
       - "8081:8080"
+    volumes:
+      - keycloak_data:/opt/keycloak/data
     networks:
       - grainguard-net
     healthcheck:
@@ -213,26 +263,12 @@ services:
       interval: 20s
       timeout: 10s
       retries: 10
-  schema-registry:
-    image: confluentinc/cp-schema-registry:7.6.1
-    container_name: grainguard-schema-registry
-    restart: unless-stopped
-    depends_on:
-      kafka:
-        condition: service_healthy
-    ports:
-      - "8082:8081"
-    environment:
-      SCHEMA_REGISTRY_HOST_NAME: schema-registry
-      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
-      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:9092
-    networks:
-      - grainguard-net
 
 volumes:
   pgdata:
   pgdata_read:
   kafka-data:
+  keycloak_data:
 
 networks:
   grainguard-net:
