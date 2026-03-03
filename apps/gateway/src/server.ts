@@ -49,30 +49,25 @@ app.use((req, _res, next) => {
 app.post("/devices", authMiddleware, async (req: Request, res: Response) => {
   try {
     const { serialNumber } = req.body;
-
     if (!serialNumber) {
       return res.status(400).json({ error: "Missing serialNumber" });
     }
 
-    // 🔥 DO NOT trust tenantId from body — take it from the verified JWT
     const tenantId = req.user!.tenantId;
     const userId = req.user!.sub;
-    const token = req.headers.authorization;
 
-    const result = await createDevice(
-      tenantId,
-      serialNumber,
-      req.requestId,
-      userId,
-      token
-    );
+    const token = Array.isArray(req.headers.authorization)
+      ? req.headers.authorization[0]
+      : req.headers.authorization;
 
+    const requestId = Array.isArray(req.requestId)
+      ? req.requestId[0]
+      : req.requestId;
+
+    const result = await createDevice(tenantId, serialNumber, requestId, userId, token);
     return res.json(result);
   } catch (err) {
-    console.error(
-      `[gateway] request_id=${req.requestId} Create device error:`,
-      err
-    );
+    console.error(`[gateway] request_id=${req.requestId} Create device error:`, err);
     return res.status(500).json({ error: "Failed to create device" });
   }
 });
@@ -85,7 +80,7 @@ app.get(
   authMiddleware,
   async (req: Request, res: Response) => {
     try {
-      const data = await getDeviceLatestTelemetry(req.params.deviceId);
+      const data = await getDeviceLatestTelemetry(req.params["deviceId"] as string);
 
       if (!data) {
         return res.status(404).json({ error: "Not found" });

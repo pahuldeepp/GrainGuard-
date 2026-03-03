@@ -1,11 +1,10 @@
 FROM node:20-alpine
 WORKDIR /app
-
-COPY package*.json ./
+COPY apps/gateway/package*.json ./
 RUN npm install
-
-COPY tsconfig.json ./
-COPY src ./src
-
+COPY apps/gateway/tsconfig.json ./
+COPY apps/gateway/src ./src
+COPY libs ./libs
+RUN npx tsc
 EXPOSE 3000
-CMD ["npx", "ts-node", "src/server.ts"]
+CMD ["node", "dist/server.js"]

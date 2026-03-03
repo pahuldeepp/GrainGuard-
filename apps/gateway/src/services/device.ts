@@ -1,5 +1,6 @@
-import grpc from "@grpc/grpc-js";
-import protoLoader from "@grpc/proto-loader";
+
+import * as grpc from "@grpc/grpc-js";
+import * as protoLoader from "@grpc/proto-loader";
 import path from "path";
 import fs from "fs";
 
@@ -9,7 +10,7 @@ import fs from "fs";
 
 const protoPath = path.resolve(
   __dirname,
-  "../../../../libs/proto/device.proto"
+  "../../libs/proto/device.proto"
 );
 
 const packageDefinition = protoLoader.loadSync(protoPath, {
@@ -49,11 +50,7 @@ const credentials = grpc.credentials.createSsl(
 const target =
   process.env.GRPC_TARGET || "telemetry-service:50051";
 
-const client = new proto.DeviceService(
-  target,
-  credentials
-);
-
+const client = new (proto as any).device.DeviceService(target, credentials);
 /* =========================================
    🚀 Create Device (Secure mTLS Call)
 ========================================= */

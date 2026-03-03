@@ -64,7 +64,7 @@ export async function getDeviceLatestTelemetry(deviceId: string) {
 
   if (allowRequest()) {
     try {
-      const res = await redis.set(lockKey, lockValue, "NX", "EX", lockTtlSeconds);
+      const res = await redis.set(lockKey, lockValue, "EX", lockTtlSeconds, "NX");
       lockAcquired = res === "OK";
     } catch (err) {
       recordFailure();
