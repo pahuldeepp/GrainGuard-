@@ -12,6 +12,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/pahuldeepp/grainguard/apps/read-model-builder/internal/observability"
 )
 
 type TelemetryEvent struct {
@@ -23,25 +25,39 @@ type TelemetryEvent struct {
 }
 
 func HandleTelemetry(pool *pgxpool.Pool, redisClient *redis.Client) func([]byte) error {
+
 	return func(payload []byte) error {
+
+		start := time.Now()
+
+		observability.InflightJobs.Inc()
+		defer observability.InflightJobs.Dec()
+
 		var event TelemetryEvent
+
 		if err := json.Unmarshal(payload, &event); err != nil {
+			observability.EventsRetry.Inc()
 			return err
 		}
 
 		recordedAt, err := time.Parse(time.RFC3339, event.RecordedAt)
 		if err != nil {
+			observability.EventsRetry.Inc()
 			return err
 		}
 
 		ctx := context.Background()
+
 		tx, err := pool.Begin(ctx)
 		if err != nil {
+			observability.EventsRetry.Inc()
 			return err
 		}
+
 		defer tx.Rollback(ctx)
 
 		var inserted uuid.UUID
+
 		err = tx.QueryRow(ctx,
 			`
 			INSERT INTO processed_events(event_id)
@@ -53,13 +69,23 @@ func HandleTelemetry(pool *pgxpool.Pool, redisClient *redis.Client) func([]byte)
 		).Scan(&inserted)
 
 		if errors.Is(err, pgx.ErrNoRows) {
+
+			observability.EventsProcessed.Inc()
+
+			observability.EventProcessingLatency.Observe(
+				time.Since(start).Seconds(),
+			)
+
 			return tx.Commit(ctx)
 		}
+
 		if err != nil {
+			observability.EventsRetry.Inc()
 			return err
 		}
 
 		var newVersion int64
+
 		err = tx.QueryRow(ctx,
 			`
 			INSERT INTO device_telemetry_latest
@@ -82,10 +108,12 @@ func HandleTelemetry(pool *pgxpool.Pool, redisClient *redis.Client) func([]byte)
 		).Scan(&newVersion)
 
 		if err != nil {
+			observability.EventsRetry.Inc()
 			return err
 		}
 
 		if err := tx.Commit(ctx); err != nil {
+			observability.EventsRetry.Inc()
 			return err
 		}
 
@@ -100,13 +128,22 @@ func HandleTelemetry(pool *pgxpool.Pool, redisClient *redis.Client) func([]byte)
 			"version":     newVersion,
 		})
 
-		if err := redisClient.Set(ctx, dataKey, cachePayload, 5*time.Minute).Err(); err != nil {
-			log.Println("Redis versioned write failed:", err)
+		pipe := redisClient.Pipeline()
+
+		pipe.Set(ctx, dataKey, cachePayload, 5*time.Minute)
+		pipe.Set(ctx, versionKey, newVersion, 5*time.Minute)
+
+		_, err = pipe.Exec(ctx)
+
+		if err != nil {
+			log.Println("Redis pipeline write failed:", err)
 		}
 
-		if err := redisClient.Set(ctx, versionKey, newVersion, 5*time.Minute).Err(); err != nil {
-			log.Println("Redis version pointer write failed:", err)
-		}
+		observability.EventsProcessed.Inc()
+
+		observability.EventProcessingLatency.Observe(
+			time.Since(start).Seconds(),
+		)
 
 		return nil
 	}

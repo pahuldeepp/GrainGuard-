@@ -3,15 +3,14 @@ package main
 import (
 	"context"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
+
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -22,7 +21,6 @@ import (
 
 func initTracer(ctx context.Context) (func(context.Context) error, error) {
 	endpoint := getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317")
-
 	exp, err := otlptracegrpc.New(ctx,
 		otlptracegrpc.WithEndpoint(endpoint),
 		otlptracegrpc.WithInsecure(),
@@ -30,13 +28,10 @@ func initTracer(ctx context.Context) (func(context.Context) error, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exp),
 	)
-
 	otel.SetTracerProvider(tp)
-
 	return tp.Shutdown, nil
 }
 
@@ -52,57 +47,51 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// 🔹 Redis (cache layer - best effort)
+	// Redis
 	redisClient := redis.NewClient(&redis.Options{
 		Addr: getenv("REDIS_ADDR", "localhost:6379"),
 	})
-	defer func() { _ = redisClient.Close() }()
+	defer redisClient.Close()
 
 	if err := redisClient.Ping(ctx).Err(); err != nil {
-		log.Printf("redis ping failed (cache will be best-effort): %v", err)
+		log.Printf("redis ping failed (cache best-effort): %v", err)
 	}
 
-	// 🔹 Initialize tracing
+	// tracing
 	shutdown, err := initTracer(ctx)
 	if err != nil {
 		log.Fatalf("otel init failed: %v", err)
 	}
-	defer func() { _ = shutdown(context.Background()) }()
+	defer shutdown(context.Background())
 
-	// 🔹 Initialize metrics
+	// metrics
 	observability.Init()
 
-	// 🔹 Metrics endpoint
-	metricsPort := getenv("METRICS_PORT", "2112")
-	go func() {
-		mux := http.NewServeMux()
-		mux.Handle("/metrics", promhttp.Handler())
-		log.Printf("metrics listening on :%s", metricsPort)
-		if err := http.ListenAndServe(":"+metricsPort, mux); err != nil {
-			log.Printf("metrics server error: %v", err)
-		}
-	}()
-
-	// 🔹 Database
+	// database
 	dbURL := getenv(
 		"READ_DB_URL",
 		"postgres://postgres:postgres@postgres-read:5432/grainguard_read?sslmode=disable",
 	)
+
 	pool, err := pgxpool.New(ctx, dbURL)
 	if err != nil {
 		log.Fatalf("db connect failed: %v", err)
 	}
 	defer pool.Close()
 
-	// 🔹 Kafka consumer (env-based)
-	kafkaConsumer := consumer.NewKafkaConsumerFromEnv()
+	// kafka consumer
+	kafkaConsumer := consumer.NewKafkaConsumerFromEnv(
+		"telemetry.events",
+		"read-model-builder",
+	)
 
-	// 🔥 Envelope-aware handler (does version routing → calls projection.HandleTelemetry internally)
 	handler := consumer.NewEnvelopeHandler(pool, redisClient)
 
 	log.Println("Read-model-builder started")
 
-	go kafkaConsumer.Start(ctx, handler)
+	go kafkaConsumer.Start(ctx, func(b []byte) error {
+		return handler(ctx, b)
+	})
 
 	<-ctx.Done()
 

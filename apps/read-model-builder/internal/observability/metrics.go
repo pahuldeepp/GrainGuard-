@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -18,7 +19,7 @@ var (
 	EventsDLQ = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "events_dlq_total",
-			Help: "Total events sent to DLQ",
+			Help: "Total events sent to dead letter queue",
 		},
 	)
 
@@ -29,18 +30,10 @@ var (
 		},
 	)
 
-	// 🔥 NEW: Kafka fetch errors metric
 	KafkaFetchErrors = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "kafka_fetch_errors_total",
 			Help: "Total Kafka fetch errors",
-		},
-	)
-
-	CircuitBreakerState = prometheus.NewGauge(
-		prometheus.GaugeOpts{
-			Name: "circuit_breaker_state",
-			Help: "0=closed, 1=open, 2=half-open",
 		},
 	)
 
@@ -50,20 +43,52 @@ var (
 			Help: "Current Kafka consumer lag",
 		},
 	)
+
+	InflightJobs = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "inflight_jobs",
+			Help: "Number of events currently being processed",
+		},
+	)
+
+	CircuitBreakerState = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "circuit_breaker_state",
+			Help: "Circuit breaker state: 0=closed, 1=open, 2=half-open",
+		},
+	)
+
+	EventProcessingLatency = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "event_processing_latency_seconds",
+			Help:    "Latency of processing telemetry events",
+			Buckets: prometheus.DefBuckets,
+		},
+	)
 )
 
 func Init() {
+
 	prometheus.MustRegister(
 		EventsProcessed,
 		EventsDLQ,
 		EventsRetry,
-		KafkaFetchErrors, // 🔥 register new metric
-		CircuitBreakerState,
+		KafkaFetchErrors,
 		KafkaConsumerLag,
+		InflightJobs,
+		CircuitBreakerState,
+		EventProcessingLatency,
 	)
 
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+
 	go func() {
-		http.Handle("/metrics", promhttp.Handler())
-		http.ListenAndServe(":2112", nil)
+		log.Println("Prometheus metrics exposed on :2112/metrics")
+
+		err := http.ListenAndServe(":2112", mux)
+		if err != nil {
+			log.Fatalf("metrics server failed: %v", err)
+		}
 	}()
 }

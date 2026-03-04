@@ -23,7 +23,7 @@ type KafkaConsumer struct {
 	breaker   *CircuitBreaker
 }
 
-func NewKafkaConsumerFromEnv() *KafkaConsumer {
+func NewKafkaConsumerFromEnv(topic string, groupID string) *KafkaConsumer {
 	brokers := os.Getenv("KAFKA_BROKERS")
 	if brokers == "" {
 		brokers = "localhost:9092"
@@ -36,16 +36,16 @@ func NewKafkaConsumerFromEnv() *KafkaConsumer {
 
 		reader: kafka.NewReader(kafka.ReaderConfig{
 			Brokers:        brokerList,
-			Topic:          "telemetry.events",
-			GroupID:        "read-model-builder",
+			Topic:          topic,
+			GroupID:        groupID,
 			MinBytes:       1,
 			MaxBytes:       10e6,
-			CommitInterval: 0, // manual commit
+			CommitInterval: 0,
 		}),
 
 		dlqWriter: &kafka.Writer{
 			Addr:     kafka.TCP(brokerList...),
-			Topic:    "telemetry.events.dlq",
+			Topic:    topic + ".dlq",
 			Balancer: &kafka.LeastBytes{},
 		},
 	}
@@ -55,11 +55,9 @@ func (c *KafkaConsumer) Start(ctx context.Context, handler func([]byte) error) {
 	tracer := otel.Tracer("read-model-builder.consumer")
 
 	for {
-		// Update consumer lag at top of loop
 		stats := c.reader.Stats()
 		observability.KafkaConsumerLag.Set(float64(stats.Lag))
 
-		// Circuit breaker guard
 		if !c.breaker.Allow() {
 			log.Println("Circuit breaker OPEN — pausing consumption")
 			observability.CircuitBreakerState.Set(1)
@@ -71,12 +69,10 @@ func (c *KafkaConsumer) Start(ctx context.Context, handler func([]byte) error) {
 			continue
 		}
 
-		// Breaker allowed → HALF-OPEN or CLOSED
 		observability.CircuitBreakerState.Set(2)
 
 		msg, err := c.reader.FetchMessage(ctx)
 		if err != nil {
-			// Check if context was cancelled (graceful shutdown)
 			if ctx.Err() != nil {
 				log.Println("Consumer shutting down")
 				return
@@ -102,7 +98,6 @@ func (c *KafkaConsumer) Start(ctx context.Context, handler func([]byte) error) {
 		if err != nil {
 			span.RecordError(err)
 			log.Println("Handler failed after retries. Sending to DLQ:", err)
-
 			observability.EventsDLQ.Inc()
 
 			dlqErr := c.dlqWriter.WriteMessages(msgCtx, kafka.Message{
@@ -135,7 +130,6 @@ func (c *KafkaConsumer) Start(ctx context.Context, handler func([]byte) error) {
 			continue
 		}
 
-		// Success path
 		if commitErr := c.reader.CommitMessages(msgCtx, msg); commitErr != nil {
 			c.breaker.Failure()
 			span.RecordError(commitErr)
@@ -147,7 +141,6 @@ func (c *KafkaConsumer) Start(ctx context.Context, handler func([]byte) error) {
 		c.breaker.Success()
 		observability.EventsProcessed.Inc()
 		observability.CircuitBreakerState.Set(0)
-
 		span.End()
 	}
 }
