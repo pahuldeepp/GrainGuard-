@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -25,6 +26,14 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 )
+
+func envBool(key string, def bool) bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if v == "" {
+		return def
+	}
+	return v == "true" || v == "1" || v == "yes" || v == "y"
+}
 
 func main() {
 	ctx := context.Background()
@@ -96,23 +105,33 @@ func main() {
 
 	/* =======================================================
 	   🔐 JWT CONFIG (User Identity via OAuth / JWKS)
+	   ✅ Toggle with AUTH_ENABLED
 	======================================================= */
 
-	jwksURL := os.Getenv("JWKS_URL")
-	issuer := os.Getenv("JWT_ISSUER")
-	audience := os.Getenv("JWT_AUDIENCE")
+	authEnabled := envBool("AUTH_ENABLED", false) // default OFF for local
 
-	if jwksURL == "" || issuer == "" || audience == "" {
-		log.Fatal("JWKS_URL / JWT_ISSUER / JWT_AUDIENCE must be set")
-	}
+	var jwtVerifier *interceptors.JWTVerifier
+	if authEnabled {
+		jwksURL := os.Getenv("JWKS_URL")
+		issuer := os.Getenv("JWT_ISSUER")
+		audience := os.Getenv("JWT_AUDIENCE")
 
-	verifier, err := interceptors.NewJWTVerifier(jwksURL, issuer, audience)
-	if err != nil {
-		log.Fatal("Failed to initialize JWKS verifier:", err)
+		if jwksURL == "" || issuer == "" || audience == "" {
+			log.Fatal("AUTH_ENABLED=true but JWKS_URL / JWT_ISSUER / JWT_AUDIENCE not set")
+		}
+
+		v, err := interceptors.NewJWTVerifier(jwksURL, issuer, audience)
+		if err != nil {
+			log.Fatal("Failed to initialize JWKS verifier:", err)
+		}
+		jwtVerifier = v
+		log.Println("Authentication ENABLED (JWT + RBAC)")
+	} else {
+		log.Println("Authentication DISABLED (skipping JWKS/JWT/RBAC)")
 	}
 
 	/* =======================================================
-	   🚀 gRPC SERVER (mTLS + JWT + RBAC + OTel)
+	   🚀 gRPC SERVER (mTLS + optional JWT/RBAC + OTel)
 	======================================================= */
 
 	lis, err := net.Listen("tcp", ":50051")
@@ -120,14 +139,24 @@ func main() {
 		log.Fatal("Failed to listen:", err)
 	}
 
-	grpcServer := grpc.NewServer(
-	grpc.Creds(creds), // ✅ mTLS enforced
-	grpc.StatsHandler(otelgrpc.NewServerHandler()), // 3️⃣ tracing
-	grpc.ChainUnaryInterceptor(
-		verifier.UnaryAuthInterceptor(),     // 1️⃣ authenticate (JWT)
-		interceptors.RBACUnaryInterceptor(), // 2️⃣ authorize (RBAC + tenant)
-	),
-)
+	var grpcServer *grpc.Server
+
+	if authEnabled && jwtVerifier != nil {
+		grpcServer = grpc.NewServer(
+			grpc.Creds(creds),                              // ✅ mTLS enforced
+			grpc.StatsHandler(otelgrpc.NewServerHandler()), // ✅ tracing
+			grpc.ChainUnaryInterceptor(
+				jwtVerifier.UnaryAuthInterceptor(),          // ✅ JWT auth
+				interceptors.RBACUnaryInterceptor(),         // ✅ RBAC
+			),
+		)
+	} else {
+		grpcServer = grpc.NewServer(
+			grpc.Creds(creds),                              // ✅ still mTLS
+			grpc.StatsHandler(otelgrpc.NewServerHandler()), // ✅ still tracing
+			// no JWT / RBAC interceptors
+		)
+	}
 
 	devicepb.RegisterDeviceServiceServer(
 		grpcServer,
@@ -135,7 +164,7 @@ func main() {
 	)
 
 	go func() {
-		log.Println("gRPC server running with mTLS + JWT + RBAC on :50051")
+		log.Println("gRPC server running on :50051 (mTLS enforced)")
 		if err := grpcServer.Serve(lis); err != nil {
 			log.Fatal(err)
 		}
@@ -143,13 +172,11 @@ func main() {
 
 	/* =======================================================
 	   🌐 HTTP SERVER (DEV ONLY — bypasses gRPC auth)
-	   ⚠️ Do NOT use in production
 	======================================================= */
 
 	r := mux.NewRouter()
 
 	r.HandleFunc("/devices", func(w http.ResponseWriter, r *http.Request) {
-
 		type Request struct {
 			TenantID string `json:"tenant_id"`
 			Serial   string `json:"serial"`
@@ -169,11 +196,9 @@ func main() {
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(device)
-
 	}).Methods("POST")
 
 	r.HandleFunc("/telemetry", func(w http.ResponseWriter, r *http.Request) {
-
 		type Request struct {
 			DeviceID    string  `json:"device_id"`
 			Temperature float64 `json:"temperature"`
@@ -197,7 +222,6 @@ func main() {
 		}
 
 		w.WriteHeader(http.StatusCreated)
-
 	}).Methods("POST")
 
 	log.Println("HTTP server running on :8080 (DEV ONLY)")
