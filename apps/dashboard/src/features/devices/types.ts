@@ -6,3 +6,10 @@ export interface Device {
   humidity: number | null;
   recordedAt: string | null;
 }
+
+export interface DeviceTelemetryHistory {
+  deviceId: string;
+  temperature: number | null;
+  humidity: number | null;
+  recordedAt: string | null;
+}
