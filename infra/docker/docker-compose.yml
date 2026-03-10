@@ -303,6 +303,29 @@ services:
     networks:
       - grainguard-net
 
+  bff:
+    build:
+      context: ../../apps/bff
+      dockerfile: Dockerfile
+    container_name: grainguard-bff
+    ports:
+      - "4000:4000"
+    environment:
+      - READ_DB_HOST=postgres-read
+      - READ_DB_PORT=5432
+      - READ_DB_NAME=grainguard_read
+      - READ_DB_USER=postgres
+      - READ_DB_PASSWORD=postgres
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - PORT=4000
+    depends_on:
+      - postgres-read
+      - redis
+    networks:
+      - grainguard-net
+    restart: unless-stopped
+
 
   gateway:
     build:
