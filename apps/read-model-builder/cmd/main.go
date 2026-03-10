@@ -148,18 +148,25 @@ func main() {
 	// Each flush = 1 DB transaction + 1 Redis pipeline instead of 64.
 	//-----------------------------------
 
-	kafkaConsumer := consumer.NewKafkaConsumerFromEnv(
-		"telemetry.events",
-		"read-model-builder",
-	)
-
-	batchHandler := consumer.NewBatchEnvelopeHandler(pool, redisClient)
 	workerCount := getenvInt("WORKER_COUNT", 16)
 
-	log.Printf("read-model-builder started with %d batch workers", workerCount)
+// Consumer 1: telemetry.events — batch mode for high throughput
+telemetryConsumer := consumer.NewKafkaConsumerFromEnv(
+        "telemetry.events",
+        "read-model-builder",
+)
+batchHandler := consumer.NewBatchEnvelopeHandler(pool, redisClient)
+log.Printf("read-model-builder started with %d batch workers", workerCount)
+go telemetryConsumer.StartBatch(ctx, workerCount, batchHandler)
 
-	go kafkaConsumer.StartBatch(ctx, workerCount, batchHandler)
-
+// Consumer 2: device.events — single mode, lower volume
+deviceConsumer := consumer.NewKafkaConsumerFromEnv(
+        "device.events",
+        "read-model-builder-devices",
+)
+deviceHandler := consumer.NewEnvelopeHandler(pool, redisClient)
+log.Printf("read-model-builder device consumer started")
+go deviceConsumer.Start(ctx, 4, deviceHandler)
 	//-----------------------------------
 	// Graceful shutdown
 	//-----------------------------------
