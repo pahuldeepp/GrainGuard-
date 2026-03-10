@@ -143,16 +143,29 @@ func HandleTelemetry(pool *pgxpool.Pool, redisClient *redis.Client) func([]byte)
 		).Scan(&newVersion)
 
 		if err != nil {
-			observability.EventsRetry.Inc()
-			return err
-		}
+				observability.EventsRetry.Inc()
+				return err
+			}
 
-		if err := tx.Commit(ctx); err != nil {
-			observability.EventsRetry.Inc()
-			return err
-		}
+			// Write to history table for chart queries
+			_, err = tx.Exec(
+				ctx,
+				`INSERT INTO device_telemetry_history
+				 (device_id, temperature, humidity, recorded_at)
+				 VALUES ($1, $2, $3, $4)`,
+				deviceID, temperature, humidity, recordedAt,
+			)
+			if err != nil {
+				observability.EventsRetry.Inc()
+				return err
+			}
 
-		versionKey := "device:" + deviceID.String() + ":latest_version"
+			if err := tx.Commit(ctx); err != nil {
+				observability.EventsRetry.Inc()
+				return err
+			}
+
+			versionKey := "device:" + deviceID.String()
 		dataKey := fmt.Sprintf("device:%s:v%d", deviceID.String(), newVersion)
 
 		cachePayload, _ := json.Marshal(map[string]any{
@@ -352,12 +365,31 @@ func HandleTelemetryBatch(pool *pgxpool.Pool, redisClient *redis.Client) func(co
 		}
 		rows.Close()
 
-		if err := tx.Commit(txCtx); err != nil {
-			observability.EventsRetry.Inc()
-			return err
-		}
+			// Bulk insert into history table
+			historyArgs := make([]any, 0, len(newEvents)*4)
+			historyClauses := make([]string, 0, len(newEvents))
+			for i, e := range newEvents {
+				base := i * 4
+				historyClauses = append(historyClauses,
+					fmt.Sprintf("($%d,$%d,$%d,$%d)", base+1, base+2, base+3, base+4),
+				)
+				historyArgs = append(historyArgs, e.deviceID, e.temperature, e.humidity, e.recordedAt)
+			}
+			historySQL := fmt.Sprintf(
+				`INSERT INTO device_telemetry_history (device_id, temperature, humidity, recorded_at) VALUES %s`,
+				strings.Join(historyClauses, ","),
+			)
+			if _, err := tx.Exec(txCtx, historySQL, historyArgs...); err != nil {
+				observability.EventsRetry.Inc()
+				return err
+			}
 
-		eventByDevice := make(map[uuid.UUID]parsedEvent, len(newEvents))
+			if err := tx.Commit(txCtx); err != nil {
+				observability.EventsRetry.Inc()
+				return err
+			}
+
+			eventByDevice := make(map[uuid.UUID]parsedEvent, len(newEvents))
 		for _, e := range newEvents {
 			eventByDevice[e.deviceID] = e
 		}
