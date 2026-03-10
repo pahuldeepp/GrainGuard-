@@ -5,25 +5,39 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	"google.golang.org/protobuf/proto"
 
+	eventspb "github.com/pahuldeepp/grainguard/libs/events/gen"
 	"github.com/pahuldeepp/grainguard/apps/read-model-builder/internal/projection"
 )
 
-// NewEnvelopeHandler returns a single-message handler.
-// Used by Start() for backwards compatibility.
 func NewEnvelopeHandler(
 	pool *pgxpool.Pool,
 	redisClient *redis.Client,
 ) func(context.Context, []byte) error {
 	telemetryHandler := projection.HandleTelemetry(pool, redisClient)
+	deviceHandler := projection.HandleDevice(pool, redisClient)
+
 	return func(ctx context.Context, message []byte) error {
-		return telemetryHandler(message)
+
+		// Decode just enough to get the event type
+		// Then pass raw bytes to the correct handler
+		var envelope eventspb.EventEnvelope
+		if err := proto.Unmarshal(message, &envelope); err != nil {
+			return err
+		}
+
+		switch envelope.EventType {
+		case "telemetry.recorded":
+			return telemetryHandler(message)
+		case "device_created_v1":
+			return deviceHandler(message)
+		default:
+			return nil
+		}
 	}
 }
 
-// NewBatchEnvelopeHandler returns a batch handler.
-// Used by StartBatch() for high-throughput processing.
-// Processes up to 64 events in a single DB transaction + Redis pipeline.
 func NewBatchEnvelopeHandler(
 	pool *pgxpool.Pool,
 	redisClient *redis.Client,
