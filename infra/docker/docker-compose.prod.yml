@@ -1,0 +1,181 @@
+# Production overrides for docker-compose.yml
+# Run with:
+# docker compose -f infra/docker/docker-compose.yml -f infra/docker/docker-compose.prod.yml up -d
+
+services:
+
+  postgres:
+    ports: !reset []
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "0.5"
+
+  postgres-read:
+    ports: !reset []
+    volumes:
+      - pgdata_read:/var/lib/postgresql/data
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "0.5"
+
+  redis:
+    ports: !reset []
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "0.25"
+
+  kafka:
+    ports: !reset []
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "1.0"
+
+  kafka-connect:
+    ports: !reset []
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "0.5"
+
+  schema-registry:
+    ports: !reset []
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "0.25"
+
+  telemetry-service:
+    image: ghcr.io/pahuldeepp/grainguard/telemetry-service:latest
+    build: !reset null
+    environment:
+      WRITE_DB_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/grainguard?sslmode=disable
+      AUTH_ENABLED: "true"
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "0.5"
+
+  cdc-transformer:
+    image: ghcr.io/pahuldeepp/grainguard/cdc-transformer:latest
+    build: !reset null
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "0.5"
+
+  read-model-builder:
+    image: ghcr.io/pahuldeepp/grainguard/read-model-builder:latest
+    build: !reset null
+    environment:
+      READ_DB_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres-read:5432/grainguard_read?sslmode=disable
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "0.5"
+
+  dlq-reprocessor:
+    image: ghcr.io/pahuldeepp/grainguard/dlq-reprocessor:latest
+    build: !reset null
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: "0.25"
+
+  saga-orchestrator:
+    image: ghcr.io/pahuldeepp/grainguard/saga-orchestrator:latest
+    build: !reset null
+    environment:
+      SAGA_DB_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/grainguard?sslmode=disable
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "0.5"
+
+  bff:
+    image: ghcr.io/pahuldeepp/grainguard/bff:latest
+    build: !reset null
+    environment:
+      - READ_DB_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "0.5"
+
+  gateway:
+    image: ghcr.io/pahuldeepp/grainguard/gateway:latest
+    build: !reset null
+    environment:
+      READ_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres-read:5432/grainguard_read?sslmode=disable
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "0.5"
+
+  keycloak:
+    command: start
+    ports: !reset []
+    environment:
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD is required}
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:?KEYCLOAK_HOSTNAME is required}
+      KC_HOSTNAME_STRICT: "true"
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "0.5"
+
+  prometheus:
+    ports: !reset []
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "0.25"
+
+  grafana:
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required}
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "0.25"
+
+  tempo:
+    ports: !reset []
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "0.25"
+
+  otel-collector:
+    ports: !reset []
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: "0.25"
