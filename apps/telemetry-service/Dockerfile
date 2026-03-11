@@ -17,5 +17,9 @@ RUN apk add --no-cache ca-certificates
 
 COPY --from=builder /bin/telemetry-service /telemetry-service
 
-EXPOSE 50051 8080
+# 50051 = gRPC
+# 8080  = HTTP (dev only)
+# 8081  = health check endpoints (/healthz/live, /healthz/ready)
+EXPOSE 50051 8080 8081
+
 ENTRYPOINT ["/telemetry-service"]

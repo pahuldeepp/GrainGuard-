@@ -17,5 +17,8 @@ RUN apk add --no-cache ca-certificates
 
 COPY --from=builder /bin/read-model-builder /read-model-builder
 
-EXPOSE 2112
+# 2112 = Prometheus metrics
+# 8081 = health check endpoints (/healthz/live, /healthz/ready)
+EXPOSE 2112 8081
+
 ENTRYPOINT ["/read-model-builder"]

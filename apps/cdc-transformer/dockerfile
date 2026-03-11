@@ -1,14 +1,20 @@
-FROM golang:1.24-alpine AS build
-WORKDIR /src
+FROM golang:1.24-alpine AS builder
+WORKDIR /app
+
+RUN apk add --no-cache ca-certificates
 
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN go build -o /out/cdc-transformer ./apps/cdc-transformer/cmd
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -o /bin/cdc-transformer \
+    ./apps/cdc-transformer/cmd
 
+# --- runtime ---
 FROM alpine:3.19
-WORKDIR /app
-COPY --from=build /out/cdc-transformer /app/cdc-transformer
+RUN apk add --no-cache ca-certificates
 
-CMD ["/app/cdc-transformer"]
+COPY --from=builder /bin/cdc-transformer /cdc-transformer
+
+ENTRYPOINT ["/cdc-transformer"]
