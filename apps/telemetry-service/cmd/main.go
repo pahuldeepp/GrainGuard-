@@ -23,6 +23,9 @@ import (
 	grpcserver "github.com/pahuldeepp/grainguard/apps/telemetry-service/internal/grpc"
 	"github.com/pahuldeepp/grainguard/apps/telemetry-service/internal/grpc/interceptors"
 	"github.com/pahuldeepp/grainguard/apps/telemetry-service/internal/repository"
+	"github.com/pahuldeepp/grainguard/apps/telemetry-service/migrations"
+	"github.com/pahuldeepp/grainguard/libs/health"
+	libmigrate "github.com/pahuldeepp/grainguard/libs/migrate"
 
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 )
@@ -85,6 +88,17 @@ func main() {
 	defer pool.Close()
 
 	/* =======================================================
+	   📦 MIGRATIONS — run before anything else touches the DB
+	   Schema must exist before repositories are used.
+	   Already-applied migrations are skipped automatically.
+	   Embedded via //go:embed so no files needed at runtime.
+	======================================================= */
+
+	if err := libmigrate.Up(dbURL, migrations.FS, "grainguard"); err != nil {
+		log.Fatalf("migration failed: %v", err)
+	}
+
+	/* =======================================================
 	   📦 REPOSITORIES
 	======================================================= */
 
@@ -104,7 +118,7 @@ func main() {
 	)
 
 	/* =======================================================
-	   🔐 JWT CONFIG (User Identity via OAuth / JWKS)
+	   🔑 JWT CONFIG (User Identity via OAuth / JWKS)
 	   ✅ Toggle with AUTH_ENABLED
 	======================================================= */
 
@@ -143,11 +157,11 @@ func main() {
 
 	if authEnabled && jwtVerifier != nil {
 		grpcServer = grpc.NewServer(
-			grpc.Creds(creds),                              // ✅ mTLS enforced
-			grpc.StatsHandler(otelgrpc.NewServerHandler()), // ✅ tracing
+			grpc.Creds(creds),                                    // ✅ mTLS enforced
+			grpc.StatsHandler(otelgrpc.NewServerHandler()),       // ✅ tracing
 			grpc.ChainUnaryInterceptor(
-				jwtVerifier.UnaryAuthInterceptor(),          // ✅ JWT auth
-				interceptors.RBACUnaryInterceptor(),         // ✅ RBAC
+				jwtVerifier.UnaryAuthInterceptor(), // ✅ JWT auth
+				interceptors.RBACUnaryInterceptor(), // ✅ RBAC
 			),
 		)
 	} else {
@@ -167,6 +181,24 @@ func main() {
 		log.Println("gRPC server running on :50051 (mTLS enforced)")
 		if err := grpcServer.Serve(lis); err != nil {
 			log.Fatal(err)
+		}
+	}()
+
+	/* =======================================================
+	   🏥 HEALTH CHECK SERVER
+	   :8081 — dedicated port for K8s liveness/readiness probes
+	   /healthz/live  → liveness  (K8s restarts pod if this fails)
+	   /healthz/ready → readiness (K8s stops routing if this fails)
+	======================================================= */
+
+	healthHandler := health.NewHandler(
+		health.NewPostgresChecker(pool),
+	)
+	healthSrv := health.NewServer(":8081", healthHandler)
+	go func() {
+		log.Println("health server listening on :8081")
+		if err := healthSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("health server error: %v", err)
 		}
 	}()
 
