@@ -79,6 +79,24 @@ export const db = {
     return result.rows[0] || null;
   },
 
+  async getTelemetryHistory(deviceId: string, limit = 50) {
+  const result = await pool.query(
+    `SELECT device_id, temperature, humidity, recorded_at
+     FROM device_telemetry_history
+     WHERE device_id = $1
+     ORDER BY recorded_at ASC
+     LIMIT $2`,
+    [deviceId, limit]
+  );
+  return result.rows.map((r) => ({
+    deviceId: r.device_id,
+    temperature: r.temperature,
+    humidity: r.humidity,
+    recordedAt: r.recorded_at,
+  }));
+  },
+
+
   // Get all devices with their latest telemetry
   async getAllDevicesWithTelemetry(limit: number = 20) {
     const result = await pool.query(

@@ -2,6 +2,7 @@ import { ApolloProvider } from "@apollo/client/react";
 import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
 import client from "./lib/apollo";
 import { DevicesPage } from "./features/devices/components/DevicesPage";
+import { DeviceDetailPage } from "./features/devices/components/DeviceDetailPage";
 
 function App() {
   return (
@@ -26,6 +27,7 @@ function App() {
           {/* Routes */}
           <Routes>
             <Route path="/" element={<DevicesPage />} />
+            <Route path="/devices/:id" element={<DeviceDetailPage />} />
           </Routes>
         </div>
       </BrowserRouter>

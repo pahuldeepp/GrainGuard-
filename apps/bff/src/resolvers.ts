@@ -177,5 +177,14 @@ export const resolvers = {
 
       return results.filter(Boolean);
     },
+    deviceTelemetryHistory: async (_: any, args: { deviceId: string; limit?: number }) => {
+      const rows = await db.getTelemetryHistory(args.deviceId, args.limit ?? 50);
+      return rows.map((row: any) => ({
+        deviceId:    row.deviceId,
+        temperature: row.temperature,
+        humidity:    row.humidity,
+        recordedAt:  new Date(row.recordedAt).toISOString(),
+      }));
+    },
   },
 };
