@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telemetry-service
+  namespace: grainguard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: telemetry-service
+  template:
+    metadata:
+      labels:
+        app: telemetry-service
+    spec:
+      containers:
+        - name: telemetry-service
+          image: ghcr.io/pahuldeepp/grainguard/telemetry-service:latest
+          ports:
+            - containerPort: 50051
+              name: grpc
+            - containerPort: 8081
+              name: health
+          env:
+            - name: WRITE_DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: WRITE_DB_URL
+            - name: KAFKA_BROKERS
+              value: kafka:9092
+            - name: JWKS_URL
+              value: http://keycloak:8080/realms/grainguard/protocol/openid-connect/certs
+            - name: JWT_ISSUER
+              value: http://keycloak:8080/realms/grainguard
+            - name: JWT_AUDIENCE
+              value: grainguard-gateway
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: otel-collector:4317
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz/live
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz/ready
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: telemetry-service
+  namespace: grainguard
+spec:
+  selector:
+    app: telemetry-service
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: 50051

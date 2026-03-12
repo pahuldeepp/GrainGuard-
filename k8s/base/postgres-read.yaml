@@ -1,0 +1,91 @@
+﻿# postgres-read.yaml
+# A second Postgres instance dedicated to read traffic.
+# The read-model-builder and BFF connect here instead of the primary,
+# keeping read queries isolated from the CDC write path.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-read-config
+  namespace: grainguard
+data:
+  POSTGRES_DB: grainguard
+  POSTGRES_USER: grainguard
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-read-pvc
+  namespace: grainguard
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-read
+  namespace: grainguard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-read
+  template:
+    metadata:
+      labels:
+        app: postgres-read
+    spec:
+      containers:
+        - name: postgres-read
+          image: postgres:16
+          ports:
+            - containerPort: 5432
+          envFrom:
+            - configMapRef:
+                name: postgres-read-config
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-read-secret
+                  key: POSTGRES_PASSWORD
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          volumeMounts:
+            - mountPath: /var/lib/postgresql/data
+              name: postgres-read-storage
+          livenessProbe:
+            exec:
+              command: [pg_isready, -U, grainguard]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: [pg_isready, -U, grainguard]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: postgres-read-storage
+          persistentVolumeClaim:
+            claimName: postgres-read-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-read
+  namespace: grainguard
+spec:
+  selector:
+    app: postgres-read
+  ports:
+    - port: 5432
+      targetPort: 5432

@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: saga-orchestrator
+  namespace: grainguard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: saga-orchestrator
+  template:
+    metadata:
+      labels:
+        app: saga-orchestrator
+    spec:
+      containers:
+        - name: saga-orchestrator
+          image: ghcr.io/pahuldeepp/grainguard/saga-orchestrator:latest
+          ports:
+            - containerPort: 8081
+              name: health
+          env:
+            - name: KAFKA_BROKERS
+              value: kafka:9092
+            - name: SAGA_DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: SAGA_DB_URL
+            - name: SAGA_EVENTS_TOPIC
+              value: device.events
+            - name: SAGA_COMMANDS_TOPIC
+              value: device.commands
+            - name: SAGA_CONSUMER_GROUP
+              value: saga-orchestrator
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz/live
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz/ready
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: saga-orchestrator
+  namespace: grainguard
+spec:
+  selector:
+    app: saga-orchestrator
+  ports:
+    - name: health
+      port: 8081
+      targetPort: 8081

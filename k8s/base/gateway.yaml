@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: grainguard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gateway
+  template:
+    metadata:
+      labels:
+        app: gateway
+    spec:
+      containers:
+        - name: gateway
+          image: ghcr.io/pahuldeepp/grainguard/gateway:latest
+          ports:
+            - containerPort: 3000
+              name: http
+            - containerPort: 8081
+              name: health
+          env:
+            - name: REDIS_HOST
+              value: redis
+            - name: REDIS_PORT
+              value: "6379"
+            - name: READ_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-read-secret
+                  key: READ_DATABASE_URL
+            - name: GRPC_TARGET
+              value: telemetry-service:50051
+            - name: JWKS_URL
+              value: http://keycloak:8080/realms/grainguard/protocol/openid-connect/certs
+            - name: JWT_ISSUER
+              value: http://keycloak:8080/realms/grainguard
+            - name: JWT_AUDIENCE
+              value: grainguard-gateway
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: otel-collector:4317
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz/live
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz/ready
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: grainguard
+spec:
+  selector:
+    app: gateway
+  type: LoadBalancer
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000

@@ -1,0 +1,7 @@
+﻿apiVersion: v1
+kind: Namespace
+metadata:
+  name: grainguard
+  labels:
+    app.kubernetes.io/name: grainguard
+    app.kubernetes.io/managed-by: kubectl
