@@ -1,5 +1,6 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useDevices } from "../hooks/useDevices";
+import { useDebounce } from "../../../hooks/useDebounce";
 import { DeviceTable } from "./DeviceTable";
 import { EmptyState } from "../../../shared/components/EmptyState";
 import toast from "react-hot-toast";
@@ -15,19 +16,47 @@ export function DevicesPage() {
 
   const { devices, loading, error, refetch } = useDevices(limit);
 
-  const handleRefetch = async () => {
+  // Debounce search — filter only fires 300ms after user stops typing
+  const debouncedSearch = useDebounce(search, 300);
+
+  // Stable function references — won't break React.memo on DeviceTable
+  const handleRefetch = useCallback(async () => {
     try {
       await refetch();
       toast.success("Devices refreshed");
     } catch {
       toast.error("Failed to refresh devices");
     }
-  };
+  }, [refetch]);
 
+  const handleSearch = useCallback((val: string) => {
+    setSearch(val);
+    setPage(1);
+  }, []);
+
+  const handleStatus = useCallback((val: StatusFilter) => {
+    setStatusFilter(val);
+    setPage(1);
+  }, []);
+
+  const handleClear = useCallback(() => {
+    setSearch("");
+    setStatusFilter("all");
+    setPage(1);
+  }, []);
+
+  // Stats — memoized separately so they don't recompute on page change
+  const stats = useMemo(() => ({
+    total: devices.length,
+    withTelemetry: devices.filter((d) => d.temperature !== null).length,
+    noData: devices.filter((d) => d.temperature === null).length,
+  }), [devices]);
+
+  // Filter uses debouncedSearch not raw search
   const filteredDevices = useMemo(() => {
     let result = devices;
-    if (search.trim()) {
-      const q = search.toLowerCase();
+    if (debouncedSearch.trim()) {
+      const q = debouncedSearch.toLowerCase();
       result = result.filter(
         (d) =>
           d.serialNumber.toLowerCase().includes(q) ||
@@ -40,18 +69,16 @@ export function DevicesPage() {
       result = result.filter((d) => d.temperature === null);
     }
     return result;
-  }, [devices, search, statusFilter]);
+  }, [devices, debouncedSearch, statusFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filteredDevices.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
+
   const pagedDevices = useMemo(() => {
     const start = (safePage - 1) * PAGE_SIZE;
     return filteredDevices.slice(start, start + PAGE_SIZE);
   }, [filteredDevices, safePage]);
 
-  const handleSearch = (val: string) => { setSearch(val); setPage(1); };
-  const handleStatus = (val: StatusFilter) => { setStatusFilter(val); setPage(1); };
-  const handleClear = () => { setSearch(""); setStatusFilter("all"); setPage(1); };
   const isFiltering = search.trim() !== "" || statusFilter !== "all";
 
   if (error) {
@@ -77,8 +104,8 @@ export function DevicesPage() {
             {loading
               ? "Loading..."
               : isFiltering
-              ? `${filteredDevices.length} of ${devices.length} devices`
-              : `${devices.length} devices`}
+              ? `${filteredDevices.length} of ${stats.total} devices`
+              : `${stats.total} devices`}
           </p>
         </div>
         <div className="flex gap-3">
@@ -105,19 +132,19 @@ export function DevicesPage() {
         <div className="bg-white dark:bg-gray-900 rounded-lg shadow p-4">
           <div className="text-sm text-gray-500 dark:text-gray-400">Total Devices</div>
           <div className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
-            {loading ? "—" : devices.length}
+            {loading ? "—" : stats.total}
           </div>
         </div>
         <div className="bg-white dark:bg-gray-900 rounded-lg shadow p-4">
           <div className="text-sm text-gray-500 dark:text-gray-400">With Telemetry</div>
           <div className="text-2xl font-bold text-green-600 mt-1">
-            {loading ? "—" : devices.filter((d) => d.temperature !== null).length}
+            {loading ? "—" : stats.withTelemetry}
           </div>
         </div>
         <div className="bg-white dark:bg-gray-900 rounded-lg shadow p-4">
           <div className="text-sm text-gray-500 dark:text-gray-400">No Data</div>
           <div className="text-2xl font-bold text-gray-400 mt-1">
-            {loading ? "—" : devices.filter((d) => d.temperature === null).length}
+            {loading ? "—" : stats.noData}
           </div>
         </div>
       </div>
@@ -152,7 +179,7 @@ export function DevicesPage() {
         {isFiltering && (
           <button
             onClick={handleClear}
-            className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white border border-gray-300 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800"
+            className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 border border-gray-300 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800"
           >
             Clear
           </button>

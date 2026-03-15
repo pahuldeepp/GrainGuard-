@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { useNavigate } from "react-router-dom";
 import type { Device as DeviceType } from "../types";
 import { TelemetryBadge } from "../../telemetry/components/TelemetryBadge";
@@ -9,7 +10,7 @@ interface Props {
   loading: boolean;
 }
 
-export function DeviceTable({ devices, loading }: Props) {
+export const DeviceTable = memo(function DeviceTable({ devices, loading }: Props) {
   const navigate = useNavigate();
 
   if (!loading && devices.length === 0) {
@@ -67,4 +68,4 @@ export function DeviceTable({ devices, loading }: Props) {
       </table>
     </div>
   );
-}
+});
