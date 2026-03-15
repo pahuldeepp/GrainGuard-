@@ -1,14 +1,16 @@
 ﻿import { useParams, useNavigate } from "react-router-dom";
-import { useDevice } from "../hooks/useDevices";
+import { useDevice, useDeviceTelemetryHistory } from "../hooks/useDevices";
 import { TelemetryBadge } from "../../telemetry/components/TelemetryBadge";
 import { Skeleton } from "../../../shared/components/Skeleton";
 import { TelemetryChart } from "../../telemetry/components/TelemetryChart";
-import { useDeviceTelemetryHistory } from "../hooks/useDevices";
+import { EmptyState } from "../../../shared/components/EmptyState";
+
 export function DeviceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { device, loading, error } = useDevice(id!);
-const { telemetryHistory: history, loading: historyLoading } = useDeviceTelemetryHistory(id!);
+  const { telemetryHistory: history, loading: historyLoading } = useDeviceTelemetryHistory(id!);
+
   if (loading) {
     return (
       <div className="p-6 max-w-3xl mx-auto">
@@ -24,35 +26,43 @@ const { telemetryHistory: history, loading: historyLoading } = useDeviceTelemetr
 
   if (error || !device) {
     return (
-      <div className="p-8 text-center">
-        <div className="text-red-500 text-lg font-medium">Device not found</div>
+      <div className="p-6 max-w-3xl mx-auto">
         <button
           onClick={() => navigate("/")}
-          className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+          className="text-blue-600 hover:text-blue-800 text-sm mb-6 flex items-center gap-1"
         >
-          Back to Devices
+          ← Back to Devices
         </button>
+        <div className="bg-white rounded-lg shadow">
+          <EmptyState
+            icon="🔍"
+            title="Device not found"
+            description={
+              error
+                ? error.message
+                : "This device doesn't exist or you don't have access to it."
+            }
+            action={{ label: "Back to Devices", onClick: () => navigate("/") }}
+          />
+        </div>
       </div>
     );
   }
 
   return (
     <div className="p-6 max-w-3xl mx-auto">
-      {/* Back button */}
       <button
         onClick={() => navigate("/")}
         className="text-blue-600 hover:text-blue-800 text-sm mb-6 flex items-center gap-1"
       >
-        â† Back to Devices
+        ← Back to Devices
       </button>
 
-      {/* Header */}
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">{device.serialNumber}</h1>
         <p className="text-gray-500 text-sm mt-1 font-mono">{device.deviceId}</p>
       </div>
 
-      {/* Device info */}
       <div className="bg-white rounded-lg shadow p-6 mb-6">
         <h2 className="text-sm font-semibold text-gray-500 uppercase mb-4">Device Info</h2>
         <div className="space-y-3">
@@ -71,16 +81,19 @@ const { telemetryHistory: history, loading: historyLoading } = useDeviceTelemetr
         </div>
       </div>
 
-      {/* Latest telemetry */}
       <div className="bg-white rounded-lg shadow p-6 mb-6">
         <h2 className="text-sm font-semibold text-gray-500 uppercase mb-4">Latest Telemetry</h2>
         {device.temperature === null ? (
-          <div className="text-gray-400 text-center py-4">No telemetry data yet</div>
+          <EmptyState
+            icon="📡"
+            title="No telemetry data yet"
+            description="This device hasn't sent any readings."
+          />
         ) : (
           <div className="space-y-4">
             <div className="flex justify-between items-center">
               <span className="text-gray-600">Temperature</span>
-              <TelemetryBadge value={device.temperature} unit="Â°C" high={40} />
+              <TelemetryBadge value={device.temperature} unit="°C" high={40} />
             </div>
             <div className="flex justify-between items-center">
               <span className="text-gray-600">Humidity</span>
@@ -89,20 +102,15 @@ const { telemetryHistory: history, loading: historyLoading } = useDeviceTelemetr
             <div className="flex justify-between items-center">
               <span className="text-gray-600">Last Reading</span>
               <span className="text-sm text-gray-500">
-                {device.recordedAt
-                  ? new Date(device.recordedAt).toLocaleString()
-                  : "â€”"}
+                {device.recordedAt ? new Date(device.recordedAt).toLocaleString() : "—"}
               </span>
             </div>
           </div>
         )}
       </div>
 
-      {/* Telemetry Chart */}
       <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-sm font-semibold text-gray-500 uppercase mb-4">
-          Telemetry History
-        </h2>
+        <h2 className="text-sm font-semibold text-gray-500 uppercase mb-4">Telemetry History</h2>
         <TelemetryChart history={history} loading={historyLoading} />
       </div>
     </div>
