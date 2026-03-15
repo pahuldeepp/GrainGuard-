@@ -13,6 +13,18 @@ interface Props {
 export const DeviceTable = memo(function DeviceTable({ devices, loading }: Props) {
   const navigate = useNavigate();
 
+  const handleRowClick = (deviceId: string) => {
+    navigate(`/devices/${deviceId}`);
+  };
+
+  const handleRowKeyDown = (e: React.KeyboardEvent, deviceId: string) => {
+    // Enter or Space activates the row — same as a button
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      navigate(`/devices/${deviceId}`);
+    }
+  };
+
   if (!loading && devices.length === 0) {
     return (
       <div className="bg-white dark:bg-gray-900 rounded-lg shadow">
@@ -27,14 +39,22 @@ export const DeviceTable = memo(function DeviceTable({ devices, loading }: Props
 
   return (
     <div className="bg-white dark:bg-gray-900 rounded-lg shadow overflow-hidden">
-      <table className="w-full text-left text-sm">
+      <table
+        className="w-full text-left text-sm"
+        role="grid"
+        aria-label="Devices list"
+        aria-busy={loading}
+      >
+        <caption className="sr-only">
+          List of registered GrainGuard devices with telemetry status
+        </caption>
         <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
           <tr>
-            <th className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300">Serial Number</th>
-            <th className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300">Device ID</th>
-            <th className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300">Temperature</th>
-            <th className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300">Humidity</th>
-            <th className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300">Last Reading</th>
+            <th scope="col" className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300">Serial Number</th>
+            <th scope="col" className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300">Device ID</th>
+            <th scope="col" className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300">Temperature</th>
+            <th scope="col" className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300">Humidity</th>
+            <th scope="col" className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300">Last Reading</th>
           </tr>
         </thead>
         <tbody>
@@ -44,8 +64,12 @@ export const DeviceTable = memo(function DeviceTable({ devices, loading }: Props
           {!loading && devices.map((device) => (
             <tr
               key={device.deviceId}
-              onClick={() => navigate(`/devices/${device.deviceId}`)}
-              className="border-b border-gray-100 dark:border-gray-800 hover:bg-blue-50 dark:hover:bg-gray-800 cursor-pointer transition-colors"
+              onClick={() => handleRowClick(device.deviceId)}
+              onKeyDown={(e) => handleRowKeyDown(e, device.deviceId)}
+              tabIndex={0}
+              role="row"
+              aria-label={`Device ${device.serialNumber}, click to view details`}
+              className="border-b border-gray-100 dark:border-gray-800 hover:bg-blue-50 dark:hover:bg-gray-800 cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-green-500"
             >
               <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">
                 {device.serialNumber}
