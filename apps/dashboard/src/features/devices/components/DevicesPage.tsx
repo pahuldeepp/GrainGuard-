@@ -4,6 +4,7 @@ import { useDebounce } from "../../../hooks/useDebounce";
 import { DeviceTable } from "./DeviceTable";
 import { EmptyState } from "../../../shared/components/EmptyState";
 import toast from "react-hot-toast";
+import { exportDevicesToCsv, buildCsvFilename } from "../../../utils/exportCsv";
 
 type StatusFilter = "all" | "with-telemetry" | "no-data";
 const PAGE_SIZE = 20;
@@ -15,11 +16,8 @@ export function DevicesPage() {
   const [page, setPage] = useState(1);
 
   const { devices, loading, error, refetch } = useDevices(limit);
-
-  // Debounce search — filter only fires 300ms after user stops typing
   const debouncedSearch = useDebounce(search, 300);
 
-  // Stable function references — won't break React.memo on DeviceTable
   const handleRefetch = useCallback(async () => {
     try {
       await refetch();
@@ -29,30 +27,16 @@ export function DevicesPage() {
     }
   }, [refetch]);
 
-  const handleSearch = useCallback((val: string) => {
-    setSearch(val);
-    setPage(1);
-  }, []);
+  const handleSearch = useCallback((val: string) => { setSearch(val); setPage(1); }, []);
+  const handleStatus = useCallback((val: StatusFilter) => { setStatusFilter(val); setPage(1); }, []);
+  const handleClear = useCallback(() => { setSearch(""); setStatusFilter("all"); setPage(1); }, []);
 
-  const handleStatus = useCallback((val: StatusFilter) => {
-    setStatusFilter(val);
-    setPage(1);
-  }, []);
-
-  const handleClear = useCallback(() => {
-    setSearch("");
-    setStatusFilter("all");
-    setPage(1);
-  }, []);
-
-  // Stats — memoized separately so they don't recompute on page change
   const stats = useMemo(() => ({
     total: devices.length,
     withTelemetry: devices.filter((d) => d.temperature !== null).length,
     noData: devices.filter((d) => d.temperature === null).length,
   }), [devices]);
 
-  // Filter uses debouncedSearch not raw search
   const filteredDevices = useMemo(() => {
     let result = devices;
     if (debouncedSearch.trim()) {
@@ -81,6 +65,19 @@ export function DevicesPage() {
 
   const isFiltering = search.trim() !== "" || statusFilter !== "all";
 
+  // ← handleExport is NOW after filteredDevices and isFiltering
+  const handleExport = useCallback(() => {
+    if (filteredDevices.length === 0) {
+      toast.error("No devices to export");
+      return;
+    }
+    exportDevicesToCsv(
+      filteredDevices,
+      buildCsvFilename(isFiltering, filteredDevices.length)
+    );
+    toast.success(`Exported ${filteredDevices.length} devices to CSV`);
+  }, [filteredDevices, isFiltering]);
+
   if (error) {
     return (
       <div className="p-8">
@@ -100,7 +97,11 @@ export function DevicesPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Devices</h1>
-          <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">
+          <p
+            className="text-gray-500 dark:text-gray-400 text-sm mt-1"
+            aria-live="polite"
+            aria-atomic="true"
+          >
             {loading
               ? "Loading..."
               : isFiltering
@@ -118,6 +119,14 @@ export function DevicesPage() {
             <option value={100}>Fetch 100</option>
             <option value={200}>Fetch 200</option>
           </select>
+          <button
+            onClick={handleExport}
+            disabled={loading || filteredDevices.length === 0}
+            aria-label={`Export ${filteredDevices.length} devices to CSV`}
+            className="px-4 py-2 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-700 rounded text-sm hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            ↓ Export CSV
+          </button>
           <button
             onClick={handleRefetch}
             className="px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
@@ -155,6 +164,7 @@ export function DevicesPage() {
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">🔍</span>
           <input
             type="text"
+            aria-label="Search devices by serial number or device ID"
             placeholder="Search by serial number or device ID..."
             value={search}
             onChange={(e) => handleSearch(e.target.value)}
@@ -169,6 +179,7 @@ export function DevicesPage() {
         </div>
         <select
           value={statusFilter}
+          aria-label="Filter by telemetry status"
           onChange={(e) => handleStatus(e.target.value as StatusFilter)}
           className="border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
         >
