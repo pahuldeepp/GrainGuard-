@@ -25,7 +25,6 @@ export function DevicesPage() {
     }
   };
 
-  // Step 1 — filter the full list
   const filteredDevices = useMemo(() => {
     let result = devices;
     if (search.trim()) {
@@ -44,7 +43,6 @@ export function DevicesPage() {
     return result;
   }, [devices, search, statusFilter]);
 
-  // Step 2 — slice filtered list into current page
   const totalPages = Math.max(1, Math.ceil(filteredDevices.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const pagedDevices = useMemo(() => {
@@ -52,7 +50,6 @@ export function DevicesPage() {
     return filteredDevices.slice(start, start + PAGE_SIZE);
   }, [filteredDevices, safePage]);
 
-  // Reset to page 1 when filters change
   const handleSearch = (val: string) => { setSearch(val); setPage(1); };
   const handleStatus = (val: StatusFilter) => { setStatusFilter(val); setPage(1); };
   const handleClear = () => { setSearch(""); setStatusFilter("all"); setPage(1); };
@@ -73,9 +70,9 @@ export function DevicesPage() {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-4 md:p-6 max-w-7xl mx-auto">
+      {/* Header — stacks on mobile */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Devices</h1>
           <p className="text-gray-500 text-sm mt-1">
@@ -105,8 +102,8 @@ export function DevicesPage() {
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      {/* Stats — 1 col mobile, 3 col sm+ */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         <div className="bg-white rounded-lg shadow p-4">
           <div className="text-sm text-gray-500">Total Devices</div>
           <div className="text-2xl font-bold text-gray-900 mt-1">
@@ -127,8 +124,8 @@ export function DevicesPage() {
         </div>
       </div>
 
-      {/* Search + Filter */}
-      <div className="flex gap-3 mb-4">
+      {/* Search + filter — stacks on mobile */}
+      <div className="flex flex-col sm:flex-row gap-3 mb-4">
         <div className="relative flex-1">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">
             🔍
@@ -168,31 +165,28 @@ export function DevicesPage() {
         )}
       </div>
 
-      {/* Table */}
-      <DeviceTable devices={pagedDevices} loading={loading} />
+      {/* Table — horizontal scroll on mobile */}
+      <div className="overflow-x-auto rounded-lg">
+        <DeviceTable devices={pagedDevices} loading={loading} />
+      </div>
 
-      {/* Pagination controls */}
+      {/* Pagination */}
       {!loading && filteredDevices.length > PAGE_SIZE && (
-        <div className="flex items-center justify-between mt-4 px-1">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mt-4 px-1">
           <p className="text-sm text-gray-500">
             Showing {((safePage - 1) * PAGE_SIZE) + 1}–{Math.min(safePage * PAGE_SIZE, filteredDevices.length)} of {filteredDevices.length}
           </p>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 flex-wrap">
             <button
               onClick={() => setPage(1)}
               disabled={safePage === 1}
               className="px-2 py-1 text-sm rounded border border-gray-300 disabled:opacity-40 hover:bg-gray-50 disabled:cursor-not-allowed"
-            >
-              «
-            </button>
+            >«</button>
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={safePage === 1}
               className="px-3 py-1 text-sm rounded border border-gray-300 disabled:opacity-40 hover:bg-gray-50 disabled:cursor-not-allowed"
-            >
-              Prev
-            </button>
-            {/* Page number pills */}
+            >Prev</button>
             {Array.from({ length: totalPages }, (_, i) => i + 1)
               .filter((p) => p === 1 || p === totalPages || Math.abs(p - safePage) <= 1)
               .reduce<(number | "...")[]>((acc, p, i, arr) => {
@@ -212,25 +206,19 @@ export function DevicesPage() {
                         ? "bg-green-600 text-white border-green-600"
                         : "border-gray-300 hover:bg-gray-50"
                     }`}
-                  >
-                    {p}
-                  </button>
+                  >{p}</button>
                 )
               )}
             <button
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               disabled={safePage === totalPages}
               className="px-3 py-1 text-sm rounded border border-gray-300 disabled:opacity-40 hover:bg-gray-50 disabled:cursor-not-allowed"
-            >
-              Next
-            </button>
+            >Next</button>
             <button
               onClick={() => setPage(totalPages)}
               disabled={safePage === totalPages}
               className="px-2 py-1 text-sm rounded border border-gray-300 disabled:opacity-40 hover:bg-gray-50 disabled:cursor-not-allowed"
-            >
-              »
-            </button>
+            >»</button>
           </div>
         </div>
       )}

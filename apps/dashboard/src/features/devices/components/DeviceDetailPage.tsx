@@ -13,7 +13,7 @@ export function DeviceDetailPage() {
 
   if (loading) {
     return (
-      <div className="p-6 max-w-3xl mx-auto">
+      <div className="p-4 md:p-6 max-w-3xl mx-auto">
         <Skeleton className="h-8 w-48 mb-6" />
         <div className="bg-white rounded-lg shadow p-6 space-y-4">
           <Skeleton className="h-4 w-64" />
@@ -26,7 +26,7 @@ export function DeviceDetailPage() {
 
   if (error || !device) {
     return (
-      <div className="p-6 max-w-3xl mx-auto">
+      <div className="p-4 md:p-6 max-w-3xl mx-auto">
         <button
           onClick={() => navigate("/")}
           className="text-blue-600 hover:text-blue-800 text-sm mb-6 flex items-center gap-1"
@@ -37,11 +37,7 @@ export function DeviceDetailPage() {
           <EmptyState
             icon="🔍"
             title="Device not found"
-            description={
-              error
-                ? error.message
-                : "This device doesn't exist or you don't have access to it."
-            }
+            description={error ? error.message : "This device doesn't exist or you don't have access to it."}
             action={{ label: "Back to Devices", onClick: () => navigate("/") }}
           />
         </div>
@@ -50,7 +46,7 @@ export function DeviceDetailPage() {
   }
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
+    <div className="p-4 md:p-6 max-w-3xl mx-auto">
       <button
         onClick={() => navigate("/")}
         className="text-blue-600 hover:text-blue-800 text-sm mb-6 flex items-center gap-1"
@@ -59,29 +55,29 @@ export function DeviceDetailPage() {
       </button>
 
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">{device.serialNumber}</h1>
-        <p className="text-gray-500 text-sm mt-1 font-mono">{device.deviceId}</p>
+        <h1 className="text-xl md:text-2xl font-bold text-gray-900">{device.serialNumber}</h1>
+        <p className="text-gray-500 text-sm mt-1 font-mono break-all">{device.deviceId}</p>
       </div>
 
-      <div className="bg-white rounded-lg shadow p-6 mb-6">
+      <div className="bg-white rounded-lg shadow p-4 md:p-6 mb-6">
         <h2 className="text-sm font-semibold text-gray-500 uppercase mb-4">Device Info</h2>
         <div className="space-y-3">
-          <div className="flex justify-between">
+          <div className="flex flex-col sm:flex-row sm:justify-between gap-1">
             <span className="text-gray-600">Serial Number</span>
             <span className="font-medium">{device.serialNumber}</span>
           </div>
-          <div className="flex justify-between">
+          <div className="flex flex-col sm:flex-row sm:justify-between gap-1">
             <span className="text-gray-600">Tenant ID</span>
-            <span className="font-mono text-sm text-gray-500">{device.tenantId}</span>
+            <span className="font-mono text-sm text-gray-500 break-all">{device.tenantId}</span>
           </div>
-          <div className="flex justify-between">
+          <div className="flex flex-col sm:flex-row sm:justify-between gap-1">
             <span className="text-gray-600">Device ID</span>
-            <span className="font-mono text-sm text-gray-500">{device.deviceId}</span>
+            <span className="font-mono text-sm text-gray-500 break-all">{device.deviceId}</span>
           </div>
         </div>
       </div>
 
-      <div className="bg-white rounded-lg shadow p-6 mb-6">
+      <div className="bg-white rounded-lg shadow p-4 md:p-6 mb-6">
         <h2 className="text-sm font-semibold text-gray-500 uppercase mb-4">Latest Telemetry</h2>
         {device.temperature === null ? (
           <EmptyState
@@ -109,7 +105,7 @@ export function DeviceDetailPage() {
         )}
       </div>
 
-      <div className="bg-white rounded-lg shadow p-6">
+      <div className="bg-white rounded-lg shadow p-4 md:p-6">
         <h2 className="text-sm font-semibold text-gray-500 uppercase mb-4">Telemetry History</h2>
         <TelemetryChart history={history} loading={historyLoading} />
       </div>
