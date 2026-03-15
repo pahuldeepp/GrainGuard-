@@ -1,8 +1,6 @@
 import { useAuth0 } from "@auth0/auth0-react";
-
 export function LoginPage() {
   const { loginWithRedirect, isLoading } = useAuth0();
-
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center px-4">
       <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-lg p-8 w-full max-w-md text-center">
