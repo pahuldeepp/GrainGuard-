@@ -6,22 +6,39 @@ import { DevicesPage } from "./features/devices/components/DevicesPage";
 import { DeviceDetailPage } from "./features/devices/components/DeviceDetailPage";
 import { ErrorBoundary } from "./shared/components/ErrorBoundary";
 import { NotFound } from "./shared/components/NotFound";
+import { useDarkMode } from "./hooks/useDarkMode";
 
 function App() {
+  const { isDark, toggle } = useDarkMode();
+
   return (
     <ApolloProvider client={client}>
       <BrowserRouter>
-        <div className="min-h-screen bg-gray-50">
-          <nav className="bg-white border-b border-gray-200 px-4 md:px-6 py-4">
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+          <nav className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-4 md:px-6 py-4">
             <div className="max-w-7xl mx-auto flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-green-600 rounded-lg flex items-center justify-center shrink-0">
                   <span className="text-white text-sm font-bold">G</span>
                 </div>
-                <span className="text-lg font-bold text-gray-900">GrainGuard</span>
+                <span className="text-lg font-bold text-gray-900 dark:text-white">
+                  GrainGuard
+                </span>
               </div>
-              <div className="flex gap-4 md:gap-6 text-sm">
-                <Link to="/" className="text-gray-600 hover:text-gray-900">Devices</Link>
+              <div className="flex items-center gap-4 md:gap-6 text-sm">
+                <Link
+                  to="/"
+                  className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
+                >
+                  Devices
+                </Link>
+                <button
+                  onClick={toggle}
+                  aria-label="Toggle dark mode"
+                  className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                >
+                  {isDark ? "☀️" : "🌙"}
+                </button>
               </div>
             </div>
           </nav>

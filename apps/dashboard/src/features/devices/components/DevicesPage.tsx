@@ -5,7 +5,6 @@ import { EmptyState } from "../../../shared/components/EmptyState";
 import toast from "react-hot-toast";
 
 type StatusFilter = "all" | "with-telemetry" | "no-data";
-
 const PAGE_SIZE = 20;
 
 export function DevicesPage() {
@@ -53,7 +52,6 @@ export function DevicesPage() {
   const handleSearch = (val: string) => { setSearch(val); setPage(1); };
   const handleStatus = (val: StatusFilter) => { setStatusFilter(val); setPage(1); };
   const handleClear = () => { setSearch(""); setStatusFilter("all"); setPage(1); };
-
   const isFiltering = search.trim() !== "" || statusFilter !== "all";
 
   if (error) {
@@ -71,11 +69,11 @@ export function DevicesPage() {
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto">
-      {/* Header — stacks on mobile */}
+      {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Devices</h1>
-          <p className="text-gray-500 text-sm mt-1">
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Devices</h1>
+          <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">
             {loading
               ? "Loading..."
               : isFiltering
@@ -87,7 +85,7 @@ export function DevicesPage() {
           <select
             value={limit}
             onChange={(e) => { setLimit(Number(e.target.value)); setPage(1); }}
-            className="border border-gray-300 rounded px-3 py-2 text-sm"
+            className="border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded px-3 py-2 text-sm"
           >
             <option value={50}>Fetch 50</option>
             <option value={100}>Fetch 100</option>
@@ -102,54 +100,50 @@ export function DevicesPage() {
         </div>
       </div>
 
-      {/* Stats — 1 col mobile, 3 col sm+ */}
+      {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-500">Total Devices</div>
-          <div className="text-2xl font-bold text-gray-900 mt-1">
+        <div className="bg-white dark:bg-gray-900 rounded-lg shadow p-4">
+          <div className="text-sm text-gray-500 dark:text-gray-400">Total Devices</div>
+          <div className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
             {loading ? "—" : devices.length}
           </div>
         </div>
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-500">With Telemetry</div>
+        <div className="bg-white dark:bg-gray-900 rounded-lg shadow p-4">
+          <div className="text-sm text-gray-500 dark:text-gray-400">With Telemetry</div>
           <div className="text-2xl font-bold text-green-600 mt-1">
             {loading ? "—" : devices.filter((d) => d.temperature !== null).length}
           </div>
         </div>
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-500">No Data</div>
+        <div className="bg-white dark:bg-gray-900 rounded-lg shadow p-4">
+          <div className="text-sm text-gray-500 dark:text-gray-400">No Data</div>
           <div className="text-2xl font-bold text-gray-400 mt-1">
             {loading ? "—" : devices.filter((d) => d.temperature === null).length}
           </div>
         </div>
       </div>
 
-      {/* Search + filter — stacks on mobile */}
+      {/* Search + filter */}
       <div className="flex flex-col sm:flex-row gap-3 mb-4">
         <div className="relative flex-1">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">
-            🔍
-          </span>
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">🔍</span>
           <input
             type="text"
             placeholder="Search by serial number or device ID..."
             value={search}
             onChange={(e) => handleSearch(e.target.value)}
-            className="w-full pl-8 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+            className="w-full pl-8 pr-4 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
           />
           {search && (
             <button
               onClick={() => handleSearch("")}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-lg leading-none"
-            >
-              ×
-            </button>
+            >×</button>
           )}
         </div>
         <select
           value={statusFilter}
           onChange={(e) => handleStatus(e.target.value as StatusFilter)}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+          className="border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
         >
           <option value="all">All Status</option>
           <option value="with-telemetry">With Telemetry</option>
@@ -158,14 +152,14 @@ export function DevicesPage() {
         {isFiltering && (
           <button
             onClick={handleClear}
-            className="px-3 py-2 text-sm text-gray-500 hover:text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
+            className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white border border-gray-300 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800"
           >
             Clear
           </button>
         )}
       </div>
 
-      {/* Table — horizontal scroll on mobile */}
+      {/* Table */}
       <div className="overflow-x-auto rounded-lg">
         <DeviceTable devices={pagedDevices} loading={loading} />
       </div>
@@ -173,20 +167,14 @@ export function DevicesPage() {
       {/* Pagination */}
       {!loading && filteredDevices.length > PAGE_SIZE && (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mt-4 px-1">
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
             Showing {((safePage - 1) * PAGE_SIZE) + 1}–{Math.min(safePage * PAGE_SIZE, filteredDevices.length)} of {filteredDevices.length}
           </p>
           <div className="flex items-center gap-1 flex-wrap">
-            <button
-              onClick={() => setPage(1)}
-              disabled={safePage === 1}
-              className="px-2 py-1 text-sm rounded border border-gray-300 disabled:opacity-40 hover:bg-gray-50 disabled:cursor-not-allowed"
-            >«</button>
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={safePage === 1}
-              className="px-3 py-1 text-sm rounded border border-gray-300 disabled:opacity-40 hover:bg-gray-50 disabled:cursor-not-allowed"
-            >Prev</button>
+            <button onClick={() => setPage(1)} disabled={safePage === 1}
+              className="px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-700 dark:text-gray-300 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:cursor-not-allowed">«</button>
+            <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={safePage === 1}
+              className="px-3 py-1 text-sm rounded border border-gray-300 dark:border-gray-700 dark:text-gray-300 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:cursor-not-allowed">Prev</button>
             {Array.from({ length: totalPages }, (_, i) => i + 1)
               .filter((p) => p === 1 || p === totalPages || Math.abs(p - safePage) <= 1)
               .reduce<(number | "...")[]>((acc, p, i, arr) => {
@@ -198,27 +186,18 @@ export function DevicesPage() {
                 p === "..." ? (
                   <span key={`ellipsis-${i}`} className="px-2 text-gray-400">…</span>
                 ) : (
-                  <button
-                    key={p}
-                    onClick={() => setPage(p as number)}
+                  <button key={p} onClick={() => setPage(p as number)}
                     className={`px-3 py-1 text-sm rounded border transition-colors ${
                       safePage === p
                         ? "bg-green-600 text-white border-green-600"
-                        : "border-gray-300 hover:bg-gray-50"
-                    }`}
-                  >{p}</button>
+                        : "border-gray-300 dark:border-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                    }`}>{p}</button>
                 )
               )}
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={safePage === totalPages}
-              className="px-3 py-1 text-sm rounded border border-gray-300 disabled:opacity-40 hover:bg-gray-50 disabled:cursor-not-allowed"
-            >Next</button>
-            <button
-              onClick={() => setPage(totalPages)}
-              disabled={safePage === totalPages}
-              className="px-2 py-1 text-sm rounded border border-gray-300 disabled:opacity-40 hover:bg-gray-50 disabled:cursor-not-allowed"
-            >»</button>
+            <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={safePage === totalPages}
+              className="px-3 py-1 text-sm rounded border border-gray-300 dark:border-gray-700 dark:text-gray-300 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:cursor-not-allowed">Next</button>
+            <button onClick={() => setPage(totalPages)} disabled={safePage === totalPages}
+              className="px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-700 dark:text-gray-300 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:cursor-not-allowed">»</button>
           </div>
         </div>
       )}
