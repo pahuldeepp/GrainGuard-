@@ -3,6 +3,7 @@ import { useDevices } from "../hooks/useDevices";
 import { useDebounce } from "../../../hooks/useDebounce";
 import { DeviceTable } from "./DeviceTable";
 import { EmptyState } from "../../../shared/components/EmptyState";
+import { useTenantContext } from "../../tenancy/TenantContext";
 import toast from "react-hot-toast";
 import { exportDevicesToCsv, buildCsvFilename } from "../../../utils/exportCsv";
 
@@ -13,7 +14,9 @@ export function DevicesPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
+  const { activeTenantId } = useTenantContext();
   const { devices, loading, error, refetch } = useDevices(limit);
+
   const debouncedSearch = useDebounce(search, 300);
 
   const handleRefetch = useCallback(async () => {
@@ -70,11 +73,23 @@ export function DevicesPage() {
     toast.success(`Exported ${filteredDevices.length} devices to CSV`);
   }, [filteredDevices, isFiltering]);
 
+  if (!activeTenantId) {
+    return (
+      <div className="p-8">
+        <EmptyState
+          icon="🏢"
+          title="No tenant assigned"
+          description="Your account is not associated with any tenant. Contact your administrator."
+        />
+      </div>
+    );
+  }
+
   if (error) {
     return (
       <div className="p-8">
         <EmptyState
-          icon="warning"
+          icon="⚠️"
           title="Failed to load devices"
           description={error.message}
           action={{ label: "Retry", onClick: handleRefetch }}
@@ -85,11 +100,20 @@ export function DevicesPage() {
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto">
+      {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Devices</h1>
-          <p className="text-gray-500 dark:text-gray-400 text-sm mt-1" aria-live="polite" aria-atomic="true">
-            {loading ? "Loading..." : isFiltering ? `${filteredDevices.length} of ${stats.total} devices` : `${stats.total} devices`}
+          <p
+            className="text-gray-500 dark:text-gray-400 text-sm mt-1"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            {loading
+              ? "Loading..."
+              : isFiltering
+              ? `${filteredDevices.length} of ${stats.total} devices`
+              : `${stats.total} devices`}
           </p>
         </div>
         <div className="flex gap-3">
@@ -105,9 +129,10 @@ export function DevicesPage() {
           <button
             onClick={handleExport}
             disabled={loading || filteredDevices.length === 0}
+            aria-label={`Export ${filteredDevices.length} devices to CSV`}
             className="px-4 py-2 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-700 rounded text-sm hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
-            Export CSV
+            ↓ Export CSV
           </button>
           <button
             onClick={handleRefetch}
@@ -118,31 +143,46 @@ export function DevicesPage() {
         </div>
       </div>
 
+      {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         <div className="bg-white dark:bg-gray-900 rounded-lg shadow p-4">
           <div className="text-sm text-gray-500 dark:text-gray-400">Total Devices</div>
-          <div className="text-2xl font-bold text-gray-900 dark:text-white mt-1">{loading ? "-" : stats.total}</div>
+          <div className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
+            {loading ? "—" : stats.total}
+          </div>
         </div>
         <div className="bg-white dark:bg-gray-900 rounded-lg shadow p-4">
           <div className="text-sm text-gray-500 dark:text-gray-400">With Telemetry</div>
-          <div className="text-2xl font-bold text-green-600 mt-1">{loading ? "-" : stats.withTelemetry}</div>
+          <div className="text-2xl font-bold text-green-600 mt-1">
+            {loading ? "—" : stats.withTelemetry}
+          </div>
         </div>
         <div className="bg-white dark:bg-gray-900 rounded-lg shadow p-4">
           <div className="text-sm text-gray-500 dark:text-gray-400">No Data</div>
-          <div className="text-2xl font-bold text-gray-400 mt-1">{loading ? "-" : stats.noData}</div>
+          <div className="text-2xl font-bold text-gray-400 mt-1">
+            {loading ? "—" : stats.noData}
+          </div>
         </div>
       </div>
 
+      {/* Search + filter */}
       <div className="flex flex-col sm:flex-row gap-3 mb-4">
         <div className="relative flex-1">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">🔍</span>
           <input
             type="text"
             aria-label="Search devices by serial number or device ID"
             placeholder="Search by serial number or device ID..."
             value={search}
             onChange={(e) => handleSearch(e.target.value)}
-            className="w-full pl-4 pr-4 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+            className="w-full pl-8 pr-4 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
           />
+          {search && (
+            <button
+              onClick={() => handleSearch("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-lg leading-none"
+            >×</button>
+          )}
         </div>
         <select
           aria-label="Filter by telemetry status"
@@ -164,6 +204,7 @@ export function DevicesPage() {
         )}
       </div>
 
+      {/* Table */}
       <div className="overflow-x-auto rounded-lg">
         <DeviceTable devices={filteredDevices} loading={loading} />
       </div>

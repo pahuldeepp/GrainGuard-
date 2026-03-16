@@ -305,8 +305,8 @@ services:
 
   bff:
     build:
-      context: ../../apps/bff
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: apps/bff/Dockerfile
     container_name: grainguard-bff
     ports:
       - "4000:4000"
@@ -319,6 +319,9 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - PORT=4000
+      - JWKS_URL=https://dev-0saa2rbtwuf2j0e8.us.auth0.com/.well-known/jwks.json
+      - JWT_ISSUER=https://dev-0saa2rbtwuf2j0e8.us.auth0.com/
+      - JWT_AUDIENCE=https://api.grainguard.io
     depends_on:
       - postgres-read
       - redis
