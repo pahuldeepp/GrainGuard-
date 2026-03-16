@@ -1,5 +1,10 @@
 import { ApolloServer } from "@apollo/server";
-import { startStandaloneServer } from "@apollo/server/standalone";
+import { expressMiddleware } from "@apollo/server/express4";
+import { ApolloServerPluginDrainHttpServer } from "@apollo/server/plugin/drainHttpServer";
+import express from "express";
+import http from "http";
+import cors from "cors";
+import helmet from "helmet";
 import { GraphQLError } from "graphql";
 import { typeDefs } from "./schema";
 import { resolvers } from "./resolvers";
@@ -8,6 +13,7 @@ import { createRemoteJWKSet, jwtVerify, JWTPayload } from "jose";
 const JWKS_URL = process.env.JWKS_URL!;
 const ISSUER = process.env.JWT_ISSUER!;
 const AUDIENCE = process.env.JWT_AUDIENCE!;
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "http://localhost:5173,http://localhost:5174").split(",");
 
 if (!JWKS_URL || !ISSUER || !AUDIENCE) {
   throw new Error("JWKS_URL, JWT_ISSUER, JWT_AUDIENCE must be set");
@@ -31,49 +37,85 @@ export interface BffContext {
   userId: string;
 }
 
-const server = new ApolloServer<BffContext>({
-  typeDefs,
-  resolvers,
-});
+async function startServer() {
+  const app = express();
+  const httpServer = http.createServer(app);
 
-const PORT = parseInt(process.env.PORT || "4000");
+  app.use(helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+  }));
 
-startStandaloneServer(server, {
-  listen: { port: PORT },
-  context: async ({ req }): Promise<BffContext> => {
-    const authHeader = req.headers.authorization;
+  const server = new ApolloServer<BffContext>({
+    typeDefs,
+    resolvers,
+    plugins: [ApolloServerPluginDrainHttpServer({ httpServer })],
+    introspection: process.env.NODE_ENV !== "production",
+  });
 
-    if (!authHeader?.startsWith("Bearer ")) {
-      throw new GraphQLError("Missing authentication token", {
-        extensions: { code: "UNAUTHENTICATED", http: { status: 401 } },
-      });
-    }
+  await server.start();
 
-    const token = authHeader.substring("Bearer ".length);
+  app.use(
+    "/graphql",
+    cors<cors.CorsRequest>({
+      origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
+        if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+        callback(new Error(`CORS: origin ${origin} not allowed`));
+      },
+      credentials: true,
+    }),
+    express.json({ limit: "10kb" }),
+    expressMiddleware(server, {
+      context: async ({ req }): Promise<BffContext> => {
+        const authHeader = req.headers.authorization;
 
-    try {
-      const payload = await verifyToken(token);
+        if (!authHeader?.startsWith("Bearer ")) {
+          throw new GraphQLError("Missing authentication token", {
+            extensions: { code: "UNAUTHENTICATED", http: { status: 401 } },
+          });
+        }
 
-      const tenantId = payload["https://grainguard/tenant_id"];
-      const userId = payload.sub;
+        const token = authHeader.substring("Bearer ".length);
 
-      if (!tenantId) {
-        throw new GraphQLError("Tenant not found in token", {
-          extensions: { code: "FORBIDDEN", http: { status: 403 } },
-        });
-      }
+        try {
+          const payload = await verifyToken(token);
+          const tenantId = payload["https://grainguard/tenant_id"];
+          const userId = payload.sub;
 
-      return {
-        tenantId: String(tenantId),
-        userId: String(userId || ""),
-      };
-    } catch (err) {
-      if (err instanceof GraphQLError) throw err;
-      throw new GraphQLError("Invalid or expired token", {
-        extensions: { code: "UNAUTHENTICATED", http: { status: 401 } },
-      });
-    }
-  },
-}).then(({ url }) => {
-  console.log(`BFF GraphQL server running at ${url}`);
+          if (!tenantId) {
+            throw new GraphQLError("Tenant not found in token", {
+              extensions: { code: "FORBIDDEN", http: { status: 403 } },
+            });
+          }
+
+          return {
+            tenantId: String(tenantId),
+            userId: String(userId || ""),
+          };
+        } catch (err) {
+          if (err instanceof GraphQLError) throw err;
+          throw new GraphQLError("Invalid or expired token", {
+            extensions: { code: "UNAUTHENTICATED", http: { status: 401 } },
+          });
+        }
+      },
+    })
+  );
+
+  const PORT = parseInt(process.env.PORT || "4000");
+
+  await new Promise<void>((resolve) => httpServer.listen({ port: PORT }, resolve));
+
+  console.log(JSON.stringify({
+    level: "info",
+    service: "bff",
+    message: `BFF GraphQL server running at http://localhost:${PORT}/graphql`,
+    allowedOrigins: ALLOWED_ORIGINS,
+  }));
+}
+
+startServer().catch((err) => {
+  console.error("Failed to start BFF:", err);
+  process.exit(1);
 });
