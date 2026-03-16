@@ -1,5 +1,6 @@
 ﻿import { db } from "./datasources/postgres";
 import { cache } from "./datasources/redis";
+import { pubsub, TELEMETRY_UPDATED, TENANT_TELEMETRY_UPDATED } from "./pubsub";
 import type { BffContext } from "./server";
 
 const TELEMETRY_TTL = 30;
@@ -10,16 +11,12 @@ export const resolvers = {
   Query: {
 
     device: async (_: any, args: { deviceId: string }, ctx: BffContext) => {
-      // Scope cache key by tenant — tenant A never gets tenant B's cache
       const cacheKey = `device:full:${ctx.tenantId}:${args.deviceId}`;
-
       const cached = await cache.get<any>(cacheKey);
       if (cached) return cached;
 
       const row = await db.getDeviceWithTelemetry(args.deviceId);
       if (!row) return null;
-
-      // Enforce tenant isolation — reject if device belongs to different tenant
       if (row.tenant_id !== ctx.tenantId) return null;
 
       const result = {
@@ -39,13 +36,11 @@ export const resolvers = {
 
     devices: async (_: any, args: { limit?: number }, ctx: BffContext) => {
       const limit = args.limit || 20;
-      // Scope cache key by tenant
       const cacheKey = `devices:all:${ctx.tenantId}:${limit}`;
 
       const cached = await cache.get<any[]>(cacheKey);
       if (cached) return cached;
 
-      // Pass tenantId to DB query — filter at database level
       const rows = await db.getAllDevicesWithTelemetry(limit, ctx.tenantId);
 
       const result = rows.map((row: any) => ({
@@ -80,7 +75,6 @@ export const resolvers = {
         const row = await db.getDeviceTelemetry(args.deviceId);
         if (!row) return null;
 
-        // Verify device belongs to this tenant
         const device = await db.getDeviceWithTelemetry(args.deviceId);
         if (!device || device.tenant_id !== ctx.tenantId) return null;
 
@@ -153,7 +147,6 @@ export const resolvers = {
       for (let i = 0; i < missedIds.length; i++) {
         const row = await db.getDeviceTelemetry(missedIds[i]);
         if (row) {
-          // Verify tenant ownership
           const device = await db.getDeviceWithTelemetry(missedIds[i]);
           if (!device || device.tenant_id !== ctx.tenantId) continue;
 
@@ -174,7 +167,6 @@ export const resolvers = {
     },
 
     deviceTelemetryHistory: async (_: any, args: { deviceId: string; limit?: number }, ctx: BffContext) => {
-      // Verify device belongs to tenant before returning history
       const device = await db.getDeviceWithTelemetry(args.deviceId);
       if (!device || device.tenant_id !== ctx.tenantId) return [];
 
@@ -185,6 +177,29 @@ export const resolvers = {
         humidity:    row.humidity,
         recordedAt:  new Date(row.recordedAt).toISOString(),
       }));
+    },
+  },
+
+  Subscription: {
+    telemetryUpdated: {
+      subscribe: (_: any, args: { deviceId: string }, ctx: BffContext) => {
+        return pubsub.asyncIterableIterator(
+          `${TELEMETRY_UPDATED}:${ctx.tenantId}:${args.deviceId}`
+        );
+      },
+      resolve: (payload: any) => payload,
+    },
+
+    tenantTelemetryUpdated: {
+      subscribe: (_: any, args: { tenantId: string }, ctx: BffContext) => {
+        if (args.tenantId !== ctx.tenantId) {
+          throw new Error("Unauthorized: cannot subscribe to another tenant");
+        }
+        return pubsub.asyncIterableIterator(
+          `${TENANT_TELEMETRY_UPDATED}:${ctx.tenantId}`
+        );
+      },
+      resolve: (payload: any) => payload,
     },
   },
 };

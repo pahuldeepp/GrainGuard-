@@ -1,5 +1,4 @@
-export const typeDefs = `#graphql
-
+﻿export const typeDefs = `#graphql
   type Telemetry {
     deviceId:    String!
     temperature: Float
@@ -34,5 +33,10 @@ export const typeDefs = `#graphql
     allTelemetry(limit: Int): [Telemetry!]!
     manyDeviceTelemetry(deviceIds: [String!]!): [Telemetry!]!
     deviceTelemetryHistory(deviceId: String!, limit: Int): [TelemetryHistory!]!
+  }
+
+  type Subscription {
+    telemetryUpdated(deviceId: String!): Telemetry!
+    tenantTelemetryUpdated(tenantId: String!): Telemetry!
   }
 `;
