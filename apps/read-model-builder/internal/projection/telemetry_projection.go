@@ -33,6 +33,7 @@ type TelemetryRecordedEvent struct {
 type parsedEvent struct {
 	eventID     string
 	deviceID    uuid.UUID
+	tenantID    string
 	temperature float64
 	humidity    float64
 	recordedAt  time.Time
@@ -94,6 +95,8 @@ func HandleTelemetry(pool *pgxpool.Pool, redisClient *redis.Client) func([]byte)
 			humidity = *event.Data.Humidity
 		}
 
+		tenantID := event.Data.TenantID
+
 		ctx := context.Background()
 
 		tx, err := pool.Begin(ctx)
@@ -128,44 +131,45 @@ func HandleTelemetry(pool *pgxpool.Pool, redisClient *redis.Client) func([]byte)
 		err = tx.QueryRow(
 			ctx,
 			`INSERT INTO device_telemetry_latest
-			 (device_id, temperature, humidity, recorded_at, version)
-			 VALUES ($1,$2,$3,$4,1)
+			 (device_id, tenant_id, temperature, humidity, recorded_at, version)
+			 VALUES ($1,$2,$3,$4,$5,1)
 			 ON CONFLICT (device_id)
 			 DO UPDATE SET
-			 	temperature = EXCLUDED.temperature,
-			 	humidity = EXCLUDED.humidity,
-			 	recorded_at = EXCLUDED.recorded_at,
-			 	updated_at = NOW(),
-			 	version = device_telemetry_latest.version + 1
+				tenant_id   = EXCLUDED.tenant_id,
+				temperature = EXCLUDED.temperature,
+				humidity    = EXCLUDED.humidity,
+				recorded_at = EXCLUDED.recorded_at,
+				updated_at  = NOW(),
+				version     = device_telemetry_latest.version + 1
 			 WHERE EXCLUDED.recorded_at >= device_telemetry_latest.recorded_at
 			 RETURNING version`,
-			deviceID, temperature, humidity, recordedAt,
+			deviceID, tenantID, temperature, humidity, recordedAt,
 		).Scan(&newVersion)
 
 		if err != nil {
-				observability.EventsRetry.Inc()
-				return err
-			}
+			observability.EventsRetry.Inc()
+			return err
+		}
 
-			// Write to history table for chart queries
-			_, err = tx.Exec(
-				ctx,
-				`INSERT INTO device_telemetry_history
-				 (device_id, temperature, humidity, recorded_at)
-				 VALUES ($1, $2, $3, $4)`,
-				deviceID, temperature, humidity, recordedAt,
-			)
-			if err != nil {
-				observability.EventsRetry.Inc()
-				return err
-			}
+		// Write to history table for chart queries
+		_, err = tx.Exec(
+			ctx,
+			`INSERT INTO device_telemetry_history
+			 (device_id, temperature, humidity, recorded_at)
+			 VALUES ($1, $2, $3, $4)`,
+			deviceID, temperature, humidity, recordedAt,
+		)
+		if err != nil {
+			observability.EventsRetry.Inc()
+			return err
+		}
 
-			if err := tx.Commit(ctx); err != nil {
-				observability.EventsRetry.Inc()
-				return err
-			}
+		if err := tx.Commit(ctx); err != nil {
+			observability.EventsRetry.Inc()
+			return err
+		}
 
-			versionKey := "device:" + deviceID.String()
+		versionKey := "device:" + deviceID.String()
 		dataKey := fmt.Sprintf("device:%s:v%d", deviceID.String(), newVersion)
 
 		cachePayload, _ := json.Marshal(map[string]any{
@@ -245,6 +249,7 @@ func HandleTelemetryBatch(pool *pgxpool.Pool, redisClient *redis.Client) func(co
 			events = append(events, parsedEvent{
 				eventID:     event.EventID,
 				deviceID:    deviceID,
+				tenantID:    event.Data.TenantID,
 				temperature: temperature,
 				humidity:    humidity,
 				recordedAt:  recordedAt,
@@ -306,8 +311,6 @@ func HandleTelemetryBatch(pool *pgxpool.Pool, redisClient *redis.Client) func(co
 		}
 
 		// Deduplicate by deviceID — keep latest recordedAt per device.
-		// Postgres ON CONFLICT DO UPDATE cannot affect the same row twice
-		// in a single statement.
 		deduped := make(map[uuid.UUID]parsedEvent, len(newEvents))
 		for _, e := range newEvents {
 			if existing, ok := deduped[e.deviceID]; !ok || e.recordedAt.After(existing.recordedAt) {
@@ -319,23 +322,24 @@ func HandleTelemetryBatch(pool *pgxpool.Pool, redisClient *redis.Client) func(co
 			dedupedEvents = append(dedupedEvents, e)
 		}
 
-		args := make([]any, 0, len(dedupedEvents)*4)
+		args := make([]any, 0, len(dedupedEvents)*5)
 		valueClauses := make([]string, 0, len(dedupedEvents))
 
 		for i, e := range dedupedEvents {
-			base := i * 4
+			base := i * 5
 			valueClauses = append(valueClauses,
-				fmt.Sprintf("($%d,$%d,$%d,$%d,1)", base+1, base+2, base+3, base+4),
+				fmt.Sprintf("($%d,$%d,$%d,$%d,$%d,1)", base+1, base+2, base+3, base+4, base+5),
 			)
-			args = append(args, e.deviceID, e.temperature, e.humidity, e.recordedAt)
+			args = append(args, e.deviceID, e.tenantID, e.temperature, e.humidity, e.recordedAt)
 		}
 
 		bulkSQL := fmt.Sprintf(`
 			INSERT INTO device_telemetry_latest
-			(device_id, temperature, humidity, recorded_at, version)
+			(device_id, tenant_id, temperature, humidity, recorded_at, version)
 			VALUES %s
 			ON CONFLICT (device_id)
 			DO UPDATE SET
+				tenant_id   = EXCLUDED.tenant_id,
 				temperature = EXCLUDED.temperature,
 				humidity    = EXCLUDED.humidity,
 				recorded_at = EXCLUDED.recorded_at,
@@ -365,31 +369,31 @@ func HandleTelemetryBatch(pool *pgxpool.Pool, redisClient *redis.Client) func(co
 		}
 		rows.Close()
 
-			// Bulk insert into history table
-			historyArgs := make([]any, 0, len(newEvents)*4)
-			historyClauses := make([]string, 0, len(newEvents))
-			for i, e := range newEvents {
-				base := i * 4
-				historyClauses = append(historyClauses,
-					fmt.Sprintf("($%d,$%d,$%d,$%d)", base+1, base+2, base+3, base+4),
-				)
-				historyArgs = append(historyArgs, e.deviceID, e.temperature, e.humidity, e.recordedAt)
-			}
-			historySQL := fmt.Sprintf(
-				`INSERT INTO device_telemetry_history (device_id, temperature, humidity, recorded_at) VALUES %s`,
-				strings.Join(historyClauses, ","),
+		// Bulk insert into history table
+		historyArgs := make([]any, 0, len(newEvents)*4)
+		historyClauses := make([]string, 0, len(newEvents))
+		for i, e := range newEvents {
+			base := i * 4
+			historyClauses = append(historyClauses,
+				fmt.Sprintf("($%d,$%d,$%d,$%d)", base+1, base+2, base+3, base+4),
 			)
-			if _, err := tx.Exec(txCtx, historySQL, historyArgs...); err != nil {
-				observability.EventsRetry.Inc()
-				return err
-			}
+			historyArgs = append(historyArgs, e.deviceID, e.temperature, e.humidity, e.recordedAt)
+		}
+		historySQL := fmt.Sprintf(
+			`INSERT INTO device_telemetry_history (device_id, temperature, humidity, recorded_at) VALUES %s`,
+			strings.Join(historyClauses, ","),
+		)
+		if _, err := tx.Exec(txCtx, historySQL, historyArgs...); err != nil {
+			observability.EventsRetry.Inc()
+			return err
+		}
 
-			if err := tx.Commit(txCtx); err != nil {
-				observability.EventsRetry.Inc()
-				return err
-			}
+		if err := tx.Commit(txCtx); err != nil {
+			observability.EventsRetry.Inc()
+			return err
+		}
 
-			eventByDevice := make(map[uuid.UUID]parsedEvent, len(newEvents))
+		eventByDevice := make(map[uuid.UUID]parsedEvent, len(newEvents))
 		for _, e := range newEvents {
 			eventByDevice[e.deviceID] = e
 		}
