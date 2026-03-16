@@ -1,14 +1,18 @@
-import { ApolloServer } from "@apollo/server";
+﻿import { ApolloServer } from "@apollo/server";
 import { expressMiddleware } from "@apollo/server/express4";
 import { ApolloServerPluginDrainHttpServer } from "@apollo/server/plugin/drainHttpServer";
 import express from "express";
 import http from "http";
 import cors from "cors";
 import helmet from "helmet";
+import { WebSocketServer } from "ws";
+import { useServer } from "graphql-ws/lib/use/ws";
+import { makeExecutableSchema } from "@graphql-tools/utils";
 import { GraphQLError } from "graphql";
 import { typeDefs } from "./schema";
 import { resolvers } from "./resolvers";
 import { createRemoteJWKSet, jwtVerify, JWTPayload } from "jose";
+import { startTelemetryWatcher } from "./telemetryWatcher";
 
 const JWKS_URL = process.env.JWKS_URL!;
 const ISSUER = process.env.JWT_ISSUER!;
@@ -42,14 +46,58 @@ async function startServer() {
   const httpServer = http.createServer(app);
 
   app.use(helmet({
-    contentSecurityPolicy: false,
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:"],
+        connectSrc: ["'self'", "ws://localhost:4000", "wss://localhost:4000"],
+        fontSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        mediaSrc: ["'self'"],
+        frameSrc: ["'none'"],
+      },
+    },
     crossOriginEmbedderPolicy: false,
   }));
 
+  const schema = makeExecutableSchema({ typeDefs, resolvers });
+
+  const wsServer = new WebSocketServer({
+    server: httpServer,
+    path: "/graphql",
+  });
+
+  const serverCleanup = useServer(
+    {
+      schema,
+      context: async (ctx) => {
+        const token = ctx.connectionParams?.authorization as string | undefined;
+        if (!token?.startsWith("Bearer ")) throw new Error("Missing token");
+        const payload = await verifyToken(token.substring("Bearer ".length));
+        const tenantId = payload["https://grainguard/tenant_id"];
+        if (!tenantId) throw new Error("Tenant not found");
+        return { tenantId: String(tenantId), userId: String(payload.sub || "") };
+      },
+    },
+    wsServer
+  );
+
   const server = new ApolloServer<BffContext>({
-    typeDefs,
-    resolvers,
-    plugins: [ApolloServerPluginDrainHttpServer({ httpServer })],
+    schema,
+    plugins: [
+      ApolloServerPluginDrainHttpServer({ httpServer }),
+      {
+        async serverWillStart() {
+          return {
+            async drainServer() {
+              await serverCleanup.dispose();
+            },
+          };
+        },
+      },
+    ],
     introspection: process.env.NODE_ENV !== "production",
   });
 
@@ -107,10 +155,13 @@ async function startServer() {
 
   await new Promise<void>((resolve) => httpServer.listen({ port: PORT }, resolve));
 
+  await startTelemetryWatcher();
+
   console.log(JSON.stringify({
     level: "info",
     service: "bff",
     message: `BFF GraphQL server running at http://localhost:${PORT}/graphql`,
+    websocket: `ws://localhost:${PORT}/graphql`,
     allowedOrigins: ALLOWED_ORIGINS,
   }));
 }
