@@ -11,7 +11,6 @@ const pool = new Pool({
 
 export const db = {
 
-  // Get device metadata from device_projections
   async getDevice(deviceId: string) {
     const result = await pool.query(
       `SELECT device_id, tenant_id, serial_number, created_at
@@ -22,7 +21,6 @@ export const db = {
     return result.rows[0] || null;
   },
 
-  // Get all devices from device_projections
   async getAllDevices(limit: number = 20) {
     const result = await pool.query(
       `SELECT device_id, tenant_id, serial_number, created_at
@@ -34,7 +32,6 @@ export const db = {
     return result.rows;
   },
 
-  // Get latest telemetry for one device
   async getDeviceTelemetry(deviceId: string) {
     const result = await pool.query(
       `SELECT device_id, temperature, humidity, recorded_at, updated_at, version
@@ -45,8 +42,19 @@ export const db = {
     return result.rows[0] || null;
   },
 
-  // Get all devices telemetry
-  async getAllTelemetry(limit: number = 20) {
+  async getAllTelemetry(limit: number = 20, tenantId?: string) {
+    if (tenantId) {
+      const result = await pool.query(
+        `SELECT t.device_id, t.temperature, t.humidity, t.recorded_at, t.updated_at, t.version
+         FROM device_telemetry_latest t
+         INNER JOIN device_projections d ON d.device_id = t.device_id
+         WHERE d.tenant_id = $1
+         ORDER BY t.updated_at DESC
+         LIMIT $2`,
+        [tenantId, limit]
+      );
+      return result.rows;
+    }
     const result = await pool.query(
       `SELECT device_id, temperature, humidity, recorded_at, updated_at, version
        FROM device_telemetry_latest
@@ -57,8 +65,6 @@ export const db = {
     return result.rows;
   },
 
-  // JOIN both tables — device metadata + latest telemetry
-  // This is the core BFF query: one call, two sources combined
   async getDeviceWithTelemetry(deviceId: string) {
     const result = await pool.query(
       `SELECT
@@ -80,25 +86,44 @@ export const db = {
   },
 
   async getTelemetryHistory(deviceId: string, limit = 50) {
-  const result = await pool.query(
-    `SELECT device_id, temperature, humidity, recorded_at
-     FROM device_telemetry_history
-     WHERE device_id = $1
-     ORDER BY recorded_at ASC
-     LIMIT $2`,
-    [deviceId, limit]
-  );
-  return result.rows.map((r) => ({
-    deviceId: r.device_id,
-    temperature: r.temperature,
-    humidity: r.humidity,
-    recordedAt: r.recorded_at,
-  }));
+    const result = await pool.query(
+      `SELECT device_id, temperature, humidity, recorded_at
+       FROM device_telemetry_history
+       WHERE device_id = $1
+       ORDER BY recorded_at ASC
+       LIMIT $2`,
+      [deviceId, limit]
+    );
+    return result.rows.map((r) => ({
+      deviceId:    r.device_id,
+      temperature: r.temperature,
+      humidity:    r.humidity,
+      recordedAt:  r.recorded_at,
+    }));
   },
 
-
-  // Get all devices with their latest telemetry
-  async getAllDevicesWithTelemetry(limit: number = 20) {
+  async getAllDevicesWithTelemetry(limit: number = 20, tenantId?: string) {
+    if (tenantId) {
+      const result = await pool.query(
+        `SELECT
+           d.device_id,
+           d.tenant_id,
+           d.serial_number,
+           d.created_at,
+           t.temperature,
+           t.humidity,
+           t.recorded_at,
+           t.version
+         FROM device_projections d
+         LEFT JOIN device_telemetry_latest t
+           ON d.device_id = t.device_id
+         WHERE d.tenant_id = $1
+         ORDER BY d.created_at DESC
+         LIMIT $2`,
+        [tenantId, limit]
+      );
+      return result.rows;
+    }
     const result = await pool.query(
       `SELECT
          d.device_id,

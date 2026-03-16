@@ -1,27 +1,26 @@
-import { db } from "./datasources/postgres";
+﻿import { db } from "./datasources/postgres";
 import { cache } from "./datasources/redis";
+import type { BffContext } from "./server";
 
 const TELEMETRY_TTL = 30;
-const DEVICE_TTL = 300; // 5 minutes — device metadata changes rarely
+const DEVICE_TTL = 300;
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export const resolvers = {
   Query: {
 
-    // Queries device_projections + device_telemetry_latest in one JOIN
-    // This is what makes the BFF powerful — one GraphQL call, two DB tables
-    device: async (_: any, args: { deviceId: string }) => {
-      const cacheKey = `device:full:${args.deviceId}`;
+    device: async (_: any, args: { deviceId: string }, ctx: BffContext) => {
+      // Scope cache key by tenant — tenant A never gets tenant B's cache
+      const cacheKey = `device:full:${ctx.tenantId}:${args.deviceId}`;
 
       const cached = await cache.get<any>(cacheKey);
-      if (cached) {
-        console.log(`Cache HIT for ${cacheKey}`);
-        return cached;
-      }
+      if (cached) return cached;
 
-      console.log(`Cache MISS for ${cacheKey} - querying Postgres`);
       const row = await db.getDeviceWithTelemetry(args.deviceId);
       if (!row) return null;
+
+      // Enforce tenant isolation — reject if device belongs to different tenant
+      if (row.tenant_id !== ctx.tenantId) return null;
 
       const result = {
         deviceId:     row.device_id,
@@ -38,19 +37,16 @@ export const resolvers = {
       return result;
     },
 
-    // All devices with telemetry
-    devices: async (_: any, args: { limit?: number }) => {
+    devices: async (_: any, args: { limit?: number }, ctx: BffContext) => {
       const limit = args.limit || 20;
-      const cacheKey = `devices:all:${limit}`;
+      // Scope cache key by tenant
+      const cacheKey = `devices:all:${ctx.tenantId}:${limit}`;
 
       const cached = await cache.get<any[]>(cacheKey);
-      if (cached) {
-        console.log(`Cache HIT for ${cacheKey}`);
-        return cached;
-      }
+      if (cached) return cached;
 
-      console.log(`Cache MISS for ${cacheKey} - querying Postgres`);
-      const rows = await db.getAllDevicesWithTelemetry(limit);
+      // Pass tenantId to DB query — filter at database level
+      const rows = await db.getAllDevicesWithTelemetry(limit, ctx.tenantId);
 
       const result = rows.map((row: any) => ({
         deviceId:     row.device_id,
@@ -67,15 +63,11 @@ export const resolvers = {
       return result;
     },
 
-    // Telemetry only
-    deviceTelemetry: async (_: any, args: { deviceId: string }) => {
-      const cacheKey = `telemetry:device:${args.deviceId}`;
+    deviceTelemetry: async (_: any, args: { deviceId: string }, ctx: BffContext) => {
+      const cacheKey = `telemetry:device:${ctx.tenantId}:${args.deviceId}`;
 
       const cached = await cache.get<any>(cacheKey);
-      if (cached) {
-        console.log(`Cache HIT for ${cacheKey}`);
-        return cached;
-      }
+      if (cached) return cached;
 
       const lockAcquired = await cache.acquireLock(cacheKey, 5);
       if (!lockAcquired) {
@@ -85,9 +77,12 @@ export const resolvers = {
       }
 
       try {
-        console.log(`Cache MISS for ${cacheKey} - querying Postgres`);
         const row = await db.getDeviceTelemetry(args.deviceId);
         if (!row) return null;
+
+        // Verify device belongs to this tenant
+        const device = await db.getDeviceWithTelemetry(args.deviceId);
+        if (!device || device.tenant_id !== ctx.tenantId) return null;
 
         const result = {
           deviceId:    row.device_id,
@@ -105,15 +100,12 @@ export const resolvers = {
       }
     },
 
-    allTelemetry: async (_: any, args: { limit?: number }) => {
+    allTelemetry: async (_: any, args: { limit?: number }, ctx: BffContext) => {
       const limit = args.limit || 20;
-      const cacheKey = `telemetry:all:${limit}`;
+      const cacheKey = `telemetry:all:${ctx.tenantId}:${limit}`;
 
       const cached = await cache.get<any[]>(cacheKey);
-      if (cached) {
-        console.log(`Cache HIT for ${cacheKey}`);
-        return cached;
-      }
+      if (cached) return cached;
 
       const lockAcquired = await cache.acquireLock(cacheKey, 5);
       if (!lockAcquired) {
@@ -123,8 +115,7 @@ export const resolvers = {
       }
 
       try {
-        console.log(`Cache MISS for ${cacheKey} - querying Postgres`);
-        const rows = await db.getAllTelemetry(limit);
+        const rows = await db.getAllTelemetry(limit, ctx.tenantId);
 
         const result = rows.map((row: any) => ({
           deviceId:    row.device_id,
@@ -142,8 +133,8 @@ export const resolvers = {
       }
     },
 
-    manyDeviceTelemetry: async (_: any, args: { deviceIds: string[] }) => {
-      const keys = args.deviceIds.map(id => `telemetry:device:${id}`);
+    manyDeviceTelemetry: async (_: any, args: { deviceIds: string[] }, ctx: BffContext) => {
+      const keys = args.deviceIds.map(id => `telemetry:device:${ctx.tenantId}:${id}`);
       const cachedResults = await cache.getMany<any>(keys);
 
       const results: any[] = [];
@@ -162,6 +153,10 @@ export const resolvers = {
       for (let i = 0; i < missedIds.length; i++) {
         const row = await db.getDeviceTelemetry(missedIds[i]);
         if (row) {
+          // Verify tenant ownership
+          const device = await db.getDeviceWithTelemetry(missedIds[i]);
+          if (!device || device.tenant_id !== ctx.tenantId) continue;
+
           const result = {
             deviceId:    row.device_id,
             temperature: row.temperature,
@@ -177,7 +172,12 @@ export const resolvers = {
 
       return results.filter(Boolean);
     },
-    deviceTelemetryHistory: async (_: any, args: { deviceId: string; limit?: number }) => {
+
+    deviceTelemetryHistory: async (_: any, args: { deviceId: string; limit?: number }, ctx: BffContext) => {
+      // Verify device belongs to tenant before returning history
+      const device = await db.getDeviceWithTelemetry(args.deviceId);
+      if (!device || device.tenant_id !== ctx.tenantId) return [];
+
       const rows = await db.getTelemetryHistory(args.deviceId, args.limit ?? 50);
       return rows.map((row: any) => ({
         deviceId:    row.deviceId,
