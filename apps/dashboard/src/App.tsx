@@ -22,6 +22,7 @@ function AppInner() {
 
   useEffect(() => {
     setGetAccessTokenSilently(getAccessTokenSilently);
+    (window as any).__getToken = getAccessTokenSilently; // dev only — remove after testing
   }, [getAccessTokenSilently]);
 
   return (
