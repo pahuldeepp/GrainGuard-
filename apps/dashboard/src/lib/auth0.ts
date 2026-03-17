@@ -8,3 +8,4 @@ export async function getAccessTokenSilently(options?: any): Promise<string> {
   if (!_getToken) throw new Error("Auth0 not initialized");
   return _getToken(options);
 }
+(window as any).__getToken = getAccessTokenSilently;

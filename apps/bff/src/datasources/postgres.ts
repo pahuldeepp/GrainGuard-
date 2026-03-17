@@ -1,14 +1,13 @@
 ﻿import { Pool } from "pg";
 
 const pool = new Pool({
-  host:     process.env.READ_DB_HOST     || "localhost",
-  port:     parseInt(process.env.READ_DB_PORT || "5433"),
+  host:     process.env.READ_DB_HOST     || "postgres-read",
+  port:     parseInt(process.env.READ_DB_PORT || "5432"),
   database: process.env.READ_DB_NAME     || "grainguard_read",
   user:     process.env.READ_DB_USER     || "postgres",
   password: process.env.READ_DB_PASSWORD || "postgres",
   max: 10,
 });
-
 export const db = {
 
   async getDevice(deviceId: string) {

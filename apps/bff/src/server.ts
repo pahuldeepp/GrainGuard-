@@ -7,7 +7,7 @@ import cors from "cors";
 import helmet from "helmet";
 import { WebSocketServer } from "ws";
 import { useServer } from "graphql-ws/lib/use/ws";
-import { makeExecutableSchema } from "@graphql-tools/utils";
+import { makeExecutableSchema } from "@graphql-tools/schema";
 import { GraphQLError } from "graphql";
 import { typeDefs } from "./schema";
 import { resolvers } from "./resolvers";
@@ -17,8 +17,9 @@ import { startTelemetryWatcher } from "./telemetryWatcher";
 const JWKS_URL = process.env.JWKS_URL!;
 const ISSUER = process.env.JWT_ISSUER!;
 const AUDIENCE = process.env.JWT_AUDIENCE!;
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "http://localhost:5173,http://localhost:5174").split(",");
-
+const ALLOWED_ORIGINS =
+  (process.env.ALLOWED_ORIGINS ||
+    "http://localhost:5173,http://localhost:8086").split(",");
 if (!JWKS_URL || !ISSUER || !AUDIENCE) {
   throw new Error("JWKS_URL, JWT_ISSUER, JWT_AUDIENCE must be set");
 }
@@ -52,7 +53,11 @@ async function startServer() {
         scriptSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", "data:"],
-        connectSrc: ["'self'", "ws://localhost:4000", "wss://localhost:4000"],
+        connectSrc: [
+          "'self'",
+          "http://localhost:8086",
+          "ws://localhost:8086",
+        ],
         fontSrc: ["'self'"],
         objectSrc: ["'none'"],
         mediaSrc: ["'self'"],
@@ -72,7 +77,7 @@ async function startServer() {
   const serverCleanup = useServer(
     {
       schema,
-      context: async (ctx) => {
+      context: async (ctx: Record<string, any>) => {
         const token = ctx.connectionParams?.authorization as string | undefined;
         if (!token?.startsWith("Bearer ")) throw new Error("Missing token");
         const payload = await verifyToken(token.substring("Bearer ".length));

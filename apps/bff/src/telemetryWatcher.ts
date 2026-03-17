@@ -1,13 +1,18 @@
 ﻿import { Client } from "pg";
 import { pubsub, TELEMETRY_UPDATED, TENANT_TELEMETRY_UPDATED } from "./pubsub";
 
-const WRITE_DB_URL = process.env.WRITE_DB_URL ||
-  "postgres://postgres:postgres@localhost:5433/grainguard_read";
+const READ_DB_URL =
+  process.env.READ_DATABASE_URL ||
+  "postgres://postgres:postgres@postgres-read:5432/grainguard_read";
 
 export async function startTelemetryWatcher() {
-  const client = new Client({ connectionString: WRITE_DB_URL });
+  const client = new Client({
+    connectionString: READ_DB_URL,
+  });
 
   await client.connect();
+
+  console.log("TelemetryWatcher DB connected");
 
   await client.query(`
     CREATE OR REPLACE FUNCTION notify_telemetry_update()
@@ -32,7 +37,7 @@ export async function startTelemetryWatcher() {
 
   await client.query(`
     DROP TRIGGER IF EXISTS telemetry_update_trigger
-      ON device_telemetry_latest;
+    ON device_telemetry_latest;
 
     CREATE TRIGGER telemetry_update_trigger
     AFTER INSERT OR UPDATE ON device_telemetry_latest
@@ -48,38 +53,32 @@ export async function startTelemetryWatcher() {
       const data = JSON.parse(msg.payload);
 
       const telemetry = {
-        deviceId:    data.device_id,
+        deviceId: data.device_id,
         temperature: data.temperature,
-        humidity:    data.humidity,
-        recordedAt:  data.recorded_at,
-        updatedAt:   data.updated_at,
-        version:     data.version,
+        humidity: data.humidity,
+        recordedAt: data.recorded_at,
+        updatedAt: data.updated_at,
+        version: data.version,
       };
 
-      // Publish to device-specific subscribers
       pubsub.publish(
         `${TELEMETRY_UPDATED}:${data.tenant_id}:${data.device_id}`,
         telemetry
       );
 
-      // Publish to tenant-wide subscribers
       pubsub.publish(
         `${TENANT_TELEMETRY_UPDATED}:${data.tenant_id}`,
         telemetry
       );
 
     } catch (err) {
-      console.error("[telemetry-watcher] Failed to parse notification:", err);
+      console.error("[telemetry-watcher] parse error:", err);
     }
   });
 
   client.on("error", (err) => {
-    console.error("[telemetry-watcher] Postgres error:", err);
+    console.error("[telemetry-watcher] postgres error:", err);
   });
 
-  console.log(JSON.stringify({
-    level: "info",
-    service: "bff",
-    message: "Telemetry watcher started — listening for Postgres NOTIFY",
-  }));
+  console.log("Telemetry watcher started — LISTEN telemetry_updated");
 }
