@@ -11,7 +11,7 @@ import (
 
 /*
 RBAC policy:
-- Enforce per-method scopes
+- Enforce per-method scopes OR admin role
 - Enforce tenant isolation
 */
 
@@ -43,10 +43,10 @@ func RBACUnaryInterceptor() grpc.UnaryServerInterceptor {
 			}
 		}
 
-		// ✅ 3. Scope enforcement
+		// ✅ 3. Scope enforcement — admin role bypasses scope requirement
 		requiredScopes := methodScopes[info.FullMethod]
 		if len(requiredScopes) > 0 {
-			if !hasAnyScope(auth.Scopes, requiredScopes) {
+			if !isAdmin(auth.Roles) && !hasAnyScope(auth.Scopes, requiredScopes) {
 				return nil, status.Error(codes.PermissionDenied, "missing_required_scope")
 			}
 		}
@@ -55,18 +55,24 @@ func RBACUnaryInterceptor() grpc.UnaryServerInterceptor {
 	}
 }
 
+func isAdmin(roles []string) bool {
+	for _, r := range roles {
+		if r == "admin" {
+			return true
+		}
+	}
+	return false
+}
+
 func hasAnyScope(userScopes []string, required []string) bool {
 	scopeSet := make(map[string]struct{}, len(userScopes))
 	for _, s := range userScopes {
 		scopeSet[s] = struct{}{}
 	}
-
 	for _, r := range required {
 		if _, ok := scopeSet[r]; ok {
 			return true
 		}
 	}
-
 	return false
 }
-

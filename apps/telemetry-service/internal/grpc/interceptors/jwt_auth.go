@@ -2,7 +2,6 @@ package interceptors
 
 import (
 	"context"
-	
 	"strings"
 	"time"
 
@@ -22,6 +21,7 @@ type AuthInfo struct {
 }
 
 type ctxKey string
+
 const authInfoKey ctxKey = "authInfo"
 
 func GetAuthInfo(ctx context.Context) (*AuthInfo, bool) {
@@ -83,7 +83,7 @@ func (v *JWTVerifier) UnaryAuthInterceptor() grpc.UnaryServerInterceptor {
 		claims := jwt.MapClaims{}
 
 		parser := jwt.Parser{
-			ValidMethods: []string{"RS256"}, // enforce alg
+			ValidMethods: []string{"RS256"},
 		}
 
 		tok, err := parser.ParseWithClaims(tokenStr, claims, v.JWKS.Keyfunc)
@@ -97,7 +97,7 @@ func (v *JWTVerifier) UnaryAuthInterceptor() grpc.UnaryServerInterceptor {
 			return nil, status.Error(codes.Unauthenticated, "invalid issuer")
 		}
 
-		// ✅ Audience check (Keycloak can be string OR array)
+		// ✅ Audience check
 		if v.Audience != "" && !audMatches(claims["aud"], v.Audience) {
 			return nil, status.Error(codes.Unauthenticated, "invalid audience")
 		}
@@ -105,7 +105,7 @@ func (v *JWTVerifier) UnaryAuthInterceptor() grpc.UnaryServerInterceptor {
 		// Extract sub
 		sub, _ := claims["sub"].(string)
 
-		// tenant_id
+		// tenant_id — check standard claim first, then Auth0 namespaced
 		tenantID, _ := claims["tenant_id"].(string)
 		if tenantID == "" {
 			if ns, ok := claims["https://grainguard/tenant_id"].(string); ok {
@@ -122,12 +122,22 @@ func (v *JWTVerifier) UnaryAuthInterceptor() grpc.UnaryServerInterceptor {
 			scopes = strings.Fields(scopeStr)
 		}
 
-		// roles (optional)
+		// roles — check standard claim first, then Auth0 namespaced
 		var roles []string
 		if rs, ok := claims["roles"].([]any); ok {
 			for _, r := range rs {
 				if s, ok := r.(string); ok {
 					roles = append(roles, s)
+				}
+			}
+		}
+		// Auth0 namespaced roles fallback
+		if len(roles) == 0 {
+			if rs, ok := claims["https://ledgerflow.api/roles"].([]any); ok {
+				for _, r := range rs {
+					if s, ok := r.(string); ok {
+						roles = append(roles, s)
+					}
 				}
 			}
 		}

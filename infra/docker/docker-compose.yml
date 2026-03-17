@@ -159,9 +159,10 @@ services:
     environment:
       WRITE_DB_URL: postgres://postgres:postgres@postgres:5432/grainguard?sslmode=disable
       KAFKA_BROKERS: kafka:9092
-      JWKS_URL: http://keycloak:8080/realms/grainguard/protocol/openid-connect/certs
-      JWT_ISSUER: http://keycloak:8080/realms/grainguard
-      JWT_AUDIENCE: grainguard-gateway
+      JWKS_URL: https://dev-0saa2rbtwuf2j0e8.us.auth0.com/.well-known/jwks.json
+      JWT_ISSUER: https://dev-0saa2rbtwuf2j0e8.us.auth0.com/
+      JWT_AUDIENCE: https://api.grainguard.io
+      AUTH_ENABLED: "true"
       OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
 
     depends_on:
@@ -311,11 +312,7 @@ services:
     ports:
       - "4000:4000"
     environment:
-      - READ_DB_HOST=postgres-read
-      - READ_DB_PORT=5432
-      - READ_DB_NAME=grainguard_read
-      - READ_DB_USER=postgres
-      - READ_DB_PASSWORD=postgres
+      - READ_DATABASE_URL=postgres://postgres:postgres@postgres-read:5432/grainguard_read
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - PORT=4000
@@ -346,17 +343,22 @@ services:
       REDIS_PORT: "6379"
       READ_DATABASE_URL: postgres://postgres:postgres@postgres-read:5432/grainguard_read?sslmode=disable
       GRPC_TARGET: telemetry-service:50051
-      JWKS_URL: http://keycloak:8080/realms/grainguard/protocol/openid-connect/certs
-      JWT_ISSUER: http://keycloak:8080/realms/grainguard
-      JWT_AUDIENCE: grainguard-gateway
+      JWKS_URL: https://dev-0saa2rbtwuf2j0e8.us.auth0.com/.well-known/jwks.json
+      JWT_ISSUER: https://dev-0saa2rbtwuf2j0e8.us.auth0.com/
+      JWT_AUDIENCE: https://api.grainguard.io
+      AUTH_ENABLED: "true"
       OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
 
     depends_on:
-      - redis
-      - postgres-read
-      - kafka
-      - telemetry-service
-      - keycloak
+      
+      redis:
+        condition: service_started
+      postgres-read:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      telemetry-service:
+        condition: service_started
 
     ports:
       - "8086:3000"
