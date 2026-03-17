@@ -1,0 +1,10 @@
+node_modules
+.git
+.gitignore
+dist
+coverage
+*.log
+.env
+apps/dashboard
+apps/frontend
+apps/admin
