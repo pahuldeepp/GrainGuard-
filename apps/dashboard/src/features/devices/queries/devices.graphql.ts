@@ -36,3 +36,4 @@ export const GET_DEVICE = gql`
     }
   }
 `;
+export const SEARCH_DEVICES = gql;

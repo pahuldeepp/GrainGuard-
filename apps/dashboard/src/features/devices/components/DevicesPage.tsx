@@ -1,5 +1,5 @@
 ﻿import { useState, useMemo, useCallback } from "react";
-import { useDevices } from "../hooks/useDevices";
+import { useDevices, useSearchDevices } from "../hooks/useDevices";
 import { useDebounce } from "../../../hooks/useDebounce";
 import { DeviceTable } from "./DeviceTable";
 import { EmptyState } from "../../../shared/components/EmptyState";
@@ -16,6 +16,10 @@ export function DevicesPage() {
 
   const { activeTenantId } = useTenantContext();
   const { devices, loading, error, refetch } = useDevices(limit);
+  const { results: searchResults, loading: searchLoading } = useSearchDevices(debouncedSearch);
+  
+  // Use ES search results when query is active, otherwise use local devices
+  const isSearching = debouncedSearch.trim().length >= 2;
 
   const debouncedSearch = useDebounce(search, 300);
 
@@ -42,22 +46,17 @@ export function DevicesPage() {
   }), [devices]);
 
   const filteredDevices = useMemo(() => {
-    let result = devices;
-    if (debouncedSearch.trim()) {
-      const q = debouncedSearch.toLowerCase();
-      result = result.filter(
-        (d) =>
-          d.serialNumber.toLowerCase().includes(q) ||
-          d.deviceId.toLowerCase().includes(q)
-      );
-    }
+    // Use Elasticsearch results when query is long enough
+    let result = isSearching ? searchResults : devices;
+    
+    // Status filter still applied on top of ES results
     if (statusFilter === "with-telemetry") {
       result = result.filter((d) => d.temperature !== null);
     } else if (statusFilter === "no-data") {
       result = result.filter((d) => d.temperature === null);
     }
     return result;
-  }, [devices, debouncedSearch, statusFilter]);
+  }, [devices, searchResults, isSearching, statusFilter]);
 
   const isFiltering = search.trim() !== "" || statusFilter !== "all";
 
