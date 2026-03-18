@@ -1,0 +1,21 @@
+{
+  "name": "grainguard-jobs-worker",
+  "version": "1.0.0",
+  "description": "RabbitMQ jobs worker for email, webhooks, and exports",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts"
+  },
+  "dependencies": {
+    "amqplib": "^0.10.3",
+    "axios": "^1.6.0",
+    "dotenv": "^16.0.0"
+  },
+  "devDependencies": {
+    "@types/amqplib": "^0.10.4",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

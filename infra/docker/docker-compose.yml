@@ -262,9 +262,11 @@ services:
       - JWKS_URL=https://dev-0saa2rbtwuf2j0e8.us.auth0.com/.well-known/jwks.json
       - JWT_ISSUER=https://dev-0saa2rbtwuf2j0e8.us.auth0.com/
       - JWT_AUDIENCE=https://api.grainguard.io
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
     depends_on:
       - postgres-read
       - redis
+      - elasticsearch
     networks:
       - grainguard-net
 
@@ -459,6 +461,21 @@ services:
       kafka:
         condition: service_healthy
       elasticsearch:
+        condition: service_healthy
+    networks:
+      - grainguard-net
+
+
+  jobs-worker:
+    build:
+      context: ../..
+      dockerfile: apps/jobs-worker/Dockerfile
+    container_name: grainguard-jobs-worker
+    restart: unless-stopped
+    environment:
+      RABBITMQ_URL: amqp://grainguard:grainguard@rabbitmq:5672/grainguard
+    depends_on:
+      rabbitmq:
         condition: service_healthy
     networks:
       - grainguard-net
