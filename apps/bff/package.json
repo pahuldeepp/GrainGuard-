@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@apollo/server": "^4.13.0",
+    "@elastic/elasticsearch": "^9.3.4",
     "@graphql-tools/schema": "^10.0.31",
     "@graphql-tools/utils": "^11.0.0",
     "cors": "^2.8.6",

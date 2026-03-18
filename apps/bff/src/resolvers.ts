@@ -1,4 +1,5 @@
 ﻿import { db } from "./datasources/postgres";
+import { search } from "./datasources/elasticsearch";
 import { cache } from "./datasources/redis";
 import { pubsub, TELEMETRY_UPDATED, TENANT_TELEMETRY_UPDATED } from "./pubsub";
 import type { BffContext } from "./server";
@@ -180,6 +181,12 @@ export const resolvers = {
     },
   },
 
+    searchDevices: async (_: any, args: { query: string; limit?: number }, ctx: BffContext) => {
+      const q = (args.query || "").trim();
+      if (q.length < 2) return [];
+      return search.searchDevices(q, ctx.tenantId, args.limit || 20);
+    },
+  },
   Subscription: {
     telemetryUpdated: {
       subscribe: (_: any, args: { deviceId: string }, ctx: BffContext) => {

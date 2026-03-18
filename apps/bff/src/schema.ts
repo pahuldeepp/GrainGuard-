@@ -26,6 +26,17 @@
     recordedAt:  String!
   }
 
+  type SearchResult {
+    deviceId:     String
+    tenantId:     String
+    serialNumber: String
+    temperature:  Float
+    humidity:     Float
+    recordedAt:   String
+    status:       String
+    score:        Float
+  }
+
   type Query {
     device(deviceId: String!): Device
     devices(limit: Int): [Device!]!
@@ -33,6 +44,7 @@
     allTelemetry(limit: Int): [Telemetry!]!
     manyDeviceTelemetry(deviceIds: [String!]!): [Telemetry!]!
     deviceTelemetryHistory(deviceId: String!, limit: Int): [TelemetryHistory!]!
+    searchDevices(query: String!, limit: Int): [SearchResult!]!
   }
 
   type Subscription {
