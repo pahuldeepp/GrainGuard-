@@ -15,13 +15,12 @@ export function DevicesPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
   const { activeTenantId } = useTenantContext();
+  const debouncedSearch = useDebounce(search, 300);
   const { devices, loading, error, refetch } = useDevices(limit);
   const { results: searchResults, loading: searchLoading } = useSearchDevices(debouncedSearch);
   
   // Use ES search results when query is active, otherwise use local devices
   const isSearching = debouncedSearch.trim().length >= 2;
-
-  const debouncedSearch = useDebounce(search, 300);
 
   const handleRefetch = useCallback(async () => {
     try {
