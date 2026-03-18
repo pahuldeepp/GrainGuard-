@@ -9,7 +9,7 @@ const DEVICE_INDEX = "grainguard-devices";
 export const search = {
   async searchDevices(query: string, tenantId: string, limit = 20) {
     try {
-      const result = await es.search({
+      const params = {
         index: DEVICE_INDEX,
         size: limit,
         query: {
@@ -18,17 +18,22 @@ export const search = {
               {
                 multi_match: {
                   query,
-                  fields: ["serial_number^3", "serial_number.keyword", "device_id"],
+                  fields: ["serial_number", "device_id"],
                   fuzziness: "AUTO",
                 },
               },
             ],
             filter: [
-              { term: { tenant_id: tenantId } },
+              {
+                term: { tenant_id: tenantId },
+              },
             ],
           },
         },
-      });
+      };
+      console.log("[ES] searching:", JSON.stringify(params));
+      const result = await (es.search as any)(params);
+      console.log("[ES] hits:", result.hits.total);
 
       return result.hits.hits.map((hit: any) => ({
         deviceId:     hit._source.device_id,
@@ -40,8 +45,8 @@ export const search = {
         status:       hit._source.status ?? null,
         score:        hit._score,
       }));
-    } catch (err) {
-      console.error("[elasticsearch] searchDevices error:", err);
+    } catch (err: any) {
+      console.error("[ES] error:", err?.meta?.body?.error || err?.message || err);
       return [];
     }
   },
