@@ -179,8 +179,6 @@ export const resolvers = {
         recordedAt:  new Date(row.recordedAt).toISOString(),
       }));
     },
-  },
-
     searchDevices: async (_: any, args: { query: string; limit?: number }, ctx: BffContext) => {
       const q = (args.query || "").trim();
       if (q.length < 2) return [];

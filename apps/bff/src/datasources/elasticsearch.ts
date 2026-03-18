@@ -11,23 +11,21 @@ export const search = {
     try {
       const result = await es.search({
         index: DEVICE_INDEX,
-        body: {
-          size: limit,
-          query: {
-            bool: {
-              must: [
-                {
-                  multi_match: {
-                    query,
-                    fields: ["serial_number^3", "serial_number.keyword", "device_id"],
-                    fuzziness: "AUTO",
-                  },
+        size: limit,
+        query: {
+          bool: {
+            must: [
+              {
+                multi_match: {
+                  query,
+                  fields: ["serial_number^3", "serial_number.keyword", "device_id"],
+                  fuzziness: "AUTO",
                 },
-              ],
-              filter: [
-                { term: { tenant_id: tenantId } },
-              ],
-            },
+              },
+            ],
+            filter: [
+              { term: { tenant_id: tenantId } },
+            ],
           },
         },
       });
