@@ -36,4 +36,18 @@ export const GET_DEVICE = gql`
     }
   }
 `;
-export const SEARCH_DEVICES = gql;
+
+export const SEARCH_DEVICES = gql`
+  query SearchDevices($query: String!, $limit: Int) {
+    searchDevices(query: $query, limit: $limit) {
+      deviceId
+      tenantId
+      serialNumber
+      temperature
+      humidity
+      recordedAt
+      status
+      score
+    }
+  }
+`;
