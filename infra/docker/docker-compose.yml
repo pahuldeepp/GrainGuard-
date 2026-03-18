@@ -443,6 +443,27 @@ services:
     networks:
       - grainguard-net
 
+  search-indexer:
+    build:
+      context: ../..
+      dockerfile: apps/search-indexer/Dockerfile
+    container_name: grainguard-search-indexer
+    restart: unless-stopped
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      TELEMETRY_TOPIC: telemetry.events
+      DEVICE_TOPIC: device.events
+      KAFKA_GROUP_ID: search-indexer
+    depends_on:
+      kafka:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - grainguard-net
+
+
 volumes:
   pgdata:
   pgdata_read:
