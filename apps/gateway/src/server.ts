@@ -12,6 +12,7 @@ import { requestIdMiddleware } from "./middleware/requestId";
 import { authMiddleware } from "./middleware/auth";
 import { apiRateLimiter } from "./middleware/rateLimiting";
 import { validate, createDeviceSchema, deviceIdParamSchema } from "./middleware/validation";
+import { apiVersionMiddleware } from "./middleware/apiVersion";
 
 const app = express();
 
@@ -63,6 +64,7 @@ app.use(
 );
 
 app.use(requestIdMiddleware);
+app.use(apiVersionMiddleware);
 
 /**
  * Latency metric
