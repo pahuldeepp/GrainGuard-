@@ -11,6 +11,7 @@ import { metricsHandler, requestLatency } from "./observability/metrics";
 import { requestIdMiddleware } from "./middleware/requestId";
 import { authMiddleware } from "./middleware/auth";
 import { apiRateLimiter } from "./middleware/rateLimiting";
+import { validate, createDeviceSchema, deviceIdParamSchema } from "./middleware/validation";
 
 const app = express();
 
@@ -131,6 +132,7 @@ app.post(
   express.json({ limit: "10kb" }),
   apiRateLimiter,
   authMiddleware,
+  validate(createDeviceSchema, "body"),
   async (req: Request, res: Response) => {
     try {
       const { serialNumber } = req.body;
@@ -165,6 +167,7 @@ app.get(
   "/devices/:deviceId/latest",
   apiRateLimiter,
   authMiddleware,
+  validate(deviceIdParamSchema, "params"),
   async (req: Request, res: Response) => {
     try {
       const data = await getDeviceLatestTelemetry(req.params.deviceId);
