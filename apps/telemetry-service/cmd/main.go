@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -13,9 +12,11 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/jackc/pgx/v5/pgxpool"
-
+	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 
 	devicepb "github.com/pahuldeepp/grainguard/libs/proto"
 
@@ -25,9 +26,8 @@ import (
 	"github.com/pahuldeepp/grainguard/apps/telemetry-service/internal/repository"
 	"github.com/pahuldeepp/grainguard/apps/telemetry-service/migrations"
 	"github.com/pahuldeepp/grainguard/libs/health"
+	"github.com/pahuldeepp/grainguard/libs/logger"
 	libmigrate "github.com/pahuldeepp/grainguard/libs/migrate"
-
-	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 )
 
 func envBool(key string, def bool) bool {
@@ -39,28 +39,24 @@ func envBool(key string, def bool) bool {
 }
 
 func main() {
+	logger.Init("telemetry-service")
+
 	ctx := context.Background()
 
-	/* =======================================================
-	   🔐 mTLS CONFIGURATION (Service Identity)
-	======================================================= */
-
-	serverCert, err := tls.LoadX509KeyPair(
-		"/certs/telemetry-server.crt",
-		"/certs/telemetry-server.key",
-	)
+	// mTLS
+	serverCert, err := tls.LoadX509KeyPair("/certs/telemetry-server.crt", "/certs/telemetry-server.key")
 	if err != nil {
-		log.Fatal("Failed to load server certificate:", err)
+		log.Fatal().Err(err).Msg("failed to load server certificate")
 	}
 
 	caCert, err := os.ReadFile("/certs/ca.crt")
 	if err != nil {
-		log.Fatal("Failed to read CA certificate:", err)
+		log.Fatal().Err(err).Msg("failed to read CA certificate")
 	}
 
 	certPool := x509.NewCertPool()
 	if !certPool.AppendCertsFromPEM(caCert) {
-		log.Fatal("Failed to append CA certificate")
+		log.Fatal().Msg("failed to append CA certificate")
 	}
 
 	tlsConfig := &tls.Config{
@@ -69,13 +65,9 @@ func main() {
 		ClientAuth:   tls.RequireAndVerifyClientCert,
 		MinVersion:   tls.VersionTLS13,
 	}
-
 	creds := credentials.NewTLS(tlsConfig)
 
-	/* =======================================================
-	   🗄️ DATABASE
-	======================================================= */
-
+	// Database
 	dbURL := os.Getenv("WRITE_DB_URL")
 	if dbURL == "" {
 		dbURL = "postgres://postgres:postgres@postgres:5432/grainguard?sslmode=disable"
@@ -83,129 +75,90 @@ func main() {
 
 	pool, err := pgxpool.New(ctx, dbURL)
 	if err != nil {
-		log.Fatal("DB connection failed:", err)
+		log.Fatal().Err(err).Msg("DB connection failed")
 	}
 	defer pool.Close()
 
-	/* =======================================================
-	   📦 MIGRATIONS — run before anything else touches the DB
-	   Schema must exist before repositories are used.
-	   Already-applied migrations are skipped automatically.
-	   Embedded via //go:embed so no files needed at runtime.
-	======================================================= */
-
+	// Migrations
 	if err := libmigrate.Up(dbURL, migrations.FS, "grainguard"); err != nil {
-		log.Fatalf("migration failed: %v", err)
+		log.Fatal().Err(err).Msg("migration failed")
 	}
 
-	/* =======================================================
-	   📦 REPOSITORIES
-	======================================================= */
-
-	deviceRepo := repository.NewPostgresDeviceRepository(pool)
+	// Repositories
+	deviceRepo    := repository.NewPostgresDeviceRepository(pool)
 	telemetryRepo := repository.NewPostgresTelemetryRepository(pool)
-	outboxRepo := repository.NewPostgresOutboxRepository(pool)
+	outboxRepo    := repository.NewPostgresOutboxRepository(pool)
 
-	/* =======================================================
-	   🧠 APPLICATION SERVICES
-	======================================================= */
+	// Application services
+	createDeviceService    := application.NewCreateDeviceService(deviceRepo)
+	recordTelemetryService := application.NewRecordTelemetryService(pool, telemetryRepo, outboxRepo)
 
-	createDeviceService := application.NewCreateDeviceService(deviceRepo)
-	recordTelemetryService := application.NewRecordTelemetryService(
-		pool,
-		telemetryRepo,
-		outboxRepo,
-	)
-
-	/* =======================================================
-	   🔑 JWT CONFIG (User Identity via OAuth / JWKS)
-	   ✅ Toggle with AUTH_ENABLED
-	======================================================= */
-
-	authEnabled := envBool("AUTH_ENABLED", false) // default OFF for local
+	// Auth
+	authEnabled := envBool("AUTH_ENABLED", false)
 
 	var jwtVerifier *interceptors.JWTVerifier
 	if authEnabled {
-		jwksURL := os.Getenv("JWKS_URL")
-		issuer := os.Getenv("JWT_ISSUER")
+		jwksURL  := os.Getenv("JWKS_URL")
+		issuer   := os.Getenv("JWT_ISSUER")
 		audience := os.Getenv("JWT_AUDIENCE")
 
 		if jwksURL == "" || issuer == "" || audience == "" {
-			log.Fatal("AUTH_ENABLED=true but JWKS_URL / JWT_ISSUER / JWT_AUDIENCE not set")
+			log.Fatal().Msg("AUTH_ENABLED=true but JWKS_URL / JWT_ISSUER / JWT_AUDIENCE not set")
 		}
 
 		v, err := interceptors.NewJWTVerifier(jwksURL, issuer, audience)
 		if err != nil {
-			log.Fatal("Failed to initialize JWKS verifier:", err)
+			log.Fatal().Err(err).Msg("failed to initialize JWKS verifier")
 		}
 		jwtVerifier = v
-		log.Println("Authentication ENABLED (JWT + RBAC)")
+		log.Info().Msg("authentication ENABLED (JWT + RBAC)")
 	} else {
-		log.Println("Authentication DISABLED (skipping JWKS/JWT/RBAC)")
+		log.Info().Msg("authentication DISABLED (skipping JWKS/JWT/RBAC)")
 	}
 
-	/* =======================================================
-	   🚀 gRPC SERVER (mTLS + optional JWT/RBAC + OTel)
-	======================================================= */
-
+	// gRPC server
 	lis, err := net.Listen("tcp", ":50051")
 	if err != nil {
-		log.Fatal("Failed to listen:", err)
+		log.Fatal().Err(err).Msg("failed to listen on :50051")
 	}
 
 	var grpcServer *grpc.Server
-
 	if authEnabled && jwtVerifier != nil {
 		grpcServer = grpc.NewServer(
-			grpc.Creds(creds),                                    // ✅ mTLS enforced
-			grpc.StatsHandler(otelgrpc.NewServerHandler()),       // ✅ tracing
+			grpc.Creds(creds),
+			grpc.StatsHandler(otelgrpc.NewServerHandler()),
 			grpc.ChainUnaryInterceptor(
-				jwtVerifier.UnaryAuthInterceptor(), // ✅ JWT auth
-				interceptors.RBACUnaryInterceptor(), // ✅ RBAC
+				jwtVerifier.UnaryAuthInterceptor(),
+				interceptors.RBACUnaryInterceptor(),
 			),
 		)
 	} else {
 		grpcServer = grpc.NewServer(
-			grpc.Creds(creds),                              // ✅ still mTLS
-			grpc.StatsHandler(otelgrpc.NewServerHandler()), // ✅ still tracing
-			// no JWT / RBAC interceptors
+			grpc.Creds(creds),
+			grpc.StatsHandler(otelgrpc.NewServerHandler()),
 		)
 	}
 
-	devicepb.RegisterDeviceServiceServer(
-		grpcServer,
-		grpcserver.NewDeviceServer(createDeviceService),
-	)
+	devicepb.RegisterDeviceServiceServer(grpcServer, grpcserver.NewDeviceServer(createDeviceService))
 
 	go func() {
-		log.Println("gRPC server running on :50051 (mTLS enforced)")
+		log.Info().Str("addr", ":50051").Msg("gRPC server running (mTLS enforced)")
 		if err := grpcServer.Serve(lis); err != nil {
-			log.Fatal(err)
+			log.Fatal().Err(err).Msg("gRPC server failed")
 		}
 	}()
 
-	/* =======================================================
-	   🏥 HEALTH CHECK SERVER
-	   :8081 — dedicated port for K8s liveness/readiness probes
-	   /healthz/live  → liveness  (K8s restarts pod if this fails)
-	   /healthz/ready → readiness (K8s stops routing if this fails)
-	======================================================= */
-
-	healthHandler := health.NewHandler(
-		health.NewPostgresChecker(pool),
-	)
+	// Health check server
+	healthHandler := health.NewHandler(health.NewPostgresChecker(pool))
 	healthSrv := health.NewServer(":8081", healthHandler)
 	go func() {
-		log.Println("health server listening on :8081")
+		log.Info().Str("addr", ":8081").Msg("health server listening")
 		if err := healthSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("health server error: %v", err)
+			log.Error().Err(err).Msg("health server error")
 		}
 	}()
 
-	/* =======================================================
-	   🌐 HTTP SERVER (DEV ONLY — bypasses gRPC auth)
-	======================================================= */
-
+	// HTTP server (dev only)
 	r := mux.NewRouter()
 
 	r.HandleFunc("/devices", func(w http.ResponseWriter, r *http.Request) {
@@ -213,19 +166,17 @@ func main() {
 			TenantID string `json:"tenant_id"`
 			Serial   string `json:"serial"`
 		}
-
 		var req Request
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-
 		device, err := createDeviceService.Execute(ctx, req.TenantID, req.Serial)
 		if err != nil {
+			log.Error().Err(err).Str("tenant_id", req.TenantID).Msg("create device failed")
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(device)
 	}).Methods("POST")
@@ -236,26 +187,21 @@ func main() {
 			Temperature float64 `json:"temperature"`
 			Humidity    float64 `json:"humidity"`
 		}
-
 		var req Request
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-
-		if err := recordTelemetryService.Execute(
-			ctx,
-			req.DeviceID,
-			req.Temperature,
-			req.Humidity,
-		); err != nil {
+		if err := recordTelemetryService.Execute(ctx, req.DeviceID, req.Temperature, req.Humidity); err != nil {
+			log.Error().Err(err).Str("device_id", req.DeviceID).Msg("record telemetry failed")
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
 		w.WriteHeader(http.StatusCreated)
 	}).Methods("POST")
 
-	log.Println("HTTP server running on :8080 (DEV ONLY)")
-	log.Fatal(http.ListenAndServe(":8080", r))
+	log.Info().Str("addr", ":8080").Msg("HTTP server running (DEV ONLY)")
+	if err := http.ListenAndServe(":8080", r); err != nil {
+		log.Fatal().Err(err).Msg("HTTP server failed")
+	}
 }

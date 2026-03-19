@@ -1,99 +1,99 @@
 package main
 
 import (
-    "context"
-    "log"
-    "net/http"
-    "os"
-    "os/signal"
-    "syscall"
-    "time"
+	"context"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
-    "github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rs/zerolog/log"
 
-    "github.com/pahuldeepp/grainguard/apps/saga-orchestrator/internal/consumer"
-    "github.com/pahuldeepp/grainguard/apps/saga-orchestrator/internal/orchestrator"
-    "github.com/pahuldeepp/grainguard/apps/saga-orchestrator/internal/producer"
-    "github.com/pahuldeepp/grainguard/apps/saga-orchestrator/internal/recovery"
-    "github.com/pahuldeepp/grainguard/apps/saga-orchestrator/internal/repository"
-    "github.com/pahuldeepp/grainguard/apps/saga-orchestrator/migrations"
-    "github.com/pahuldeepp/grainguard/libs/health"
-    libmigrate "github.com/pahuldeepp/grainguard/libs/migrate"
+	"github.com/pahuldeepp/grainguard/apps/saga-orchestrator/internal/consumer"
+	"github.com/pahuldeepp/grainguard/apps/saga-orchestrator/internal/orchestrator"
+	"github.com/pahuldeepp/grainguard/apps/saga-orchestrator/internal/producer"
+	"github.com/pahuldeepp/grainguard/apps/saga-orchestrator/internal/recovery"
+	"github.com/pahuldeepp/grainguard/apps/saga-orchestrator/internal/repository"
+	"github.com/pahuldeepp/grainguard/apps/saga-orchestrator/migrations"
+	"github.com/pahuldeepp/grainguard/libs/health"
+	"github.com/pahuldeepp/grainguard/libs/logger"
+	libmigrate "github.com/pahuldeepp/grainguard/libs/migrate"
 )
 
 func mustEnv(key, fallback string) string {
-    v := os.Getenv(key)
-    if v == "" {
-        return fallback
-    }
-    return v
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	return v
 }
 
 func main() {
-    ctx, stop := signal.NotifyContext(
-        context.Background(),
-        os.Interrupt,
-        syscall.SIGTERM,
-    )
-    defer stop()
+	logger.Init("saga-orchestrator")
 
-    dbURL := mustEnv(
-        "SAGA_DB_URL",
-        "postgres://postgres:postgres@localhost:5432/grainguard?sslmode=disable",
-    )
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-    pool, err := pgxpool.New(ctx, dbURL)
-    if err != nil {
-        log.Fatal("failed to connect to db:", err)
-    }
-    defer pool.Close()
+	dbURL := mustEnv("SAGA_DB_URL", "postgres://postgres:postgres@localhost:5432/grainguard?sslmode=disable")
 
-    if err := libmigrate.Up(dbURL, migrations.FS, "grainguard"); err != nil {
-        log.Fatalf("migration failed: %v", err)
-    }
+	pool, err := pgxpool.New(ctx, dbURL)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to connect to db")
+	}
+	defer pool.Close()
 
-    eventsTopic := mustEnv("SAGA_EVENTS_TOPIC", "device.events")
-    groupID := mustEnv("SAGA_CONSUMER_GROUP", "saga-orchestrator")
-    commandsTopic := mustEnv("SAGA_COMMANDS_TOPIC", "device.commands")
+	if err := libmigrate.Up(dbURL, migrations.FS, "grainguard"); err != nil {
+		log.Fatal().Err(err).Msg("migration failed")
+	}
 
-    kafkaConsumer := consumer.NewKafkaConsumerFromEnv(eventsTopic, groupID)
-    cmdProducer := producer.NewProducerFromEnv(commandsTopic)
-    defer cmdProducer.Close()
+	eventsTopic   := mustEnv("SAGA_EVENTS_TOPIC", "device.events")
+	groupID       := mustEnv("SAGA_CONSUMER_GROUP", "saga-orchestrator")
+	commandsTopic := mustEnv("SAGA_COMMANDS_TOPIC", "device.commands")
+	kafkaBrokers  := mustEnv("KAFKA_BROKERS", "kafka:9092")
 
-    repo := repository.NewPostgresSagaRepository(pool)
-    provision := orchestrator.NewProvisionSaga(repo, cmdProducer)
+	kafkaConsumer := consumer.NewKafkaConsumerFromEnv(eventsTopic, groupID)
+	cmdProducer   := producer.NewProducerFromEnv(commandsTopic)
+	defer cmdProducer.Close()
 
-    recoveryWorker := recovery.NewRecoveryWorker(pool, cmdProducer)
-    go recoveryWorker.Start(ctx)
+	repo      := repository.NewPostgresSagaRepository(pool)
+	provision := orchestrator.NewProvisionSaga(repo, cmdProducer)
 
-    log.Println("saga-orchestrator starting... topic:", eventsTopic)
+	recoveryWorker := recovery.NewRecoveryWorker(pool, cmdProducer)
+	go recoveryWorker.Start(ctx)
 
-    go kafkaConsumer.Start(ctx, func(handlerCtx context.Context, b []byte) error {
-        return provision.HandleEvent(handlerCtx, b)
-    })
+	log.Info().
+		Str("topic", eventsTopic).
+		Str("group_id", groupID).
+		Msg("saga-orchestrator starting")
 
-    healthHandler := health.NewHandler(
-        health.NewPostgresChecker(pool),
-        health.NewKafkaChecker(mustEnv("KAFKA_BROKERS", "kafka:9092")),
-    )
-    healthSrv := health.NewServer(":8081", healthHandler)
-    go func() {
-        log.Println("health server listening on :8081")
-        if err := healthSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-            log.Printf("health server error: %v", err)
-        }
-    }()
+	go kafkaConsumer.Start(ctx, func(handlerCtx context.Context, b []byte) error {
+		return provision.HandleEvent(handlerCtx, b)
+	})
 
-    <-ctx.Done()
-    log.Println("shutting down gracefully...")
+	healthHandler := health.NewHandler(
+		health.NewPostgresChecker(pool),
+		health.NewKafkaChecker(kafkaBrokers),
+	)
+	healthSrv := health.NewServer(":8081", healthHandler)
 
-    shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-    defer cancel()
-    if err := healthSrv.Shutdown(shutdownCtx); err != nil {
-        log.Printf("health server shutdown error: %v", err)
-    }
-    log.Println("health server stopped")
+	go func() {
+		log.Info().Str("addr", ":8081").Msg("health server listening")
+		if err := healthSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Error().Err(err).Msg("health server error")
+		}
+	}()
 
-    time.Sleep(300 * time.Millisecond)
-    log.Println("saga-orchestrator stopped")
+	<-ctx.Done()
+	log.Info().Msg("shutting down gracefully")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := healthSrv.Shutdown(shutdownCtx); err != nil {
+		log.Error().Err(err).Msg("health server shutdown error")
+	}
+
+	log.Info().Msg("saga-orchestrator stopped")
 }

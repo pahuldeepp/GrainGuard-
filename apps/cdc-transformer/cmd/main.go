@@ -3,16 +3,17 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	"github.com/segmentio/kafka-go"
 
 	"github.com/pahuldeepp/grainguard/apps/cdc-transformer/internal/transform"
+	"github.com/pahuldeepp/grainguard/libs/logger"
 )
 
 const (
@@ -45,6 +46,8 @@ func brokersFromEnv(raw string) []string {
 }
 
 func main() {
+	logger.Init("cdc-transformer")
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -54,27 +57,19 @@ func main() {
 	groupID := mustEnv("KAFKA_GROUP_ID", "cdc-transformer")
 
 	reader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers: brokers,
-		GroupID: groupID,
-		Topic:   sourceTopic,
-
-		// Bigger fetches = far fewer round trips
-		MinBytes: 10e3, // 10 KB
-		MaxBytes: 10e6, // 10 MB
-		MaxWait:  500 * time.Millisecond,
-
-		// Keep first offset only for brand new consumer groups
-		StartOffset: kafka.FirstOffset,
-
-		// Queue a little more on the client side
-		QueueCapacity: 1000,
-
-		// We will commit in batches ourselves
+		Brokers:        brokers,
+		GroupID:        groupID,
+		Topic:          sourceTopic,
+		MinBytes:       10e3,
+		MaxBytes:       10e6,
+		MaxWait:        500 * time.Millisecond,
+		StartOffset:    kafka.FirstOffset,
+		QueueCapacity:  1000,
 		CommitInterval: 0,
 	})
 	defer func() {
 		if err := reader.Close(); err != nil {
-			log.Printf("reader close error: %v", err)
+			log.Error().Err(err).Msg("reader close error")
 		}
 	}()
 
@@ -82,28 +77,27 @@ func main() {
 		Addr:         kafka.TCP(brokers...),
 		Topic:        targetTopic,
 		RequiredAcks: kafka.RequireAll,
-
-		// Keep synchronous delivery for safety, but batch it
-		Async: false,
-
-		Balancer: &kafka.Hash{},
-
+		Async:        false,
+		Balancer:     &kafka.Hash{},
 		BatchSize:    batchSize,
 		BatchTimeout: 50 * time.Millisecond,
-
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}
 	defer func() {
 		if err := writer.Close(); err != nil {
-			log.Printf("writer close error: %v", err)
+			log.Error().Err(err).Msg("writer close error")
 		}
 	}()
 
-	log.Printf(
-		"cdc-transformer started source=%s target=%s brokers=%v group=%s batchSize=%d flushInterval=%s",
-		sourceTopic, targetTopic, brokers, groupID, batchSize, flushInterval,
-	)
+	log.Info().
+		Str("source_topic", sourceTopic).
+		Str("target_topic", targetTopic).
+		Strs("brokers", brokers).
+		Str("group_id", groupID).
+		Int("batch_size", batchSize).
+		Dur("flush_interval", flushInterval).
+		Msg("cdc-transformer started")
 
 	var (
 		sourceMsgs []kafka.Message
@@ -119,27 +113,23 @@ func main() {
 		if len(outMsgs) == 0 {
 			return
 		}
-
 		if err := writer.WriteMessages(ctx, outMsgs...); err != nil {
-			log.Printf("batch produce error count=%d err=%v", len(outMsgs), err)
+			log.Error().Err(err).Int("count", len(outMsgs)).Msg("batch produce error")
 			return
 		}
-
 		if err := reader.CommitMessages(ctx, sourceMsgs...); err != nil {
-			log.Printf("batch commit error count=%d err=%v", len(sourceMsgs), err)
+			log.Error().Err(err).Int("count", len(sourceMsgs)).Msg("batch commit error")
 			return
 		}
-
 		processed += len(sourceMsgs)
-
 		if processed%logEvery == 0 || len(sourceMsgs) >= batchSize {
 			last := sourceMsgs[len(sourceMsgs)-1]
-			log.Printf(
-				"batch transformed committed=%d total_processed=%d last_offset=%d",
-				len(sourceMsgs), processed, last.Offset,
-			)
+			log.Info().
+				Int("committed", len(sourceMsgs)).
+				Int("total_processed", processed).
+				Int64("last_offset", last.Offset).
+				Msg("batch transformed")
 		}
-
 		sourceMsgs = sourceMsgs[:0]
 		outMsgs = outMsgs[:0]
 	}
@@ -147,7 +137,7 @@ func main() {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("cdc-transformer shutting down")
+			log.Info().Msg("cdc-transformer shutting down")
 			flush()
 			return
 
@@ -161,22 +151,25 @@ func main() {
 					flush()
 					return
 				}
-				log.Printf("fetch error: %v", err)
+				log.Error().Err(err).Msg("fetch error")
 				time.Sleep(500 * time.Millisecond)
 				continue
 			}
 
 			evt, err := transform.TransformTelemetry(msg.Value, msg.Topic, msg.Partition, msg.Offset)
 			if err != nil {
-				// Skip tombstones / malformed envelopes / non-data events
-				log.Printf(
-					"transform skip topic=%s partition=%d offset=%d err=%v",
-					msg.Topic, msg.Partition, msg.Offset, err,
-				)
+				log.Warn().
+					Err(err).
+					Str("topic", msg.Topic).
+					Int("partition", msg.Partition).
+					Int64("offset", msg.Offset).
+					Msg("transform skip")
 
 				if commitErr := reader.CommitMessages(ctx, msg); commitErr != nil {
-					log.Printf("commit skip error topic=%s partition=%d offset=%d err=%v",
-						msg.Topic, msg.Partition, msg.Offset, commitErr)
+					log.Error().
+						Err(commitErr).
+						Int64("offset", msg.Offset).
+						Msg("commit skip error")
 				}
 				skipped++
 				continue
@@ -184,10 +177,10 @@ func main() {
 
 			payload, err := transform.MarshalTelemetry(evt)
 			if err != nil {
-				log.Printf(
-					"marshal error topic=%s partition=%d offset=%d err=%v",
-					msg.Topic, msg.Partition, msg.Offset, err,
-				)
+				log.Error().
+					Err(err).
+					Int64("offset", msg.Offset).
+					Msg("marshal error")
 				continue
 			}
 
@@ -209,7 +202,10 @@ func main() {
 			}
 
 			if skipped > 0 && (processed+skipped)%logEvery == 0 {
-				log.Printf("progress processed=%d skipped=%d", processed, skipped)
+				log.Info().
+					Int("processed", processed).
+					Int("skipped", skipped).
+					Msg("progress")
 			}
 		}
 	}
