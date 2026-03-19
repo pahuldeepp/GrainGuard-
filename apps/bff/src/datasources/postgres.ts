@@ -13,7 +13,7 @@ const pool = new Pool({
 
 // Circuit-breaker-wrapped query helper
 async function cbQuery(text: string, values?: any[]): Promise<import("pg").QueryResult<any>> {
-  return postgresCircuitBreaker.execute(() => cbQuery(text, values));
+  return postgresCircuitBreaker.execute(() => pool.query(text, values));
 }
 
 export const db = {
