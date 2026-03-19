@@ -14,6 +14,7 @@ import { typeDefs } from "./schema";
 import { resolvers } from "./resolvers";
 import { createRemoteJWKSet, jwtVerify, JWTPayload } from "jose";
 import { startTelemetryWatcher } from "./telemetryWatcher";
+import { postgresCircuitBreaker } from "./lib/circuitBreaker";
 
 const JWKS_URL = process.env.JWKS_URL!;
 const ISSUER = process.env.JWT_ISSUER!;

@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import { postgresCircuitBreaker } from "../lib/circuitBreaker";
 
 const pool = new Pool({
   host:     process.env.READ_DB_HOST     || "postgres-read",
@@ -9,10 +10,16 @@ const pool = new Pool({
   max: 10,
 });
 
+
+// Circuit-breaker-wrapped query helper
+async function cbQuery(text: string, values?: any[]): Promise<import("pg").QueryResult<any>> {
+  return postgresCircuitBreaker.execute(() => cbQuery(text, values));
+}
+
 export const db = {
 
   async getDevice(deviceId: string) {
-    const result = await pool.query(
+    const result = await cbQuery(
       `SELECT device_id, tenant_id, serial_number, created_at
        FROM device_projections
        WHERE device_id = $1`,
@@ -22,7 +29,7 @@ export const db = {
   },
 
   async getAllDevices(limit: number = 20) {
-    const result = await pool.query(
+    const result = await cbQuery(
       `SELECT device_id, tenant_id, serial_number, created_at
        FROM device_projections
        ORDER BY created_at DESC
@@ -33,7 +40,7 @@ export const db = {
   },
 
   async getDeviceTelemetry(deviceId: string) {
-    const result = await pool.query(
+    const result = await cbQuery(
       `SELECT device_id, temperature, humidity, recorded_at, updated_at, version
        FROM device_telemetry_latest
        WHERE device_id = $1`,
@@ -44,7 +51,7 @@ export const db = {
 
   async getAllTelemetry(limit: number = 20, tenantId?: string) {
     if (tenantId) {
-      const result = await pool.query(
+      const result = await cbQuery(
         `SELECT t.device_id, t.temperature, t.humidity, t.recorded_at, t.updated_at, t.version
          FROM device_telemetry_latest t
          INNER JOIN device_projections d ON d.device_id = t.device_id
@@ -55,7 +62,7 @@ export const db = {
       );
       return result.rows;
     }
-    const result = await pool.query(
+    const result = await cbQuery(
       `SELECT device_id, temperature, humidity, recorded_at, updated_at, version
        FROM device_telemetry_latest
        ORDER BY updated_at DESC
@@ -66,7 +73,7 @@ export const db = {
   },
 
   async getDeviceWithTelemetry(deviceId: string) {
-    const result = await pool.query(
+    const result = await cbQuery(
       `SELECT
          d.device_id,
          d.tenant_id,
@@ -86,7 +93,7 @@ export const db = {
   },
 
   async getTelemetryHistory(deviceId: string, limit = 50) {
-    const result = await pool.query(
+    const result = await cbQuery(
       `SELECT device_id, temperature, humidity, recorded_at
        FROM device_telemetry_history
        WHERE device_id = $1
@@ -104,7 +111,7 @@ export const db = {
 
   async getAllDevicesWithTelemetry(limit: number = 20, tenantId?: string) {
     if (tenantId) {
-      const result = await pool.query(
+      const result = await cbQuery(
         `SELECT
            d.device_id,
            d.tenant_id,
@@ -124,7 +131,7 @@ export const db = {
       );
       return result.rows;
     }
-    const result = await pool.query(
+    const result = await cbQuery(
       `SELECT
          d.device_id,
          d.tenant_id,
@@ -158,7 +165,7 @@ export const db = {
     let rows: any[];
 
     if (tenantId && afterTimestamp) {
-      const result = await pool.query(
+      const result = await cbQuery(
         `SELECT d.device_id, d.tenant_id, d.serial_number, d.created_at,
                 t.temperature, t.humidity, t.recorded_at, t.version
          FROM device_projections d
@@ -170,7 +177,7 @@ export const db = {
       );
       rows = result.rows;
     } else if (tenantId) {
-      const result = await pool.query(
+      const result = await cbQuery(
         `SELECT d.device_id, d.tenant_id, d.serial_number, d.created_at,
                 t.temperature, t.humidity, t.recorded_at, t.version
          FROM device_projections d
@@ -182,7 +189,7 @@ export const db = {
       );
       rows = result.rows;
     } else {
-      const result = await pool.query(
+      const result = await cbQuery(
         `SELECT d.device_id, d.tenant_id, d.serial_number, d.created_at,
                 t.temperature, t.humidity, t.recorded_at, t.version
          FROM device_projections d
@@ -199,13 +206,13 @@ export const db = {
 
     let totalCount = 0;
     if (tenantId) {
-      const countResult = await pool.query(
+      const countResult = await cbQuery(
         "SELECT COUNT(*) FROM device_projections WHERE tenant_id = $1",
         [tenantId]
       );
       totalCount = parseInt(countResult.rows[0].count, 10);
     } else {
-      const countResult = await pool.query("SELECT COUNT(*) FROM device_projections");
+      const countResult = await cbQuery("SELECT COUNT(*) FROM device_projections");
       totalCount = parseInt(countResult.rows[0].count, 10);
     }
 
