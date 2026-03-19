@@ -77,7 +77,7 @@
     device(deviceId: String!): Device
     devices(limit: Int): [Device!]!
     devicesConnection(first: Int, after: String): DeviceConnection!
-    devicesConnection(first: Int, after: String): DeviceConnection!
+
     deviceTelemetry(deviceId: String!): Telemetry
     allTelemetry(limit: Int): [Telemetry!]!
     manyDeviceTelemetry(deviceIds: [String!]!): [Telemetry!]!
