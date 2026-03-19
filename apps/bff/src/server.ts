@@ -1,4 +1,5 @@
 ﻿import { ApolloServer } from "@apollo/server";
+import depthLimit from "graphql-depth-limit";
 import { expressMiddleware } from "@apollo/server/express4";
 import { ApolloServerPluginDrainHttpServer } from "@apollo/server/plugin/drainHttpServer";
 import express from "express";
@@ -90,6 +91,9 @@ async function startServer() {
   );
 
   const server = new ApolloServer<BffContext>({
+    validationRules: [
+      depthLimit(5),  // max query depth = 5 levels
+    ],
     schema,
     plugins: [
       ApolloServerPluginDrainHttpServer({ httpServer }),
