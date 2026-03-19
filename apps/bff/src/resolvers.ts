@@ -179,6 +179,11 @@ export const resolvers = {
         recordedAt:  new Date(row.recordedAt).toISOString(),
       }));
     },
+    devicesConnection: async (_: any, args: { first?: number; after?: string }, ctx: BffContext) => {
+      const first = Math.min(args.first || 20, 100); // cap at 100
+      const after = args.after || null;
+      return db.getDevicesWithCursor(first, after, ctx.tenantId);
+    },
     searchDevices: async (_: any, args: { query: string; limit?: number }, ctx: BffContext) => {
       const q = (args.query || "").trim();
       if (q.length < 2) return [];

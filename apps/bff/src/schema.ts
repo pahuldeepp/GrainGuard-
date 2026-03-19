@@ -37,9 +37,47 @@
     score:        Float
   }
 
+  type PageInfo {
+    hasNextPage:     Boolean!
+    hasPreviousPage: Boolean!
+    startCursor:     String
+    endCursor:       String
+  }
+
+  type DeviceEdge {
+    node:   Device!
+    cursor: String!
+  }
+
+  type DeviceConnection {
+    edges:      [DeviceEdge!]!
+    pageInfo:   PageInfo!
+    totalCount: Int!
+  }
+
+  type PageInfo {
+    hasNextPage:     Boolean!
+    hasPreviousPage: Boolean!
+    startCursor:     String
+    endCursor:       String
+  }
+
+  type DeviceEdge {
+    node:   Device!
+    cursor: String!
+  }
+
+  type DeviceConnection {
+    edges:      [DeviceEdge!]!
+    pageInfo:   PageInfo!
+    totalCount: Int!
+  }
+
   type Query {
     device(deviceId: String!): Device
     devices(limit: Int): [Device!]!
+    devicesConnection(first: Int, after: String): DeviceConnection!
+    devicesConnection(first: Int, after: String): DeviceConnection!
     deviceTelemetry(deviceId: String!): Telemetry
     allTelemetry(limit: Int): [Telemetry!]!
     manyDeviceTelemetry(deviceIds: [String!]!): [Telemetry!]!

@@ -1,4 +1,4 @@
-﻿import { Pool } from "pg";
+import { Pool } from "pg";
 
 const pool = new Pool({
   host:     process.env.READ_DB_HOST     || "postgres-read",
@@ -8,6 +8,7 @@ const pool = new Pool({
   password: process.env.READ_DB_PASSWORD || "postgres",
   max: 10,
 });
+
 export const db = {
 
   async getDevice(deviceId: string) {
@@ -93,7 +94,7 @@ export const db = {
        LIMIT $2`,
       [deviceId, limit]
     );
-    return result.rows.map((r) => ({
+    return result.rows.map((r: any) => ({
       deviceId:    r.device_id,
       temperature: r.temperature,
       humidity:    r.humidity,
@@ -141,5 +142,96 @@ export const db = {
       [limit]
     );
     return result.rows;
+  },
+
+  async getDevicesWithCursor(first: number = 20, after: string | null = null, tenantId?: string) {
+    let afterTimestamp: string | null = null;
+    if (after) {
+      try {
+        afterTimestamp = Buffer.from(after, "base64").toString("utf-8");
+      } catch {
+        afterTimestamp = null;
+      }
+    }
+
+    const fetchLimit = first + 1;
+    let rows: any[];
+
+    if (tenantId && afterTimestamp) {
+      const result = await pool.query(
+        `SELECT d.device_id, d.tenant_id, d.serial_number, d.created_at,
+                t.temperature, t.humidity, t.recorded_at, t.version
+         FROM device_projections d
+         LEFT JOIN device_telemetry_latest t ON d.device_id = t.device_id
+         WHERE d.tenant_id = $1 AND d.created_at < $2
+         ORDER BY d.created_at DESC
+         LIMIT $3`,
+        [tenantId, afterTimestamp, fetchLimit]
+      );
+      rows = result.rows;
+    } else if (tenantId) {
+      const result = await pool.query(
+        `SELECT d.device_id, d.tenant_id, d.serial_number, d.created_at,
+                t.temperature, t.humidity, t.recorded_at, t.version
+         FROM device_projections d
+         LEFT JOIN device_telemetry_latest t ON d.device_id = t.device_id
+         WHERE d.tenant_id = $1
+         ORDER BY d.created_at DESC
+         LIMIT $2`,
+        [tenantId, fetchLimit]
+      );
+      rows = result.rows;
+    } else {
+      const result = await pool.query(
+        `SELECT d.device_id, d.tenant_id, d.serial_number, d.created_at,
+                t.temperature, t.humidity, t.recorded_at, t.version
+         FROM device_projections d
+         LEFT JOIN device_telemetry_latest t ON d.device_id = t.device_id
+         ORDER BY d.created_at DESC
+         LIMIT $1`,
+        [fetchLimit]
+      );
+      rows = result.rows;
+    }
+
+    const hasNextPage = rows.length > first;
+    const items = hasNextPage ? rows.slice(0, first) : rows;
+
+    let totalCount = 0;
+    if (tenantId) {
+      const countResult = await pool.query(
+        "SELECT COUNT(*) FROM device_projections WHERE tenant_id = $1",
+        [tenantId]
+      );
+      totalCount = parseInt(countResult.rows[0].count, 10);
+    } else {
+      const countResult = await pool.query("SELECT COUNT(*) FROM device_projections");
+      totalCount = parseInt(countResult.rows[0].count, 10);
+    }
+
+    const edges = items.map((row: any) => ({
+      cursor: Buffer.from(row.created_at.toISOString()).toString("base64"),
+      node: {
+        deviceId:     row.device_id,
+        tenantId:     row.tenant_id,
+        serialNumber: row.serial_number,
+        createdAt:    new Date(row.created_at).toISOString(),
+        temperature:  row.temperature ?? null,
+        humidity:     row.humidity ?? null,
+        recordedAt:   row.recorded_at ? new Date(row.recorded_at).toISOString() : null,
+        version:      row.version ?? null,
+      },
+    }));
+
+    return {
+      edges,
+      totalCount,
+      pageInfo: {
+        hasNextPage,
+        hasPreviousPage: !!after,
+        startCursor: edges.length > 0 ? edges[0].cursor : null,
+        endCursor:   edges.length > 0 ? edges[edges.length - 1].cursor : null,
+      },
+    };
   },
 };
