@@ -368,19 +368,23 @@ func HandleTelemetryBatch(pool *pgxpool.Pool, redisClient *redis.Client) func(co
 			}
 		}
 		rows.Close()
+		if err := rows.Err(); err != nil {
+			observability.EventsRetry.Inc()
+			return err
+		}
 
 		// Bulk insert into history table
-		historyArgs := make([]any, 0, len(newEvents)*4)
+		historyArgs := make([]any, 0, len(newEvents)*5)
 		historyClauses := make([]string, 0, len(newEvents))
 		for i, e := range newEvents {
-			base := i * 4
+			base := i * 5
 			historyClauses = append(historyClauses,
-				fmt.Sprintf("($%d,$%d,$%d,$%d)", base+1, base+2, base+3, base+4),
+				fmt.Sprintf("($%d,$%d,$%d,$%d,$%d)", base+1, base+2, base+3, base+4, base+5),
 			)
-			historyArgs = append(historyArgs, e.deviceID, e.temperature, e.humidity, e.recordedAt)
+			historyArgs = append(historyArgs, e.deviceID, e.tenantID, e.temperature, e.humidity, e.recordedAt)
 		}
 		historySQL := fmt.Sprintf(
-			`INSERT INTO device_telemetry_history (device_id, temperature, humidity, recorded_at) VALUES %s`,
+			`INSERT INTO device_telemetry_history (device_id, tenant_id, temperature, humidity, recorded_at) VALUES %s`,
 			strings.Join(historyClauses, ","),
 		)
 		if _, err := tx.Exec(txCtx, historySQL, historyArgs...); err != nil {
