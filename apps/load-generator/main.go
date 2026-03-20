@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 
 // Matches exactly what your cdc-transformer publishes
 type TelemetryEvent struct {
+	EventID     string    `json:"eventId"`
 	EventType   string    `json:"eventType"`
 	AggregateID string    `json:"aggregateId"`
 	OccurredAt  time.Time `json:"occurredAt"`
@@ -34,12 +36,22 @@ func main() {
 	ratePerSec, _ := strconv.Atoi(getenv("RATE", "1000"))
 	durationSec, _ := strconv.Atoi(getenv("DURATION", "30"))
 
-	// Pre-generate a pool of device IDs to simulate real devices
-	deviceCount := 100
-	devices := make([]string, deviceCount)
-	for i := range devices {
-		devices[i] = uuid.New().String()
+	// Use real device IDs from env, or generate random ones
+	deviceIDs := os.Getenv("DEVICE_IDS")
+	var devices []string
+	if deviceIDs != "" {
+		devices = strings.Split(deviceIDs, ",")
+		for i, d := range devices {
+			devices[i] = strings.TrimSpace(d)
+		}
+	} else {
+		deviceCount := 100
+		devices = make([]string, deviceCount)
+		for i := range devices {
+			devices[i] = uuid.New().String()
+		}
 	}
+	deviceCount := len(devices)
 
 	writer := &kafka.Writer{
 		Addr:                   kafka.TCP(brokers),
@@ -118,6 +130,7 @@ func main() {
 		case <-ticker.C:
 			deviceID := devices[i%deviceCount]
 			evt := TelemetryEvent{
+				EventID:     uuid.New().String(),
 				EventType:   "telemetry.recorded",
 				AggregateID: deviceID,
 				OccurredAt:  time.Now().UTC(),
