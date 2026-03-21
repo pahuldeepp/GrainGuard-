@@ -4,6 +4,7 @@ services:
     image: postgres:16-alpine
     container_name: grainguard-postgres
     restart: unless-stopped
+
     command:
       - postgres
       - -c
@@ -12,364 +13,26 @@ services:
       - max_replication_slots=10
       - -c
       - max_wal_senders=10
+
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: grainguard
+
     ports:
       - "5432:5432"
+
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ../../apps/telemetry-service/migrations:/docker-entrypoint-initdb.d
+
     networks:
       - grainguard-net
+
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d grainguard"]
       interval: 10s
       timeout: 5s
-      retries: 10
-
-  postgres-read:
-    image: postgres:16-alpine
-    container_name: grainguard-postgres-read
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: grainguard_read
-    ports:
-      - "5433:5432"
-    volumes:
-      - pgdata_read:/var/lib/postgresql/data
-      - ../../apps/read-model-builder/migrations:/docker-entrypoint-initdb.d
-    networks:
-      - grainguard-net
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d grainguard_read"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
-  kafka:
-    image: confluentinc/cp-kafka:7.6.1
-    container_name: grainguard-kafka
-    restart: unless-stopped
-    ports:
-      - "9092:9092"
-      - "9093:9093"
-    environment:
-      KAFKA_NODE_ID: 1
-      KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9094
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:9093,CONTROLLER://0.0.0.0:9094
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9093
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      KAFKA_LOG_DIRS: /var/lib/kafka/data
-      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
-    volumes:
-      - kafka-data:/var/lib/kafka/data
-    networks:
-      - grainguard-net
-    healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9093"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-
-  kafka-connect:
-    image: debezium/connect:2.5
-    container_name: grainguard-kafka-connect
-    restart: unless-stopped
-    ports:
-      - "8083:8083"
-    environment:
-      BOOTSTRAP_SERVERS: kafka:9092
-      GROUP_ID: grainguard-connect
-      CONFIG_STORAGE_TOPIC: grainguard_connect_configs
-      OFFSET_STORAGE_TOPIC: grainguard_connect_offsets
-      STATUS_STORAGE_TOPIC: grainguard_connect_status
-      CONFIG_STORAGE_REPLICATION_FACTOR: "1"
-      OFFSET_STORAGE_REPLICATION_FACTOR: "1"
-      STATUS_STORAGE_REPLICATION_FACTOR: "1"
-      KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
-      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
-      KEY_CONVERTER_SCHEMAS_ENABLE: "false"
-      VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
-      REST_ADVERTISED_HOST_NAME: kafka-connect
-    depends_on:
-      kafka:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-    networks:
-      - grainguard-net
-
-  redis:
-    image: redis:7
-    container_name: grainguard-redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    networks:
-      - grainguard-net
-
-  schema-registry:
-    image: confluentinc/cp-schema-registry:7.6.1
-    container_name: grainguard-schema-registry
-    restart: unless-stopped
-    ports:
-      - "8082:8081"
-    environment:
-      SCHEMA_REGISTRY_HOST_NAME: schema-registry
-      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
-      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:9092
-    depends_on:
-      kafka:
-        condition: service_healthy
-    networks:
-      - grainguard-net
-
-  telemetry-service:
-    build:
-      context: ../..
-      dockerfile: apps/telemetry-service/Dockerfile
-    container_name: grainguard-telemetry
-    restart: unless-stopped
-    ports:
-      - "50051:50051"
-    volumes:
-      - ../certs:/certs
-    environment:
-      WRITE_DB_URL: postgres://postgres:postgres@postgres:5432/grainguard?sslmode=disable
-      KAFKA_BROKERS: kafka:9092
-      JWKS_URL: https://dev-0saa2rbtwuf2j0e8.us.auth0.com/.well-known/jwks.json
-      JWT_ISSUER: https://dev-0saa2rbtwuf2j0e8.us.auth0.com/
-      JWT_AUDIENCE: https://api.grainguard.io
-      AUTH_ENABLED: "true"
-      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
-    depends_on:
-      postgres:
-        condition: service_healthy
-      kafka:
-        condition: service_healthy
-    networks:
-      - grainguard-net
-
-  cdc-transformer:
-    build:
-      context: ../..
-      dockerfile: apps/cdc-transformer/Dockerfile
-    container_name: grainguard-cdc-transformer
-    restart: unless-stopped
-    ports:
-      - "2113:2112"
-    environment:
-      KAFKA_BROKERS: kafka:9092
-      CDC_SOURCE_TOPIC: grainguard.public.telemetry_readings
-      TARGET_TOPIC: telemetry.events
-      KAFKA_GROUP_ID: cdc-transformer
-      JOB_QUEUE_SIZE: "4096"
-      PUBLISH_QUEUE_SIZE: "4096"
-      COMMIT_QUEUE_SIZE: "4096"
-      WORKER_COUNT: "24"
-      PUBLISHER_COUNT: "8"
-    depends_on:
-      kafka:
-        condition: service_healthy
-    networks:
-      - grainguard-net
-
-  read-model-builder:
-    build:
-      context: ../..
-      dockerfile: apps/read-model-builder/Dockerfile
-    container_name: grainguard-read-model-builder
-    restart: unless-stopped
-    environment:
-      KAFKA_BROKERS: kafka:9092
-      KAFKA_TOPIC: telemetry.events
-      KAFKA_GROUP_ID: read-model-builder-v2
-      READ_DB_URL: postgres://postgres:postgres@postgres-read:5432/grainguard_read?sslmode=disable
-      REDIS_ADDR: redis:6379
-      WORKER_COUNT: 12
-      METRICS_PORT: "2112"
-      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
-    depends_on:
-      kafka:
-        condition: service_healthy
-      postgres-read:
-        condition: service_healthy
-      redis:
-        condition: service_started
-    expose:
-      - "2112"
-    networks:
-      - grainguard-net
-
-  dlq-reprocessor:
-    build:
-      context: ../..
-      dockerfile: apps/dlq-reprocessor/Dockerfile
-    container_name: grainguard-dlq-reprocessor
-    restart: unless-stopped
-    environment:
-      KAFKA_BROKERS: kafka:9092
-      DLQ_TOPIC: telemetry.events.dlq
-      TARGET_TOPIC: telemetry.events
-    depends_on:
-      kafka:
-        condition: service_healthy
-    networks:
-      - grainguard-net
-
-  saga-orchestrator:
-    build:
-      context: ../..
-      dockerfile: apps/saga-orchestrator/Dockerfile
-    container_name: grainguard-saga-orchestrator
-    restart: unless-stopped
-    environment:
-      KAFKA_BROKERS: kafka:9092
-      SAGA_DB_URL: postgres://postgres:postgres@postgres:5432/grainguard?sslmode=disable
-      SAGA_EVENTS_TOPIC: device.events
-      SAGA_COMMANDS_TOPIC: device.commands
-      SAGA_CONSUMER_GROUP: saga-orchestrator
-    depends_on:
-      postgres:
-        condition: service_healthy
-      kafka:
-        condition: service_healthy
-    networks:
-      - grainguard-net
-
-  bff:
-    build:
-      context: ../..
-      dockerfile: apps/bff/Dockerfile
-    container_name: grainguard-bff
-    restart: unless-stopped
-    ports:
-      - "4000:4000"
-    environment:
-      - READ_DATABASE_URL=postgres://postgres:postgres@postgres-read:5432/grainguard_read
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - PORT=4000
-      - JWKS_URL=https://dev-0saa2rbtwuf2j0e8.us.auth0.com/.well-known/jwks.json
-      - JWT_ISSUER=https://dev-0saa2rbtwuf2j0e8.us.auth0.com/
-      - JWT_AUDIENCE=https://api.grainguard.io
-      - ELASTICSEARCH_URL=http://elasticsearch:9200
-      - CASSANDRA_HOSTS=cassandra
-      - CASSANDRA_KEYSPACE=grainguard_telemetry
-    depends_on:
-      - postgres-read
-      - redis
-      - elasticsearch
-    networks:
-      - grainguard-net
-
-  gateway:
-    build:
-      context: ../..
-      dockerfile: apps/gateway/Dockerfile
-    container_name: grainguard-gateway
-    restart: unless-stopped
-    volumes:
-      - ../certs:/certs
-    environment:
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      READ_DATABASE_URL: postgres://postgres:postgres@postgres-read:5432/grainguard_read?sslmode=disable
-      GRPC_TARGET: telemetry-service:50051
-      JWKS_URL: https://dev-0saa2rbtwuf2j0e8.us.auth0.com/.well-known/jwks.json
-      JWT_ISSUER: https://dev-0saa2rbtwuf2j0e8.us.auth0.com/
-      JWT_AUDIENCE: https://api.grainguard.io
-      AUTH_ENABLED: "true"
-      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
-    depends_on:
-      redis:
-        condition: service_started
-      postgres-read:
-        condition: service_healthy
-      kafka:
-        condition: service_healthy
-      telemetry-service:
-        condition: service_started
-    ports:
-      - "8086:3000"
-    networks:
-      - grainguard-net
-
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: grainguard-prometheus
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
-    networks:
-      - grainguard-net
-
-  grafana:
-    image: grafana/grafana:latest
-    container_name: grainguard-grafana
-    ports:
-      - "3000:3000"
-    volumes:
-      - grafana-data:/var/lib/grafana
-    networks:
-      - grainguard-net
-
-  tempo:
-    image: grafana/tempo:latest
-    container_name: grainguard-tempo
-    command: ["-config.file=/etc/tempo.yaml"]
-    volumes:
-      - ./tempo.yaml:/etc/tempo.yaml
-    ports:
-      - "3200:3200"
-    networks:
-      - grainguard-net
-
-  otel-collector:
-    image: otel/opentelemetry-collector-contrib:latest
-    container_name: grainguard-otel
-    command: ["--config=/etc/otel-collector-config.yaml"]
-    volumes:
-      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
-    ports:
-      - "4317:4317"
-      - "4318:4318"
-    depends_on:
-      - tempo
-    networks:
-      - grainguard-net
-
-  keycloak:
-    image: quay.io/keycloak/keycloak:24.0
-    container_name: keycloak
-    command: start-dev
-    environment:
-      AUTH_ENABLED: "false"
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin
-      KC_HOSTNAME: keycloak
-      KC_HOSTNAME_PORT: 8080
-      KC_HOSTNAME_STRICT: "false"
-    ports:
-      - "8081:8080"
-    volumes:
-      - keycloak_data:/opt/keycloak/data
-    networks:
-      - grainguard-net
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8080/realms/master || exit 1"]
-      interval: 20s
-      timeout: 10s
       retries: 10
 
   elasticsearch:
@@ -380,18 +43,23 @@ services:
       - discovery.type=single-node
       - xpack.security.enabled=false
       - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    
     ports:
       - "9200:9200"
-    volumes:
-      - esdata:/usr/share/elasticsearch/data
+    
     networks:
       - grainguard-net
+    
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
 
+  
   kibana:
     image: kibana:8.13.0
     container_name: grainguard-kibana
@@ -433,7 +101,10 @@ services:
     restart: unless-stopped
     ports:
       - "3100:3100"
-    command: -config.file=/etc/loki/local-config.yaml
+    command: -config.file=/etc/loki/loki-config.yaml
+    volumes:
+      - ./loki-config.yaml:/etc/loki/loki-config.yaml
+      - loki-data:/loki
     networks:
       - grainguard-net
 
@@ -447,96 +118,481 @@ services:
     networks:
       - grainguard-net
 
-  search-indexer:
-    build:
-      context: ../..
-      dockerfile: apps/search-indexer/Dockerfile
-    container_name: grainguard-search-indexer
+  
+      
+
+  postgres-read:
+    image: postgres:16-alpine
+    container_name: grainguard-postgres-read
     restart: unless-stopped
+
     environment:
-      KAFKA_BROKERS: kafka:9092
-      ELASTICSEARCH_URL: http://elasticsearch:9200
-      TELEMETRY_TOPIC: telemetry.events
-      DEVICE_TOPIC: device.events
-      KAFKA_GROUP_ID: search-indexer
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: grainguard_read
+
+    ports:
+      - "5433:5432"
+
+    volumes:
+      - pgdata_read:/var/lib/postgresql/data
+      - ../../apps/read-model-builder/migrations:/docker-entrypoint-initdb.d
+
+    networks:
+      - grainguard-net
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d grainguard_read"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  pgbouncer:
+    image: bitnami/pgbouncer:latest
+    container_name: grainguard-pgbouncer
+    restart: unless-stopped
+    ports:
+      - "5434:5432"
+    environment:
+      POSTGRESQL_HOST: postgres
+      POSTGRESQL_PORT: 5432
+      POSTGRESQL_USERNAME: postgres
+      POSTGRESQL_PASSWORD: postgres
+      POSTGRESQL_DATABASE: grainguard
+      PGBOUNCER_AUTH_TYPE: md5
+      PGBOUNCER_POOL_MODE: transaction
+      PGBOUNCER_MAX_CLIENT_CONN: 200
+      PGBOUNCER_DEFAULT_POOL_SIZE: 20
+    depends_on:
+      postgres:
+        condition: service_healthy
+      postgres-read:
+        condition: service_healthy
+    networks:
+      - grainguard-net
+
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: grainguard-kafka
+    restart: unless-stopped
+
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9094
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:9093,CONTROLLER://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+
+    networks:
+      - grainguard-net
+
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9093"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  kafka-connect:
+    image: debezium/connect:2.5
+    container_name: grainguard-kafka-connect
+    restart: unless-stopped
+
+    ports:
+    - "8083:8083"
+
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: grainguard-connect
+      CONFIG_STORAGE_TOPIC: grainguard_connect_configs
+      OFFSET_STORAGE_TOPIC: grainguard_connect_offsets
+      STATUS_STORAGE_TOPIC: grainguard_connect_status
+      CONFIG_STORAGE_REPLICATION_FACTOR: "1"
+      OFFSET_STORAGE_REPLICATION_FACTOR: "1"
+      STATUS_STORAGE_REPLICATION_FACTOR: "1"
+      KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      REST_ADVERTISED_HOST_NAME: kafka-connect
+
     depends_on:
       kafka:
         condition: service_healthy
-      elasticsearch:
+      postgres:
         condition: service_healthy
+
+    networks:
+      - grainguard-net
+
+  redis:
+    image: redis:7
+    container_name: grainguard-redis
+    restart: unless-stopped
+
+    ports:
+      - "6379:6379"
+
     networks:
       - grainguard-net
 
 
-  jobs-worker:
+  telemetry-service:
     build:
       context: ../..
-      dockerfile: apps/jobs-worker/Dockerfile
-    container_name: grainguard-jobs-worker
+      dockerfile: apps/telemetry-service/Dockerfile
+
+    container_name: grainguard-telemetry
     restart: unless-stopped
-    environment:
-      RABBITMQ_URL: amqp://grainguard:grainguard@rabbitmq:5672/grainguard
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    networks:
-      - grainguard-net
 
-
-
-  cassandra:
-    image: cassandra:4.1
-    container_name: grainguard-cassandra
     ports:
-      - '9042:9042'
-    environment:
-      CASSANDRA_CLUSTER_NAME: grainguard
-      CASSANDRA_DC: dc1
-      CASSANDRA_RACK: rack1
-      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
-      MAX_HEAP_SIZE: 512M
-      HEAP_NEWSIZE: 128M
+      - "50051:50051"
+
     volumes:
-      - cassandra-data:/var/lib/cassandra
-    healthcheck:
-      test: ["CMD", "cqlsh", "-e", "describe keyspaces"]
-      interval: 30s
-      timeout: 10s
-      retries: 10
-      start_period: 60s
+      - ../certs:/certs
+
+    environment:
+      WRITE_DB_URL: postgres://postgres:postgres@postgres:5432/grainguard?sslmode=disable
+      KAFKA_BROKERS: kafka:9092
+      JWKS_URL: https://dev-0saa2rbtwuf2j0e8.us.auth0.com/.well-known/jwks.json
+      JWT_ISSUER: https://dev-0saa2rbtwuf2j0e8.us.auth0.com/
+      JWT_AUDIENCE: https://api.grainguard.io
+      AUTH_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+    networks:
+      - grainguard-net
+  
+  promtail:
+    image: grafana/promtail:2.9.0
+    container_name: grainguard-promtail
+    restart: unless-stopped
+    volumes:
+      - ./promtail-config.yaml:/etc/promtail/config.yaml
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    command: -config.file=/etc/promtail/config.yaml
+    depends_on:
+      - loki
     networks:
       - grainguard-net
 
-  cassandra-writer:
+
+  cdc-transformer:
     build:
-      context: ../../
-      dockerfile: apps/cassandra-writer/Dockerfile
-    container_name: grainguard-cassandra-writer
+      context: ../..
+      dockerfile: apps/cdc-transformer/Dockerfile
+
+    container_name: grainguard-cdc-transformer
+    restart: unless-stopped
+
+    ports:
+      - "2113:2112"
+
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      CDC_SOURCE_TOPIC: grainguard.public.telemetry_readings
+      TARGET_TOPIC: telemetry.events
+      KAFKA_GROUP_ID: cdc-transformer
+      JOB_QUEUE_SIZE: "4096"
+      PUBLISH_QUEUE_SIZE: "4096"
+      COMMIT_QUEUE_SIZE: "4096"
+      WORKER_COUNT: "24"
+      PUBLISHER_COUNT: "8"
+
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+    networks:
+      - grainguard-net
+
+  read-model-builder:
+    build:
+      context: ../..
+      dockerfile: apps/read-model-builder/Dockerfile
+
+    container_name: grainguard-read-model-builder
+    restart: unless-stopped
+
     environment:
       KAFKA_BROKERS: kafka:9092
       KAFKA_TOPIC: telemetry.events
-      KAFKA_GROUP_ID: cassandra-writer
-      CASSANDRA_HOSTS: cassandra
-      CASSANDRA_KEYSPACE: grainguard_telemetry
+      KAFKA_GROUP_ID: read-model-builder
+
+      READ_DB_URL: postgres://postgres:postgres@postgres-read:5432/grainguard_read?sslmode=disable
+      REDIS_ADDR: redis:6379
+
+      WORKER_COUNT: 12
+      METRICS_PORT: "2112"
+      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
+
     depends_on:
       kafka:
         condition: service_healthy
-      cassandra:
+      postgres-read:
         condition: service_healthy
+      redis:
+        condition: service_started
+
+    expose:
+      - "2112"
+
+    networks:
+      - grainguard-net
+
+  dlq-reprocessor:
+    build:
+      context: ../..
+      dockerfile: apps/dlq-reprocessor/Dockerfile
+
+    container_name: grainguard-dlq-reprocessor
+    restart: unless-stopped
+
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      DLQ_TOPIC: telemetry.events.dlq
+      TARGET_TOPIC: telemetry.events
+
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+    networks:
+      - grainguard-net
+
+
+  saga-orchestrator:
+    build:
+      context: ../..
+      dockerfile: apps/saga-orchestrator/Dockerfile
+
+    container_name: grainguard-saga-orchestrator
+    restart: unless-stopped
+
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      SAGA_DB_URL: postgres://postgres:postgres@postgres:5432/grainguard?sslmode=disable
+      SAGA_EVENTS_TOPIC: device.events
+      SAGA_COMMANDS_TOPIC: device.commands
+      SAGA_CONSUMER_GROUP: saga-orchestrator
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+    networks:
+      - grainguard-net
+
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.6.1
+    container_name: grainguard-schema-registry
+    restart: unless-stopped
+
+    ports:
+      - "8082:8081"
+
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:9092
+
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+    networks:
+      - grainguard-net
+
+  bff:
+    build:
+      context: ../..
+      dockerfile: apps/bff/Dockerfile
+    container_name: grainguard-bff
+    ports:
+      - "4000:4000"
+    environment:
+      - READ_DATABASE_URL=postgres://postgres:postgres@postgres-read:5432/grainguard_read
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - PORT=4000
+      - JWKS_URL=https://dev-0saa2rbtwuf2j0e8.us.auth0.com/.well-known/jwks.json
+      - JWT_ISSUER=https://dev-0saa2rbtwuf2j0e8.us.auth0.com/
+      - JWT_AUDIENCE=https://api.grainguard.io
+    depends_on:
+      - postgres-read
+      - redis
     networks:
       - grainguard-net
     restart: unless-stopped
+
+
+  gateway:
+    build:
+      context: ../..
+      dockerfile: apps/gateway/Dockerfile
+
+    container_name: grainguard-gateway
+    restart: unless-stopped
+
+    volumes:
+      - ../certs:/certs
+
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      READ_DATABASE_URL: postgres://postgres:postgres@postgres-read:5432/grainguard_read?sslmode=disable
+      GRPC_TARGET: telemetry-service:50051
+      JWKS_URL: https://dev-0saa2rbtwuf2j0e8.us.auth0.com/.well-known/jwks.json
+      JWT_ISSUER: https://dev-0saa2rbtwuf2j0e8.us.auth0.com/
+      JWT_AUDIENCE: https://api.grainguard.io
+      AUTH_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
+
+    depends_on:
+      
+      redis:
+        condition: service_started
+      postgres-read:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      telemetry-service:
+        condition: service_started
+
+    ports:
+      - "8086:3000"
+
+    networks:
+      - grainguard-net
+
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: grainguard-prometheus
+
+    ports:
+      - "9090:9090"
+
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+
+    networks:
+      - grainguard-net
+
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grainguard-grafana
+
+    ports:
+      - "3000:3000"
+
+    volumes:
+      - grafana-data:/var/lib/grafana
+
+    networks:
+      - grainguard-net
+
+
+  tempo:
+    image: grafana/tempo:latest
+    container_name: grainguard-tempo
+
+    command: ["-config.file=/etc/tempo.yaml"]
+
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml
+
+    ports:
+      - "3200:3200"
+
+    networks:
+      - grainguard-net
+
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: grainguard-otel
+
+    command: ["--config=/etc/otel-collector-config.yaml"]
+
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+
+    depends_on:
+      - tempo
+
+    networks:
+      - grainguard-net
+
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    container_name: keycloak
+
+    command: start-dev
+
+    environment:
+      AUTH_ENABLED: "false"
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_HOSTNAME: keycloak
+      KC_HOSTNAME_PORT: 8080
+      KC_HOSTNAME_STRICT: "false"
+
+    ports:
+      - "8081:8080"
+
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+
+    networks:
+      - grainguard-net
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/realms/master || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+
+
 volumes:
   pgdata:
   pgdata_read:
   kafka-data:
   keycloak_data:
   grafana-data:
-  esdata:
-  rabbitmq-data:
-  cassandra-data:
+  loki-data:
+
 
 networks:
   grainguard-net:
     driver: bridge
-
