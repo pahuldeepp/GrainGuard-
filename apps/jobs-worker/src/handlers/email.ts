@@ -74,3 +74,4 @@ export function startEmailWorker(channel: Channel): void {
 
   console.log(`[email] worker listening on ${QUEUES.EMAILS}`);
 }
+

@@ -13,3 +13,4 @@ export async function verifyToken(token: string) {
   });
   return payload;
 }
+

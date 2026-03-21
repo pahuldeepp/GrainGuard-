@@ -110,3 +110,4 @@ function textSummary(data, opts) {
   ];
   return lines.join('\n');
 }
+

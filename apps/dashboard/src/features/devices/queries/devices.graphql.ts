@@ -51,3 +51,4 @@ export const SEARCH_DEVICES = gql`
     }
   }
 `;
+

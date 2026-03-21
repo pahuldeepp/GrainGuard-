@@ -49,3 +49,4 @@ export interface AlertJob {
   threshold: number;
   recipients: string[];
 }
+

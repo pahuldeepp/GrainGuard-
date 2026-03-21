@@ -83,3 +83,4 @@ export function startAlertWorker(channel: Channel): void {
 
   console.log(`[alert] worker listening on ${QUEUES.ALERTS}`);
 }
+

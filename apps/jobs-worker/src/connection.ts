@@ -61,3 +61,4 @@ export async function disconnect(): Promise<void> {
     console.error("[rabbitmq] disconnect error:", err);
   }
 }
+

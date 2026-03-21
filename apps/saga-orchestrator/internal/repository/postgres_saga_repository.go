@@ -92,3 +92,4 @@ func (r *PostgresSagaRepository) MarkEventProcessed(ctx context.Context, eventID
     `, eventID, sagaID)
     return err
 }
+

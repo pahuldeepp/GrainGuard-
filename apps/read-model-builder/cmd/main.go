@@ -179,3 +179,4 @@ func main() {
 	wg.Wait()
 	log.Info().Msg("all consumers drained — exiting")
 }
+

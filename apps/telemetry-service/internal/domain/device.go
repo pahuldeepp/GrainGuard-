@@ -25,3 +25,4 @@ func NewDevice(tenantID uuid.UUID, serial string) (*Device, error) {
 		CreatedAt:    time.Now().UTC(),
 	}, nil
 }
+

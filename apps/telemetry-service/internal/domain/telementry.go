@@ -32,3 +32,4 @@ func NewTelemetry(deviceID uuid.UUID, temp, humidity float64) (*Telemetry, error
 		CreatedAt:   time.Now().UTC(),
 	}, nil
 }
+

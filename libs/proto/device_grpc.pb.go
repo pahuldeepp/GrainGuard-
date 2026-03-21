@@ -119,3 +119,4 @@ var DeviceService_ServiceDesc = grpc.ServiceDesc{
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "device.proto",
 }
+

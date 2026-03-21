@@ -118,3 +118,4 @@ describe("buildCsvFilename", () => {
     expect(buildCsvFilename(false, 50)).toMatch(/\.csv$/);
   });
 });
+

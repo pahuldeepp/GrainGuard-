@@ -20,3 +20,4 @@ reviews:
         Verify eventId and tenantId are always set.
 chat:
   auto_reply: true
+

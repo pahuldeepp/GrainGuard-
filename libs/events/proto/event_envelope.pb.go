@@ -380,3 +380,4 @@ func file_libs_events_proto_event_envelope_proto_init() {
 	file_libs_events_proto_event_envelope_proto_goTypes = nil
 	file_libs_events_proto_event_envelope_proto_depIdxs = nil
 }
+

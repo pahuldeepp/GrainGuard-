@@ -94,3 +94,4 @@ export function startWebhookWorker(channel: Channel): void {
 
   console.log(`[webhook] worker listening on ${QUEUES.WEBHOOKS}`);
 }
+

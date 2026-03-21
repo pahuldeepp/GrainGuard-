@@ -37,3 +37,4 @@ main().catch((err) => {
   console.error("[jobs-worker] fatal error:", err);
   process.exit(1);
 });
+

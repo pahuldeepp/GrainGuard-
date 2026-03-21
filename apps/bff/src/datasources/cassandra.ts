@@ -69,3 +69,4 @@ export async function closeCassandraClient(): Promise<void> {
     client = null;
   }
 }
+

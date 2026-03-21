@@ -82,3 +82,4 @@ func (l *Logger) write(ctx context.Context, event Event) error {
 	)
 	return err
 }
+
