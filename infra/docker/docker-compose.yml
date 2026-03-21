@@ -192,7 +192,7 @@ services:
     environment:
       KAFKA_BROKERS: kafka:9092
       KAFKA_TOPIC: telemetry.events
-      KAFKA_GROUP_ID: read-model-builder
+      KAFKA_GROUP_ID: read-model-builder-v2
       READ_DB_URL: postgres://postgres:postgres@postgres-read:5432/grainguard_read?sslmode=disable
       REDIS_ADDR: redis:6379
       WORKER_COUNT: 12

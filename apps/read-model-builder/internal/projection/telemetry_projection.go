@@ -246,6 +246,9 @@ func HandleTelemetryBatch(pool *pgxpool.Pool, redisClient *redis.Client) func(co
 				humidity = *event.Data.Humidity
 			}
 
+			if event.Data.TenantID == "" {
+				continue
+			}
 			events = append(events, parsedEvent{
 				eventID:     event.EventID,
 				deviceID:    deviceID,
@@ -278,7 +281,7 @@ func HandleTelemetryBatch(pool *pgxpool.Pool, redisClient *redis.Client) func(co
 		rows, err := tx.Query(
 			txCtx,
 			`INSERT INTO processed_events(event_id)
-			 SELECT unnest($1::uuid[])
+			 SELECT unnest($1::text[])::uuid
 			 ON CONFLICT DO NOTHING
 			 RETURNING event_id`,
 			eventIDs,
@@ -297,12 +300,7 @@ func HandleTelemetryBatch(pool *pgxpool.Pool, redisClient *redis.Client) func(co
 		}
 		rows.Close()
 
-		newEvents := make([]parsedEvent, 0, len(events))
-		for _, e := range events {
-			if _, ok := newEventIDs[e.eventID]; ok {
-				newEvents = append(newEvents, e)
-			}
-		}
+		newEvents := events
 
 		if len(newEvents) == 0 {
 			observability.EventsProcessed.Add(float64(len(events)))

@@ -131,7 +131,7 @@ func main() {
 	var wg sync.WaitGroup
 	workerCount := getenvInt("WORKER_COUNT", 16)
 
-	telemetryConsumer := consumer.NewKafkaConsumerFromEnv("telemetry.events", "read-model-builder")
+	telemetryConsumer := consumer.NewKafkaConsumerFromEnv("telemetry.events", getenv("KAFKA_GROUP_ID", "read-model-builder"))
 	batchHandler := consumer.NewBatchEnvelopeHandler(pool, redisClient)
 
 	log.Info().Int("workers", workerCount).Msg("read-model-builder started with batch workers")
