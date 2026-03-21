@@ -1,7 +1,7 @@
 import { Pool } from "pg";
 
 // Write pool — points to primary DB, not read replica
-const writePool = new Pool({
+export const writePool = new Pool({
   host:     process.env.WRITE_DB_HOST     || "postgres",
   port:     parseInt(process.env.WRITE_DB_PORT || "5432"),
   database: process.env.WRITE_DB_NAME     || "grainguard",

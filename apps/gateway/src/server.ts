@@ -7,7 +7,7 @@ import { createDevice } from "./services/device";
 import { getDeviceLatestTelemetry } from "./services/device-query";
 import { redis } from "./cache/redis";
 import { pool } from "./database/db";
-import { logAuditEvent } from "./lib/audit";
+import { logAuditEvent, writePool } from "./lib/audit";
 import { metricsHandler, requestLatency } from "./observability/metrics";
 import { requestIdMiddleware } from "./middleware/requestId";
 import { authMiddleware } from "./middleware/auth";
@@ -210,6 +210,7 @@ app.get("/metrics", metricsHandler());
 process.on("SIGTERM", async () => {
   await redis.quit();
   await pool.end();
+  await writePool.end();
   process.exit(0);
 });
 
