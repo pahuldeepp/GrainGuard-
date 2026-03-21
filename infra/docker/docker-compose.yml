@@ -481,6 +481,49 @@ services:
       - grainguard-net
 
 
+
+  cassandra:
+    image: cassandra:4.1
+    container_name: grainguard-cassandra
+    ports:
+      - '9042:9042'
+    environment:
+      CASSANDRA_CLUSTER_NAME: grainguard
+      CASSANDRA_DC: dc1
+      CASSANDRA_RACK: rack1
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+      MAX_HEAP_SIZE: 512M
+      HEAP_NEWSIZE: 128M
+    volumes:
+      - cassandra-data:/var/lib/cassandra
+    healthcheck:
+      test: ["CMD", "cqlsh", "-e", "describe keyspaces"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    networks:
+      - grainguard-net
+
+  cassandra-writer:
+    build:
+      context: ../../
+      dockerfile: apps/cassandra-writer/Dockerfile
+    container_name: grainguard-cassandra-writer
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_TOPIC: telemetry.events
+      KAFKA_GROUP_ID: cassandra-writer
+      CASSANDRA_HOSTS: cassandra
+      CASSANDRA_KEYSPACE: grainguard_telemetry
+    depends_on:
+      kafka:
+        condition: service_healthy
+      cassandra:
+        condition: service_healthy
+    networks:
+      - grainguard-net
+    restart: unless-stopped
 volumes:
   pgdata:
   pgdata_read:
@@ -489,6 +532,7 @@ volumes:
   grafana-data:
   esdata:
   rabbitmq-data:
+  cassandra-data:
 
 networks:
   grainguard-net:
