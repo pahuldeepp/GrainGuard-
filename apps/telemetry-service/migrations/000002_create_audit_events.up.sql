@@ -22,3 +22,19 @@ REVOKE UPDATE, DELETE ON audit_events FROM PUBLIC;
 
 COMMENT ON TABLE audit_events IS 
 'Immutable audit log. Append-only. Every privileged action writes here.';
+
+-- Enforce true immutability via trigger (blocks even table owner)
+CREATE OR REPLACE FUNCTION audit_events_immutable()
+RETURNS TRIGGER AS $$
+BEGIN
+  RAISE EXCEPTION 'audit_events is immutable — UPDATE and DELETE are not allowed';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER audit_events_no_update
+  BEFORE UPDATE ON audit_events
+  FOR EACH ROW EXECUTE FUNCTION audit_events_immutable();
+
+CREATE TRIGGER audit_events_no_delete
+  BEFORE DELETE ON audit_events
+  FOR EACH ROW EXECUTE FUNCTION audit_events_immutable();

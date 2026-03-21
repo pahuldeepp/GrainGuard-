@@ -157,7 +157,7 @@ app.post(
         userId,
         authHeader
       );
-      await logAuditEvent({
+      logAuditEvent({
         eventType: "device.created",
         actorId: userId,
         tenantId,
@@ -170,10 +170,10 @@ app.post(
       return res.json(result);
     } catch (err) {
       console.error(err);
-      await logAuditEvent({
+      logAuditEvent({
         eventType: "device.creation_failed",
         actorId: req.user?.sub || "unknown",
-        tenantId: req.user?.tenantId || "unknown",
+        tenantId: req.user?.tenantId || "00000000-0000-0000-0000-000000000000",
         resourceType: "device",
         payload: { serialNumber: req.body?.serialNumber, error: String(err) },
         ipAddress: req.ip,

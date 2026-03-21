@@ -44,9 +44,10 @@ func NewLogger(pool *pgxpool.Pool) *Logger {
 }
 
 func (l *Logger) Log(ctx context.Context, event Event) {
-	// Fire and forget — audit logging should never block the main flow
+	// Fire and forget — use Background() to decouple from request lifecycle
+	// The caller context may be cancelled after the request completes
 	go func() {
-		if err := l.write(ctx, event); err != nil {
+		if err := l.write(context.Background(), event); err != nil {
 			log.Printf("[audit] failed to write event=%s actor=%s err=%v",
 				event.EventType, event.ActorID, err)
 		}

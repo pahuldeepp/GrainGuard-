@@ -1,4 +1,14 @@
-import { pool } from "../database/db";
+import { Pool } from "pg";
+
+// Write pool — points to primary DB, not read replica
+const writePool = new Pool({
+  host:     process.env.WRITE_DB_HOST     || "postgres",
+  port:     parseInt(process.env.WRITE_DB_PORT || "5432"),
+  database: process.env.WRITE_DB_NAME     || "grainguard",
+  user:     process.env.WRITE_DB_USER     || "postgres",
+  password: process.env.WRITE_DB_PASSWORD || "postgres",
+  max: 5,
+});
 
 export type AuditEventType =
   | "device.created"
@@ -20,7 +30,7 @@ export interface AuditEvent {
 
 export async function logAuditEvent(event: AuditEvent): Promise<void> {
   try {
-    await pool.query(
+    await writePool.query(
       `INSERT INTO audit_events
        (event_type, actor_id, tenant_id, resource_type, resource_id, payload, ip_address, user_agent)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
