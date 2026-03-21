@@ -1,0 +1,272 @@
+openapi: 3.0.3
+info:
+  title: GrainGuard API
+  description: |
+    Multi-tenant agri-operations platform API.
+    Ingests device telemetry, builds CQRS projections, and serves real-time sensor data.
+    
+    ## Authentication
+    All endpoints except /health require a valid Auth0 JWT bearer token.
+    Token must include tenant_id claim for multi-tenant isolation.
+    
+    ## Rate Limiting
+    - 100 requests per 15 minutes per IP (sliding window, Redis-backed)
+    - Rate limit headers returned on every response
+  version: 1.0.0
+  license:
+    name: MIT
+  contact:
+    name: GrainGuard API
+    url: https://github.com/pahuldeepp/GrainGuard-
+
+servers:
+  - url: http://localhost:8086
+    description: Local development
+    x-internal: true
+  - url: https://api.grainguard.io
+    description: Production
+
+security:
+  - BearerAuth: []
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Returns service health status. No authentication required.
+      operationId: getHealth
+      security: []
+      tags:
+        - Operations
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+              example:
+                status: ok
+
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      description: Exposes Prometheus metrics for scraping. No authentication required.
+      operationId: getMetrics
+      security: []
+      tags:
+        - Operations
+      responses:
+        '200':
+          description: Prometheus metrics in text format
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /devices:
+    post:
+      summary: Create device
+      description: |
+        Provisions a new device for the authenticated tenant.
+        Triggers the device provisioning saga (create → attach → audit).
+        Idempotent — duplicate serial numbers return the existing device.
+      operationId: createDevice
+      tags:
+        - Devices
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDeviceRequest'
+            example:
+              serialNumber: SN-001-GRAIN-BIN
+      responses:
+        '200':
+          description: Device created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceResponse'
+        '400':
+          description: Missing or invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: Missing serialNumber
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /devices/{deviceId}/latest:
+    get:
+      summary: Get latest telemetry
+      description: |
+        Returns the latest telemetry reading for a device.
+        Served from Redis cache (version-keyed) with Postgres fallback.
+        Cache TTL: version-based (invalidated on new telemetry event).
+      operationId: getDeviceLatestTelemetry
+      tags:
+        - Telemetry
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          description: Device UUID
+          schema:
+            type: string
+            format: uuid
+            example: 98b3f9c8-e504-4f11-b098-7bf970e4368c
+      responses:
+        '200':
+          description: Latest telemetry reading
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelemetryResponse'
+        '404':
+          description: Device not found or no telemetry available
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: Not found
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Auth0 RS256 JWT token
+
+  schemas:
+    CreateDeviceRequest:
+      type: object
+      required:
+        - serialNumber
+      properties:
+        serialNumber:
+          type: string
+          description: Unique serial number for the device
+          example: SN-001-GRAIN-BIN
+          minLength: 1
+          maxLength: 100
+
+    DeviceResponse:
+      type: object
+      properties:
+        deviceId:
+          type: string
+          format: uuid
+          example: 98b3f9c8-e504-4f11-b098-7bf970e4368c
+        tenantId:
+          type: string
+          format: uuid
+          example: 11111111-1111-1111-1111-111111111111
+        serialNumber:
+          type: string
+          example: SN-001-GRAIN-BIN
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-03-20T19:00:00Z'
+
+    TelemetryResponse:
+      type: object
+      properties:
+        device_id:
+          type: string
+          format: uuid
+          example: 98b3f9c8-e504-4f11-b098-7bf970e4368c
+        temperature:
+          type: number
+          format: double
+          description: Temperature reading in Celsius
+          example: 25.5
+        humidity:
+          type: number
+          format: double
+          description: Humidity percentage
+          example: 60.0
+        recorded_at:
+          type: string
+          format: date-time
+          example: '2026-03-20T19:14:20Z'
+        version:
+          type: integer
+          description: Monotonically increasing version number for optimistic concurrency
+          example: 1175
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          example: Internal error
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid JWT token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: Missing authentication token
+
+    RateLimited:
+      description: Rate limit exceeded
+      headers:
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+          description: Request limit per window
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+          description: Remaining requests in current window
+        X-RateLimit-Reset:
+          schema:
+            type: integer
+          description: Unix timestamp when window resets
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: Too many requests
+
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: Internal error
+
+tags:
+  - name: Devices
+    description: Device provisioning and management
+  - name: Telemetry
+    description: Real-time sensor data endpoints
+  - name: Operations
+    description: Health checks and observability
