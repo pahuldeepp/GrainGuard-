@@ -80,18 +80,19 @@ app.use((req: Request, res: Response, next: NextFunction) => {
  * Request log
  */
 app.use((req: Request, _res: Response, next: NextFunction) => {
-  console.log(
-    JSON.stringify({
-      level: "info",
-      service: "gateway",
-      request_id: req.requestId,
-      method: req.method,
-      path: req.path,
-      origin: req.headers.origin,
-      timestamp: new Date().toISOString(),
-    })
-  );
-  next();
+ console.log(
+  JSON.stringify({
+    level: "info",
+    service: "gateway",
+    request_id: req.requestId,
+    correlation_id: req.correlationId,
+    method: req.method,
+    path: req.path,
+    origin: req.headers.origin,
+    timestamp: new Date().toISOString(),
+  })
+ );
+ next();
 });
 
 /**

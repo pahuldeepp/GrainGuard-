@@ -1,20 +1,19 @@
 import { Request, Response, NextFunction } from "express";
 import crypto from "crypto";
 
-
 declare global {
   // eslint-disable-next-line no-var
   namespace Express {
     interface Request {
       requestId?: string;
+      correlationId?: string;
     }
   }
 }
 
-// Allow UUID format or alphanumeric+hyphens up to 64 chars (prevents log injection)
 const VALID_REQUEST_ID = /^[a-zA-Z0-9-]{1,64}$/;
 
-function generateRequestId(): string {
+function generateId(): string {
   if (typeof (crypto as any).randomUUID === "function") {
     return (crypto as any).randomUUID() as string;
   }
@@ -22,20 +21,21 @@ function generateRequestId(): string {
 }
 
 export function requestIdMiddleware(req: Request, res: Response, next: NextFunction) {
-  const incoming = req.header("x-request-id");
+  const incomingRequestId = req.header("x-request-id");
+  const requestId = (incomingRequestId && VALID_REQUEST_ID.test(incomingRequestId.trim()))
+    ? incomingRequestId.trim()
+    : generateId();
 
-  let requestId: string;
-  if (incoming && VALID_REQUEST_ID.test(incoming.trim())) {
-    requestId = incoming.trim();
-  } else {
-    requestId = generateRequestId();
-  }
+  const incomingCorrelationId = req.header("x-correlation-id");
+  const correlationId = (incomingCorrelationId && VALID_REQUEST_ID.test(incomingCorrelationId.trim()))
+    ? incomingCorrelationId.trim()
+    : generateId();
 
   req.requestId = requestId;
+  req.correlationId = correlationId;
 
-  // Echo back for client correlation and debugging
   res.setHeader("x-request-id", requestId);
+  res.setHeader("x-correlation-id", correlationId);
 
   next();
 }
-
