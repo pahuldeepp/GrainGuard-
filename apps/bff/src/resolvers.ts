@@ -3,6 +3,7 @@ import { search } from "./datasources/elasticsearch";
 import { cache } from "./datasources/redis";
 import { pubsub, TELEMETRY_UPDATED, TENANT_TELEMETRY_UPDATED } from "./pubsub";
 import type { BffContext } from "./server";
+import { getTelemetryHistoryFromCassandra } from "./datasources/cassandra";
 
 const TELEMETRY_TTL = 30;
 const DEVICE_TTL = 300;
@@ -170,8 +171,20 @@ export const resolvers = {
     deviceTelemetryHistory: async (_: any, args: { deviceId: string; limit?: number }, ctx: BffContext) => {
       const device = await db.getDeviceWithTelemetry(args.deviceId);
       if (!device || device.tenant_id !== ctx.tenantId) return [];
+      const limit = args.limit ?? 50;
 
-      const rows = await db.getTelemetryHistory(args.deviceId, args.limit ?? 50);
+      try {
+        const cassRows = await getTelemetryHistoryFromCassandra(ctx.tenantId, args.deviceId, limit);
+        if (cassRows.length > 0) {
+          console.log('[history] served from Cassandra rows=' + cassRows.length);
+          return cassRows;
+        }
+      } catch (err) {
+        console.warn('[history] Cassandra unavailable, falling back to Postgres:', err);
+      }
+
+      console.log('[history] falling back to Postgres');
+      const rows = await db.getTelemetryHistory(args.deviceId, limit);
       return rows.map((row: any) => ({
         deviceId:    row.deviceId,
         temperature: row.temperature,

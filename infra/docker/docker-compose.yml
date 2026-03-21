@@ -263,6 +263,8 @@ services:
       - JWT_ISSUER=https://dev-0saa2rbtwuf2j0e8.us.auth0.com/
       - JWT_AUDIENCE=https://api.grainguard.io
       - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - CASSANDRA_HOSTS=cassandra
+      - CASSANDRA_KEYSPACE=grainguard_telemetry
     depends_on:
       - postgres-read
       - redis
