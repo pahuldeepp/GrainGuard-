@@ -26,6 +26,7 @@ type TelemetryEvent struct {
 		DeviceID    string  `json:"deviceId"`
 		Temperature float64 `json:"temperature"`
 		Humidity    float64 `json:"humidity"`
+	TenantID    string  `json:"tenantId"`
 	} `json:"data"`
 }
 
@@ -35,6 +36,7 @@ func main() {
 	workers, _ := strconv.Atoi(getenv("WORKERS", "10"))
 	ratePerSec, _ := strconv.Atoi(getenv("RATE", "1000"))
 	durationSec, _ := strconv.Atoi(getenv("DURATION", "30"))
+	tenantID := getenv("TENANT_ID", "11111111-1111-1111-1111-111111111111")
 
 	// Use real device IDs from env, or generate random ones
 	deviceIDs := os.Getenv("DEVICE_IDS")
@@ -136,6 +138,7 @@ func main() {
 				OccurredAt:  time.Now().UTC(),
 			}
 			evt.Data.DeviceID = deviceID
+				evt.Data.TenantID = tenantID
 			evt.Data.Temperature = 20.0 + float64(i%20)
 			evt.Data.Humidity = 40.0 + float64(i%30)
 
