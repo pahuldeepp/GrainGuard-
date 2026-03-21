@@ -1,3 +1,4 @@
+// review-sweep
 ﻿export const typeDefs = `#graphql
   type Telemetry {
     deviceId:    String!
