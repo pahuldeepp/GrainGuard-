@@ -16,6 +16,26 @@ async function cbQuery(text: string, values?: any[]): Promise<import("pg").Query
   return postgresCircuitBreaker.execute(() => pool.query(text, values));
 }
 
+// Tenant-scoped query — sets app.current_tenant_id for RLS enforcement
+export async function tenantQuery(
+  tenantId: string,
+  text: string,
+  values?: any[]
+): Promise<import("pg").QueryResult<any>> {
+  return postgresCircuitBreaker.execute(async () => {
+    const client = await pool.connect();
+    try {
+      await client.query('SET LOCAL app.current_tenant_id = $1', [tenantId]);
+      return await client.query(text, values);
+    } finally {
+      client.release();
+    }
+  });
+}
+
+// Tenant-scoped query — sets app.current_tenant_id for RLS enforcement
+// Use this for all queries that should be tenant-isolated
+
 export const db = {
 
   async getDevice(deviceId: string) {
@@ -92,8 +112,11 @@ export const db = {
     return result.rows[0] || null;
   },
 
-  async getTelemetryHistory(deviceId: string, limit = 50) {
-    const result = await cbQuery(
+  async getTelemetryHistory(deviceId: string, limit = 50, tenantId?: string) {
+    const queryFn = tenantId
+      ? (text: string, values: any[]) => tenantQuery(tenantId, text, values)
+      : cbQuery;
+    const result = await queryFn(
       `SELECT device_id, temperature, humidity, recorded_at
        FROM device_telemetry_history
        WHERE device_id = $1

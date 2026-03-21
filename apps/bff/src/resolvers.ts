@@ -184,7 +184,7 @@ export const resolvers = {
       }
 
       console.log('[history] falling back to Postgres');
-      const rows = await db.getTelemetryHistory(args.deviceId, limit);
+      const rows = await db.getTelemetryHistory(args.deviceId, limit, ctx.tenantId);
       return rows.map((row: any) => ({
         deviceId:    row.deviceId,
         temperature: row.temperature,
