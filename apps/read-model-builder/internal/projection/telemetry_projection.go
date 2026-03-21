@@ -180,6 +180,12 @@ func HandleTelemetry(pool *pgxpool.Pool, redisClient *redis.Client) func([]byte)
 			"version":     newVersion,
 		})
 
+		if redisClient == nil {
+			return nil
+		}
+		if redisClient == nil {
+			return nil
+		}
 		pipe := redisClient.Pipeline()
 		pipe.Set(ctx, dataKey, cachePayload, 5*time.Minute)
 		pipe.Set(ctx, versionKey, newVersion, 5*time.Minute)
@@ -300,7 +306,12 @@ func HandleTelemetryBatch(pool *pgxpool.Pool, redisClient *redis.Client) func(co
 		}
 		rows.Close()
 
-		newEvents := events
+		newEvents := make([]parsedEvent, 0, len(events))
+		for _, e := range events {
+			if _, ok := newEventIDs[e.eventID]; ok {
+				newEvents = append(newEvents, e)
+			}
+		}
 
 		if len(newEvents) == 0 {
 			observability.EventsProcessed.Add(float64(len(events)))
@@ -400,6 +411,9 @@ func HandleTelemetryBatch(pool *pgxpool.Pool, redisClient *redis.Client) func(co
 			eventByDevice[e.deviceID] = e
 		}
 
+		if redisClient == nil {
+			return nil
+		}
 		pipe := redisClient.Pipeline()
 		for _, v := range versions {
 			e, ok := eventByDevice[v.deviceID]
