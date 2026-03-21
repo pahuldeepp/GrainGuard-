@@ -296,4 +296,42 @@ export const db = {
       },
     };
   },
+  async createDevice(input: { serialNumber: string; tenantId: string }) {
+    const result = await cbQuery(
+      `INSERT INTO device_projections (device_id, tenant_id, serial_number, created_at)
+       VALUES (gen_random_uuid(), $1, $2, NOW())
+       RETURNING device_id, tenant_id, serial_number, created_at`,
+      [input.tenantId, input.serialNumber]
+    );
+    return {
+      deviceId:     result.rows[0].device_id,
+      tenantId:     result.rows[0].tenant_id,
+      serialNumber: result.rows[0].serial_number,
+      createdAt:    new Date(result.rows[0].created_at).toISOString(),
+    };
+  },
+
+  async updateDevice(deviceId: string, input: { serialNumber?: string }) {
+    const result = await cbQuery(
+      `UPDATE device_projections
+       SET serial_number = COALESCE($1, serial_number)
+       WHERE device_id = $2
+       RETURNING device_id, tenant_id, serial_number, created_at`,
+      [input.serialNumber || null, deviceId]
+    );
+    return {
+      deviceId:     result.rows[0].device_id,
+      tenantId:     result.rows[0].tenant_id,
+      serialNumber: result.rows[0].serial_number,
+      createdAt:    new Date(result.rows[0].created_at).toISOString(),
+    };
+  },
+
+  async deleteDevice(deviceId: string) {
+    await cbQuery(
+      `DELETE FROM device_projections WHERE device_id = $1`,
+      [deviceId]
+    );
+  },
+
 };

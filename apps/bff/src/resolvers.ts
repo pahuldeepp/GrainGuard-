@@ -1,9 +1,11 @@
-﻿import { db } from "./datasources/postgres";
+﻿import { GraphQLError } from "graphql";
+import { db } from "./datasources/postgres";
 import { search } from "./datasources/elasticsearch";
 import { cache } from "./datasources/redis";
 import { pubsub, TELEMETRY_UPDATED, TENANT_TELEMETRY_UPDATED } from "./pubsub";
 import type { BffContext } from "./server";
 import { getTelemetryHistoryFromCassandra } from "./datasources/cassandra";
+import { requireAdmin, requireOperator } from "./lib/rbac";
 
 const TELEMETRY_TTL = 30;
 const DEVICE_TTL = 300;
@@ -192,17 +194,62 @@ export const resolvers = {
         recordedAt:  new Date(row.recordedAt).toISOString(),
       }));
     },
+
     devicesConnection: async (_: any, args: { first?: number; after?: string }, ctx: BffContext) => {
-      const first = Math.min(args.first || 20, 100); // cap at 100
+      const first = Math.min(args.first || 20, 100);
       const after = args.after || null;
       return db.getDevicesWithCursor(first, after, ctx.tenantId);
     },
+
     searchDevices: async (_: any, args: { query: string; limit?: number }, ctx: BffContext) => {
       const q = (args.query || "").trim();
       if (q.length < 2) return [];
       return search.searchDevices(q, ctx.tenantId, args.limit || 20);
     },
   },
+
+  Mutation: {
+    createDevice: async (_: any, args: { input: { serialNumber: string } }, ctx: BffContext) => {
+      requireAdmin(ctx);
+      const result = await db.createDevice({
+        serialNumber: args.input.serialNumber,
+        tenantId: ctx.tenantId,
+      });
+      await cache.del(`devices:all:${ctx.tenantId}:20`);
+      return result;
+    },
+
+    updateDevice: async (_: any, args: { deviceId: string; input: { serialNumber?: string } }, ctx: BffContext) => {
+      requireOperator(ctx);
+      const existing = await db.getDevice(args.deviceId);
+      if (!existing) throw new GraphQLError("Device not found", {
+        extensions: { code: "NOT_FOUND", http: { status: 404 } },
+      });
+      if (existing.tenant_id !== ctx.tenantId) throw new GraphQLError("Forbidden", {
+        extensions: { code: "FORBIDDEN", http: { status: 403 } },
+      });
+      const result = await db.updateDevice(args.deviceId, args.input);
+      await cache.del(`device:full:${ctx.tenantId}:${args.deviceId}`);
+      await cache.del(`devices:all:${ctx.tenantId}:20`);
+      return result;
+    },
+
+    deleteDevice: async (_: any, args: { deviceId: string }, ctx: BffContext) => {
+      requireAdmin(ctx);
+      const existing = await db.getDevice(args.deviceId);
+      if (!existing) throw new GraphQLError("Device not found", {
+        extensions: { code: "NOT_FOUND", http: { status: 404 } },
+      });
+      if (existing.tenant_id !== ctx.tenantId) throw new GraphQLError("Forbidden", {
+        extensions: { code: "FORBIDDEN", http: { status: 403 } },
+      });
+      await db.deleteDevice(args.deviceId);
+      await cache.del(`device:full:${ctx.tenantId}:${args.deviceId}`);
+      await cache.del(`devices:all:${ctx.tenantId}:20`);
+      return { success: true, message: "Device deleted" };
+    },
+  },
+
   Subscription: {
     telemetryUpdated: {
       subscribe: (_: any, args: { deviceId: string }, ctx: BffContext) => {
@@ -226,4 +273,3 @@ export const resolvers = {
     },
   },
 };
-

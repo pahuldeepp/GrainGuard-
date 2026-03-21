@@ -55,29 +55,23 @@
     totalCount: Int!
   }
 
-  type PageInfo {
-    hasNextPage:     Boolean!
-    hasPreviousPage: Boolean!
-    startCursor:     String
-    endCursor:       String
+  type MutationResult {
+    success: Boolean!
+    message: String
   }
 
-  type DeviceEdge {
-    node:   Device!
-    cursor: String!
+  input CreateDeviceInput {
+    serialNumber: String!
   }
 
-  type DeviceConnection {
-    edges:      [DeviceEdge!]!
-    pageInfo:   PageInfo!
-    totalCount: Int!
+  input UpdateDeviceInput {
+    serialNumber: String
   }
 
   type Query {
     device(deviceId: String!): Device
     devices(limit: Int): [Device!]!
     devicesConnection(first: Int, after: String): DeviceConnection!
-
     deviceTelemetry(deviceId: String!): Telemetry
     allTelemetry(limit: Int): [Telemetry!]!
     manyDeviceTelemetry(deviceIds: [String!]!): [Telemetry!]!
@@ -85,9 +79,14 @@
     searchDevices(query: String!, limit: Int): [SearchResult!]!
   }
 
+  type Mutation {
+    createDevice(input: CreateDeviceInput!): Device!
+    updateDevice(deviceId: String!, input: UpdateDeviceInput!): Device!
+    deleteDevice(deviceId: String!): MutationResult!
+  }
+
   type Subscription {
     telemetryUpdated(deviceId: String!): Telemetry!
     tenantTelemetryUpdated(tenantId: String!): Telemetry!
   }
 `;
-

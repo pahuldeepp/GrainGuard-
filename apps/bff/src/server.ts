@@ -22,6 +22,7 @@ const AUDIENCE = process.env.JWT_AUDIENCE!;
 const ALLOWED_ORIGINS =
   (process.env.ALLOWED_ORIGINS ||
     "http://localhost:5173,http://localhost:8086").split(",");
+
 if (!JWKS_URL || !ISSUER || !AUDIENCE) {
   throw new Error("JWKS_URL, JWT_ISSUER, JWT_AUDIENCE must be set");
 }
@@ -35,6 +36,7 @@ async function verifyToken(token: string) {
   });
   return payload as JWTPayload & {
     "https://grainguard/tenant_id"?: string;
+    "https://grainguard/roles"?: string[];
     sub?: string;
   };
 }
@@ -42,6 +44,7 @@ async function verifyToken(token: string) {
 export interface BffContext {
   tenantId: string;
   userId: string;
+  roles: string[];
 }
 
 async function startServer() {
@@ -85,7 +88,12 @@ async function startServer() {
         const payload = await verifyToken(token.substring("Bearer ".length));
         const tenantId = payload["https://grainguard/tenant_id"];
         if (!tenantId) throw new Error("Tenant not found");
-        return { tenantId: String(tenantId), userId: String(payload.sub || "") };
+        const roles = payload["https://grainguard/roles"] || [];
+        return {
+          tenantId: String(tenantId),
+          userId: String(payload.sub || ""),
+          roles,
+        };
       },
     },
     wsServer
@@ -93,7 +101,7 @@ async function startServer() {
 
   const server = new ApolloServer<BffContext>({
     validationRules: [
-      depthLimit(5),  // max query depth = 5 levels
+      depthLimit(5),
     ],
     schema,
     plugins: [
@@ -147,9 +155,12 @@ async function startServer() {
             });
           }
 
+          const roles = payload["https://grainguard/roles"] || [];
+
           return {
             tenantId: String(tenantId),
             userId: String(userId || ""),
+            roles,
           };
         } catch (err) {
           if (err instanceof GraphQLError) throw err;
@@ -180,4 +191,3 @@ startServer().catch((err) => {
   console.error("Failed to start BFF:", err);
   process.exit(1);
 });
-
