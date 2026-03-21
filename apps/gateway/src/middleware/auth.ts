@@ -90,6 +90,7 @@ export async function authMiddleware(
 
     return next();
   } catch (err) {
+    console.error("Token validation failed:", err);
     return res.status(401).json({ error: "invalid_token" });
   }
 }
