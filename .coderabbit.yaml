@@ -1,0 +1,22 @@
+language: "en-US"
+reviews:
+  profile: "assertive"
+  request_changes_workflow: true
+  high_level_summary: true
+  poem: false
+  path_instructions:
+    - path: "apps/read-model-builder/**/*.go"
+      instructions: |
+        Check pgx rows.Err() after rows.Close().
+        Verify tenant_id in all DB writes.
+        Verify Kafka offset committed only after DB commit.
+    - path: "apps/bff/src/**/*.ts"
+      instructions: |
+        Check all queries use tenantId for RLS.
+        Verify cache keys include tenantId.
+        Check authentication on all resolvers.
+    - path: "apps/load-generator/**"
+      instructions: |
+        Verify eventId and tenantId are always set.
+chat:
+  auto_reply: true
