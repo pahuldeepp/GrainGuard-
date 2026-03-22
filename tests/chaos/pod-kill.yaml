@@ -1,0 +1,155 @@
+version: "1.0.0"
+title: Pod Kill — GrainGuard critical path services
+description: >
+  Kill one pod from gateway, bff, and telemetry-service.
+  Verify each respawns and passes readiness within 30 seconds.
+
+tags:
+  - kubernetes
+  - pod-failure
+  - availability
+
+configuration:
+  namespace:
+    type: env
+    key: NAMESPACE
+    default: grainguard-dev
+
+steady-state-hypothesis:
+  title: All critical-path pods are healthy before and after
+  probes:
+    - name: gateway-pods-healthy
+      type: probe
+      tolerance: true
+      provider:
+        type: process
+        path: kubectl
+        arguments:
+          - rollout
+          - status
+          - deployment/gateway
+          - -n
+          - "${namespace}"
+          - --timeout=30s
+
+    - name: bff-pods-healthy
+      type: probe
+      tolerance: true
+      provider:
+        type: process
+        path: kubectl
+        arguments:
+          - rollout
+          - status
+          - deployment/bff
+          - -n
+          - "${namespace}"
+          - --timeout=30s
+
+    - name: telemetry-pods-healthy
+      type: probe
+      tolerance: true
+      provider:
+        type: process
+        path: kubectl
+        arguments:
+          - rollout
+          - status
+          - deployment/telemetry-service
+          - -n
+          - "${namespace}"
+          - --timeout=30s
+
+method:
+  # --- gateway ---
+  - name: kill-gateway-pod
+    type: action
+    provider:
+      type: process
+      path: kubectl
+      arguments:
+        - delete
+        - pod
+        - -l
+        - app=gateway
+        - -n
+        - "${namespace}"
+        - --grace-period=0
+        - --force
+
+  - name: wait-gateway-recovery
+    type: action
+    provider:
+      type: process
+      path: kubectl
+      arguments:
+        - rollout
+        - status
+        - deployment/gateway
+        - -n
+        - "${namespace}"
+        - --timeout=30s
+    pauses:
+      after: 5
+
+  # --- bff ---
+  - name: kill-bff-pod
+    type: action
+    provider:
+      type: process
+      path: kubectl
+      arguments:
+        - delete
+        - pod
+        - -l
+        - app=bff
+        - -n
+        - "${namespace}"
+        - --grace-period=0
+        - --force
+
+  - name: wait-bff-recovery
+    type: action
+    provider:
+      type: process
+      path: kubectl
+      arguments:
+        - rollout
+        - status
+        - deployment/bff
+        - -n
+        - "${namespace}"
+        - --timeout=30s
+    pauses:
+      after: 5
+
+  # --- telemetry-service ---
+  - name: kill-telemetry-pod
+    type: action
+    provider:
+      type: process
+      path: kubectl
+      arguments:
+        - delete
+        - pod
+        - -l
+        - app=telemetry-service
+        - -n
+        - "${namespace}"
+        - --grace-period=0
+        - --force
+
+  - name: wait-telemetry-recovery
+    type: action
+    provider:
+      type: process
+      path: kubectl
+      arguments:
+        - rollout
+        - status
+        - deployment/telemetry-service
+        - -n
+        - "${namespace}"
+        - --timeout=30s
+
+rollbacks: []
