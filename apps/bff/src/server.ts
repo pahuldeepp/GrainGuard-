@@ -5,6 +5,7 @@ import { ApolloServerPluginDrainHttpServer } from "@apollo/server/plugin/drainHt
 import express from "express";
 import http from "http";
 import cors from "cors";
+import { metricsHandler } from "./observability/metrics";
 import helmet from "helmet";
 import { WebSocketServer } from "ws";
 import { useServer } from "graphql-ws/lib/use/ws";
@@ -43,6 +44,8 @@ export interface BffContext {
   tenantId: string;
   userId: string;
 }
+
+app.get("/metrics", metricsHandler());
 
 async function startServer() {
   const app = express();
