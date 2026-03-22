@@ -539,3 +539,43 @@ volumes:
 networks:
   grainguard-net:
     driver: bridge
+
+  risk-engine:
+    build:
+      context: ../..
+      dockerfile: apps/risk-engine/Dockerfile
+    container_name: grainguard-risk-engine
+    restart: unless-stopped
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      TELEMETRY_TOPIC: telemetry.events
+      RISK_SCORES_TOPIC: risk.scores
+      KAFKA_GROUP_ID: risk-engine
+      RABBITMQ_URL: amqp://grainguard:grainguard@rabbitmq:5672/grainguard
+    depends_on:
+      kafka:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - grainguard-net
+
+  risk-engine:
+    build:
+      context: ../..
+      dockerfile: apps/risk-engine/Dockerfile
+    container_name: grainguard-risk-engine
+    restart: unless-stopped
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      TELEMETRY_TOPIC: telemetry.events
+      RISK_SCORES_TOPIC: risk.scores
+      KAFKA_GROUP_ID: risk-engine
+      RABBITMQ_URL: amqp://grainguard:grainguard@rabbitmq:5672/grainguard
+    depends_on:
+      kafka:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - grainguard-net
