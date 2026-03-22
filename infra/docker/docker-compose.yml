@@ -556,8 +556,6 @@ services:
     networks:
       - grainguard-net
 
-      - grainguard-net
-
   workflow-alerts:
     build:
       context: ../..
