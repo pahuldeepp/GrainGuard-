@@ -45,11 +45,27 @@ func (w *RecoveryWorker) Start(ctx context.Context) {
 }
 
 func (w *RecoveryWorker) recover(ctx context.Context) {
+    // Sagas stuck > 30 minutes are considered permanently timed-out.
+    // Mark them FAILED instead of retrying indefinitely.
+    _, err := w.pool.Exec(ctx, `
+        UPDATE sagas
+        SET status     = 'FAILED',
+            last_error = 'saga timed out after 30 minutes without completing',
+            updated_at = NOW()
+        WHERE status IN ('IN_PROGRESS', 'COMPENSATING')
+        AND created_at < NOW() - INTERVAL '30 minutes'
+    `)
+    if err != nil {
+        log.Printf("[recovery] timeout sweep failed: %v", err)
+    }
+
+    // Retry sagas that are stuck 5-30 minutes (eligible for retry)
     rows, err := w.pool.Query(ctx, `
         SELECT saga_id, correlation_id, status, current_step, payload
         FROM sagas
         WHERE status IN ('IN_PROGRESS', 'COMPENSATING')
         AND updated_at < NOW() - INTERVAL '5 minutes'
+        AND created_at > NOW() - INTERVAL '30 minutes'
     `)
     if err != nil {
         log.Printf("[recovery] query failed: %v", err)
@@ -75,6 +91,11 @@ func (w *RecoveryWorker) recover(ctx context.Context) {
         log.Printf("[recovery] stuck saga found saga_id=%s status=%s step=%s", sagaID, status, currentStep)
 
         w.retryOrCompensate(ctx, sagaID, &saga)
+
+        // Bump updated_at so this saga is not retried again until next 5-min window
+        _, _ = w.pool.Exec(ctx,
+            `UPDATE sagas SET updated_at = NOW() WHERE saga_id = $1`, sagaID,
+        )
     }
 }
 

@@ -71,7 +71,41 @@ class SearchIndexer:
             tenant_id = event.get("tenant_id")
             if not device_id or not tenant_id:
                 return
-            self.es.update(index=DEVICE_INDEX, id=device_id, body={"doc":{"device_id":device_id,"tenant_id":tenant_id,"temperature":payload.get("temperature"),"humidity":payload.get("humidity"),"recorded_at":payload.get("recorded_at"),"status":"active"},"doc_as_upsert":True})
+
+            # Update current device state in device index
+            self.es.update(
+                index=DEVICE_INDEX,
+                id=device_id,
+                body={
+                    "doc": {
+                        "device_id": device_id,
+                        "tenant_id": tenant_id,
+                        "temperature": payload.get("temperature"),
+                        "humidity": payload.get("humidity"),
+                        "recorded_at": payload.get("recorded_at"),
+                        "status": "active",
+                    },
+                    "doc_as_upsert": True,
+                },
+            )
+
+            # Write time-series entry to telemetry index
+            # Use composite key so concurrent writes don't create duplicates
+            doc_id = f"{device_id}:{payload.get('recorded_at', '')}"
+            self.es.update(
+                index=TELEMETRY_INDEX,
+                id=doc_id,
+                body={
+                    "doc": {
+                        "device_id": device_id,
+                        "tenant_id": tenant_id,
+                        "temperature": payload.get("temperature"),
+                        "humidity": payload.get("humidity"),
+                        "recorded_at": payload.get("recorded_at"),
+                    },
+                    "doc_as_upsert": True,
+                },
+            )
         except Exception as e:
             log.error(f"Telemetry index error: {e}")
 
