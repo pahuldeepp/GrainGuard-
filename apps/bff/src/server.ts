@@ -180,3 +180,15 @@ startServer().catch((err) => {
   console.error("Failed to start BFF:", err);
   process.exit(1);
 });
+
+// Centralized error handler
+app.use((err: Error, req: import("express").Request, res: import("express").Response, next: import("express").NextFunction) => {
+  const requestId = (req.headers["x-request-id"] as string) ?? "unknown";
+  console.error({ requestId, error: err.message, stack: err.stack });
+  if (res.headersSent) return next(err);
+  res.status(500).json({
+    error: "internal_server_error",
+    message: err.message,
+    requestId,
+  });
+});
