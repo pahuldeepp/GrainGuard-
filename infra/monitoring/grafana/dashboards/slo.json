@@ -1,0 +1,403 @@
+{
+  "__inputs": [],
+  "__requires": [
+    { "type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.0.0" },
+    { "type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0" }
+  ],
+  "annotations": { "list": [] },
+  "description": "GrainGuard — SLO burn-rate dashboard",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "Availability SLO — 99.9% (30-day rolling)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red",    "value": null },
+              { "color": "yellow", "value": 99.5 },
+              { "color": "green",  "value": 99.9 }
+            ]
+          },
+          "unit": "percent",
+          "min": 99,
+          "max": 100
+        }
+      },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 1 },
+      "id": 1,
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "auto",
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true
+      },
+      "targets": [
+        {
+          "expr": "(1 - job:http_error_ratio:rate3d{job=\"gateway\"}) * 100",
+          "legendFormat": "gateway",
+          "refId": "A"
+        }
+      ],
+      "title": "Gateway Availability (3d)",
+      "type": "gauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red",    "value": null },
+              { "color": "yellow", "value": 99.5 },
+              { "color": "green",  "value": 99.9 }
+            ]
+          },
+          "unit": "percent",
+          "min": 99,
+          "max": 100
+        }
+      },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 1 },
+      "id": 2,
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "auto",
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true
+      },
+      "targets": [
+        {
+          "expr": "(1 - job:http_error_ratio:rate3d{job=\"bff\"}) * 100",
+          "legendFormat": "bff",
+          "refId": "A"
+        }
+      ],
+      "title": "BFF Availability (3d)",
+      "type": "gauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2 },
+          "unit": "percentunit"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "fast burn threshold (14.4x)" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } },
+              { "id": "custom.lineStyle", "value": { "dash": [8, 4], "fill": "dash" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "medium burn threshold (6x)" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } },
+              { "id": "custom.lineStyle", "value": { "dash": [8, 4], "fill": "dash" } }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "id": 3,
+      "options": { "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "expr": "job:http_error_ratio:rate1h{job=~\"gateway|bff\"}",
+          "legendFormat": "{{ job }} 1h error ratio",
+          "refId": "A"
+        },
+        {
+          "expr": "job:http_error_ratio:rate6h{job=~\"gateway|bff\"}",
+          "legendFormat": "{{ job }} 6h error ratio",
+          "refId": "B"
+        },
+        {
+          "expr": "vector(14.4 * 0.001)",
+          "legendFormat": "fast burn threshold (14.4x)",
+          "refId": "C"
+        },
+        {
+          "expr": "vector(6 * 0.001)",
+          "legendFormat": "medium burn threshold (6x)",
+          "refId": "D"
+        }
+      ],
+      "title": "Error Ratio — Burn Rate Windows",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 },
+      "id": 101,
+      "title": "Latency SLO — p95 < 500ms / p99 < 1000ms",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2 },
+          "unit": "s"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "p95 SLO (500ms)" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } },
+              { "id": "custom.lineStyle", "value": { "dash": [8, 4], "fill": "dash" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "p99 SLO (1000ms)" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } },
+              { "id": "custom.lineStyle", "value": { "dash": [8, 4], "fill": "dash" } }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
+      "id": 4,
+      "targets": [
+        {
+          "expr": "job:graphql_request_duration_seconds:p95rate5m{job=~\"gateway|bff\"}",
+          "legendFormat": "{{ job }} p95",
+          "refId": "A"
+        },
+        {
+          "expr": "job:graphql_request_duration_seconds:p99rate5m{job=~\"gateway|bff\"}",
+          "legendFormat": "{{ job }} p99",
+          "refId": "B"
+        },
+        { "expr": "vector(0.5)",  "legendFormat": "p95 SLO (500ms)",  "refId": "C" },
+        { "expr": "vector(1.0)",  "legendFormat": "p99 SLO (1000ms)", "refId": "D" }
+      ],
+      "title": "GraphQL Latency Percentiles",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": null },
+              { "color": "yellow", "value": 0.4 },
+              { "color": "red",    "value": 0.5 }
+            ]
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 10 },
+      "id": 5,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "expr": "job:graphql_request_duration_seconds:p95rate5m{job=\"gateway\"}",
+          "legendFormat": "gateway p95",
+          "refId": "A"
+        }
+      ],
+      "title": "Gateway p95 (now)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": null },
+              { "color": "yellow", "value": 0.8 },
+              { "color": "red",    "value": 1.0 }
+            ]
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 10 },
+      "id": 6,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "expr": "job:graphql_request_duration_seconds:p99rate5m{job=\"gateway\"}",
+          "legendFormat": "gateway p99",
+          "refId": "A"
+        }
+      ],
+      "title": "Gateway p99 (now)",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 },
+      "id": 102,
+      "title": "Projection Freshness SLO — consumer lag < 5 000",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2 },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "warning threshold" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } },
+              { "id": "custom.lineStyle", "value": { "dash": [8, 4], "fill": "dash" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "critical threshold" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } },
+              { "id": "custom.lineStyle", "value": { "dash": [8, 4], "fill": "dash" } }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 19 },
+      "id": 7,
+      "targets": [
+        {
+          "expr": "kafka_consumergroup_lag{consumergroup=~\"read-model-builder|cdc-transformer\"}",
+          "legendFormat": "{{ consumergroup }} lag",
+          "refId": "A"
+        },
+        { "expr": "vector(5000)",  "legendFormat": "warning threshold",  "refId": "B" },
+        { "expr": "vector(50000)", "legendFormat": "critical threshold", "refId": "C" }
+      ],
+      "title": "Kafka Consumer Lag",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 27 },
+      "id": 103,
+      "title": "Error Budget Remaining (30-day)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Percentage of the monthly error budget remaining. 100% = no errors consumed. 0% = SLO breached.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red",    "value": null },
+              { "color": "yellow", "value": 25 },
+              { "color": "green",  "value": 50 }
+            ]
+          },
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        }
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 28 },
+      "id": 8,
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "showThresholdMarkers": true
+      },
+      "targets": [
+        {
+          "expr": "clamp_min((1 - (job:http_error_ratio:rate3d{job=\"gateway\"} / 0.001)) * 100, 0)",
+          "legendFormat": "gateway",
+          "refId": "A"
+        }
+      ],
+      "title": "Gateway Error Budget Remaining",
+      "type": "gauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red",    "value": null },
+              { "color": "yellow", "value": 25 },
+              { "color": "green",  "value": 50 }
+            ]
+          },
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        }
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 28 },
+      "id": 9,
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "showThresholdMarkers": true
+      },
+      "targets": [
+        {
+          "expr": "clamp_min((1 - (job:http_error_ratio:rate3d{job=\"bff\"} / 0.001)) * 100, 0)",
+          "legendFormat": "bff",
+          "refId": "A"
+        }
+      ],
+      "title": "BFF Error Budget Remaining",
+      "type": "gauge"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": ["slo", "grainguard"],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "hide": 0,
+        "includeAll": false,
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": { "from": "now-24h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "GrainGuard — SLO Burn Rate",
+  "uid": "grainguard-slo",
+  "version": 1
+}
