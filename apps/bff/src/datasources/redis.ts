@@ -35,13 +35,27 @@ export const cache = {
     await client.del(key);
   },
 
-  async acquireLock(key: string, ttlSeconds: number): Promise<boolean> {
+  async acquireLock(key: string, ttlSeconds: number): Promise<string | null> {
     const lockKey = `lock:${key}`;
-    const result = await client.set(lockKey, "1", { EX: ttlSeconds, NX: true });
-    return result === "OK";
+    const token = Math.random().toString(36).slice(2);
+    const result = await client.set(lockKey, token, { EX: ttlSeconds, NX: true });
+    return result === "OK" ? token : null;
   },
 
-  async releaseLock(key: string): Promise<void> {
-    await client.del(`lock:${key}`);
+  async releaseLock(key: string, token?: string): Promise<void> {
+    const lockKey = `lock:${key}`;
+    if (!token) {
+      await client.del(lockKey);
+      return;
+    }
+    // Atomic compare-and-delete — only release if we own the lock
+    const script = `
+      if redis.call("get", KEYS[1]) == ARGV[1] then
+        return redis.call("del", KEYS[1])
+      else
+        return 0
+      end
+    `;
+    await client.eval(script, { keys: [lockKey], arguments: [token] });
   }
 };
