@@ -106,8 +106,8 @@ auditLogRouter.get(
 
     // Build CSV string in memory — these are small enough
     const header = "id,event_type,actor_id,resource_type,resource_id,ip_address,created_at";
-    const csvRows = rows.map((r) =>
-      [r.id, r.event_type, r.actor_id, r.resource_type, r.resource_id, r.ip_address, r.created_at]
+    const csvRows = rows.map((r: Record<string, unknown>) =>
+      [r["id"], r["event_type"], r["actor_id"], r["resource_type"], r["resource_id"], r["ip_address"], r["created_at"]]
         .map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`)  // CSV-escape
         .join(",")
     );

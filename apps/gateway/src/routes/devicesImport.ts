@@ -60,10 +60,10 @@ devicesImportRouter.post(
     const lines: string[] = [];
     let headerSeen = false;
 
-    bb.on("file", (_fieldname, file) => {
+    bb.on("file", (_fieldname: string, file: NodeJS.ReadableStream) => {
       let buffer = "";
 
-      file.on("data", (chunk: Buffer) => {
+      (file as NodeJS.ReadableStream).on("data", (chunk: Buffer) => {
         buffer += chunk.toString("utf8");
         const parts = buffer.split("\n");
         // Everything except the last incomplete line

@@ -26,13 +26,18 @@
     "jose": "^5.2.4",
     "pg": "^8.11.5",
     "prom-client": "^15.0.0",
-    "zod": "^3.25.76"
+    "zod": "^3.25.76",
+    "busboy": "^1.6.0",
+    "stripe": "^16.0.0",
+    "cookie-parser": "^1.4.6"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/node": "^20.11.30",
     "@types/pg": "^8.10.9",
+    "@types/busboy": "^1.5.4",
+    "@types/cookie-parser": "^1.4.7",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.5"
   }

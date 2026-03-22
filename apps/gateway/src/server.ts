@@ -3,6 +3,7 @@ import express, { Request, Response, NextFunction } from "express";
 import http from "http";
 import helmet from "helmet";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import { createDevice } from "./services/device";
 import { getDeviceLatestTelemetry } from "./services/device-query";
 import { redis } from "./cache/redis";
@@ -44,6 +45,7 @@ const BFF_PORT = 4000;
  */
 app.use(securityHeaders());
 app.use(permissionsPolicy());
+app.use(cookieParser()); // required for req.cookies used by csrfProtection()
 
 /**
  * Stripe webhook — MUST receive the raw Buffer body so that
