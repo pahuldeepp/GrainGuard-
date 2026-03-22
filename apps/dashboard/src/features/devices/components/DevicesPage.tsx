@@ -6,6 +6,7 @@ import { EmptyState } from "../../../shared/components/EmptyState";
 import { useTenantContext } from "../../tenancy/TenantContext";
 import toast from "react-hot-toast";
 import { exportDevicesToCsv, buildCsvFilename } from "../../../utils/exportCsv";
+import { RegisterDeviceModal } from "./RegisterDeviceModal";
 
 type StatusFilter = "all" | "with-telemetry" | "no-data";
 
@@ -13,6 +14,7 @@ export function DevicesPage() {
   const [limit, setLimit] = useState(200);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [registerOpen, setRegisterOpen] = useState(false); // controls modal visibility
 
   const { activeTenantId } = useTenantContext();
   const debouncedSearch = useDebounce(search, 300);
@@ -115,6 +117,12 @@ export function DevicesPage() {
           </p>
         </div>
         <div className="flex gap-3">
+          <button
+            onClick={() => setRegisterOpen(true)}
+            className="px-4 py-2 bg-green-600 text-white rounded text-sm hover:bg-green-700"
+          >
+            + Register Device
+          </button>
           <select
             value={limit}
             onChange={(e) => setLimit(Number(e.target.value))}
@@ -206,6 +214,16 @@ export function DevicesPage() {
       <div className="overflow-x-auto rounded-lg">
         <DeviceTable devices={filteredDevices} loading={loading} />
       </div>
+
+      {/* Register Device modal — portal rendered, outside the table scroll context */}
+      <RegisterDeviceModal
+        open={registerOpen}
+        onClose={() => setRegisterOpen(false)}
+        onSuccess={() => {
+          toast.success("Device registered successfully");
+          handleRefetch(); // reload the device list to show the new row
+        }}
+      />
     </div>
   );
 }

@@ -7,6 +7,8 @@ import client from "./lib/apollo";
 import { setGetAccessTokenSilently } from "./lib/auth0";
 import { DevicesPage } from "./features/devices/components/DevicesPage";
 import { DeviceDetailPage } from "./features/devices/components/DeviceDetailPage";
+import { BillingPage } from "./features/billing/BillingPage";
+import { OnboardingPage } from "./features/onboarding/OnboardingPage";
 import { ErrorBoundary } from "./shared/components/ErrorBoundary";
 import { NotFound } from "./shared/components/NotFound";
 import { ProtectedRoute } from "./features/auth/ProtectedRoute";
@@ -49,6 +51,14 @@ function AppInner() {
                     Devices
                   </Link>
                 )}
+                {isAuthenticated && (
+                  <Link
+                    to="/billing"
+                    className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
+                  >
+                    Billing
+                  </Link>
+                )}
                 {isAuthenticated && <TenantSwitcher />}
                 <button
                   onClick={toggle}
@@ -78,6 +88,9 @@ function AppInner() {
               <Routes>
                 <Route path="/" element={<DevicesPage />} />
                 <Route path="/devices/:id" element={<DeviceDetailPage />} />
+                <Route path="/billing" element={<BillingPage />} />
+                <Route path="/billing/success" element={<BillingPage />} />
+                <Route path="/onboarding" element={<OnboardingPage />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </ProtectedRoute>
