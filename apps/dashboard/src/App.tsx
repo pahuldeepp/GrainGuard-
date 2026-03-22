@@ -9,6 +9,9 @@ import { DevicesPage } from "./features/devices/components/DevicesPage";
 import { DeviceDetailPage } from "./features/devices/components/DeviceDetailPage";
 import { BillingPage } from "./features/billing/BillingPage";
 import { OnboardingPage } from "./features/onboarding/OnboardingPage";
+import { SSOPage } from "./features/sso/SSOPage";
+import { AlertRulesPage } from "./features/alerts/AlertRulesPage";
+import { AuditLogPage } from "./features/audit/AuditLogPage";
 import { ErrorBoundary } from "./shared/components/ErrorBoundary";
 import { NotFound } from "./shared/components/NotFound";
 import { ProtectedRoute } from "./features/auth/ProtectedRoute";
@@ -52,12 +55,16 @@ function AppInner() {
                   </Link>
                 )}
                 {isAuthenticated && (
-                  <Link
-                    to="/billing"
-                    className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
-                  >
-                    Billing
-                  </Link>
+                  <Link to="/billing" className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">Billing</Link>
+                )}
+                {isAuthenticated && (
+                  <Link to="/alerts" className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">Alerts</Link>
+                )}
+                {isAuthenticated && (
+                  <Link to="/audit" className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">Audit</Link>
+                )}
+                {isAuthenticated && (
+                  <Link to="/sso" className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">SSO</Link>
                 )}
                 {isAuthenticated && <TenantSwitcher />}
                 <button
@@ -91,6 +98,9 @@ function AppInner() {
                 <Route path="/billing" element={<BillingPage />} />
                 <Route path="/billing/success" element={<BillingPage />} />
                 <Route path="/onboarding" element={<OnboardingPage />} />
+                <Route path="/sso" element={<SSOPage />} />
+                <Route path="/alerts" element={<AlertRulesPage />} />
+                <Route path="/audit" element={<AuditLogPage />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </ProtectedRoute>

@@ -19,6 +19,10 @@ import { securityHeaders, permissionsPolicy } from "./middleware/securityHeaders
 import { csrfProtection } from "./middleware/csrf";
 import { billingRouter } from "./routes/billing";
 import { tenantsRouter } from "./routes/tenants";
+import { ssoRouter } from "./routes/sso";
+import { devicesImportRouter } from "./routes/devicesImport";
+import { alertRulesRouter } from "./routes/alertRules";
+import { auditLogRouter } from "./routes/auditLog";
 
 const app = express();
 
@@ -148,6 +152,10 @@ app.use("/graphql", (req: Request, res: Response) => {
 app.use(express.json({ limit: "64kb" }));
 app.use(billingRouter);
 app.use(tenantsRouter);
+app.use(ssoRouter);
+app.use(devicesImportRouter);
+app.use(alertRulesRouter);
+app.use(auditLogRouter);
 
 /**
  * Telemetry ingest — device auth via API key (not JWT)
