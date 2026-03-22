@@ -2,25 +2,26 @@
 
 > Staff+/Principal-grade, polyglot microservices SaaS platform for grain and agri operations.
 
-GrainGuard ingests high-volume device telemetry, computes spoilage risk scores, triggers automated alert workflows, and ships with full security, observability, CI/CD, and failure-recovery playbooks. Deliberately architected to demonstrate end-to-end DDIA patterns and Staff-level engineering depth.
+GrainGuard ingests high-volume device telemetry, computes spoilage risk scores, triggers automated alert workflows, and ships with full security, observability, CI/CD, chaos testing, SLO monitoring, and operational runbooks. Deliberately architected to demonstrate end-to-end DDIA patterns and Staff-level engineering depth.
 
 ---
 
 ## Architecture
+
 ```
 React Dashboard
       ↓
-API Gateway (Node) -- JWT/RBAC/Rate Limiting
+API Gateway (Node) ── JWT/RBAC/Rate Limiting
       ↓
-BFF GraphQL (Node) -- Redis Cache -- Elasticsearch
+BFF GraphQL (Node) ── Redis Cache ── Elasticsearch
       ↓
 Telemetry Service (Go, gRPC + mTLS)
       ↓
-Postgres (OLTP + Outbox) -- Kafka (CDC via Debezium)
+Postgres (OLTP + Outbox) ── Kafka (CDC via Debezium)
       ↓
-Read Model Builder (Go) -- Cassandra (time-series) -- Postgres Read
+Read Model Builder (Go) ── Cassandra (time-series) ── Postgres Read
       ↓
-Risk Engine (Python) -- Workflow Alerts (Node) -- RabbitMQ -- Jobs Worker
+Risk Engine (Python) ── Workflow Alerts (Node) ── RabbitMQ ── Jobs Worker
 ```
 
 ### Key design decisions
@@ -68,7 +69,7 @@ Risk Engine (Python) -- Workflow Alerts (Node) -- RabbitMQ -- Jobs Worker
 
 **Observability:** Prometheus · Grafana · Loki · Tempo · OpenTelemetry
 
-**Infrastructure:** Docker Compose · Kubernetes · Terraform (AWS EKS/RDS/MSK/Elasticache)
+**Infrastructure:** Docker Compose · Kubernetes (Helm + ArgoCD) · Terraform (AWS EKS/RDS/MSK/Elasticache)
 
 **Security:** Auth0 · JWT/RBAC · mTLS · Postgres RLS · Audit logging · Helmet/CORS
 
@@ -78,7 +79,7 @@ Risk Engine (Python) -- Workflow Alerts (Node) -- RabbitMQ -- Jobs Worker
 
 ### Prerequisites
 - Docker + Docker Compose
-- Go 1.25+
+- Go 1.24+
 - Node.js 20+
 - Python 3.12+
 
@@ -115,23 +116,21 @@ cp infra/docker/.env.example infra/docker/.env
 go run tools/publish-telemetry/main.go
 ```
 
-### Run replay test
-```bash
-./scripts/replay/replay_test.sh
-```
-
 ---
 
 ## Testing
+
 ```bash
 # Go unit + integration tests
-go test ./...
+go test -race -count=1 ./...
 
-# React unit tests
-cd apps/dashboard && npm test
+# k6 load tests (requires running stack)
+k6 run tests/load/spike.js
+k6 run tests/load/soak.js
+k6 run tests/load/stress.js
 
-# k6 load tests
-k6 run scripts/load-tests/gateway-load-test.js
+# Chaos tests (requires kubectl + live cluster)
+bash tests/chaos/run-all.sh
 
 # Replay + idempotency test
 ./scripts/replay/replay_test.sh
@@ -144,16 +143,55 @@ k6 run scripts/load-tests/gateway-load-test.js
 - **Traces:** Grafana Tempo via OpenTelemetry
 - **Metrics:** Prometheus + Grafana (gateway, BFF, read-model-builder)
 - **Logs:** Loki structured JSON logs across all Go services
-- **Alerts:** 5 Grafana alert rules to Slack #grainguard-alerts
-  - Service down
-  - High error rate (>10% 5xx)
-  - Kafka consumer lag (>10k messages)
-  - DLQ messages detected
-  - Critical spoilage risk
+- **SLOs:** Burn-rate alerts (availability 99.9%, latency p95 < 500ms, p99 < 1000ms)
+- **Alerts:**
+  - `AvailabilitySLOFastBurn` — error budget burning at 14.4x (critical, pages immediately)
+  - `AvailabilitySLOMediumBurn` — error budget burning at 6x (warning)
+  - `LatencySLOP95Breach` / `LatencySLOP99Breach` — latency SLO breach
+  - `ProjectionLagHigh` / `ProjectionLagCritical` — consumer lag SLO breach
+  - `DLQMessagesAccumulating` — dead letter queue spike
+
+---
+
+## Chaos Testing
+
+Five experiments covering the critical failure modes:
+
+| Experiment | What it kills | Pass condition |
+|------------|--------------|----------------|
+| `pod-kill` | gateway, bff, telemetry-service pods | Respawns within 30s |
+| `kafka-consumer-pause` | read-model-builder + cdc-transformer | Lag ≤ 10 000 within 5 min |
+| `redis-outage` | Redis | BFF falls back to DB, no panics |
+| `projection-lag` | read-model-builder | Alert fires, lag recovers in 5 min |
+| `network-partition` | telemetry-service → Kafka egress | Messages buffered, delivered after heal |
+
+```bash
+# Run all experiments
+bash tests/chaos/run-all.sh
+
+# Or trigger via GitHub Actions (manual dispatch)
+# .github/workflows/chaos.yml — also runs weekly on Saturdays
+```
+
+---
+
+## Operational Runbooks
+
+On-call guides for every critical failure mode:
+
+| Runbook | Trigger |
+|---------|---------|
+| [Postgres Failover](docs/runbooks/postgres-failover.md) | Primary down, replica lag high |
+| [Kafka Loss](docs/runbooks/kafka-loss.md) | Broker down, under-replicated partitions |
+| [DLQ Spike](docs/runbooks/dlq-spike.md) | `DLQMessagesAccumulating` alert |
+| [Redis Failover](docs/runbooks/redis-failover.md) | Cache miss 100%, lock timeouts |
+| [Projection Lag](docs/runbooks/projection-lag.md) | `ProjectionLagHigh` alert |
+| [gRPC Outage](docs/runbooks/grpc-outage.md) | Circuit breaker open, 503 upstream |
 
 ---
 
 ## Infrastructure (AWS)
+
 ```bash
 cd infra/terraform/environments/dev
 terraform init
@@ -161,7 +199,24 @@ terraform plan -var="db_password=yourpassword"
 terraform apply -var="db_password=yourpassword"
 ```
 
-Provisions: VPC · EKS · RDS Postgres · Elasticache Redis · MSK Kafka
+Provisions: VPC · EKS · RDS Postgres · Elasticache Redis · MSK Kafka · DynamoDB · ECR · Secrets Manager
+
+---
+
+## Kubernetes (GitOps)
+
+```bash
+# Bootstrap ArgoCD and deploy all services
+bash k8s/argocd/install.sh
+
+# Helm — render and diff before ArgoCD picks it up
+helm diff upgrade grainguard k8s/helm/grainguard \
+  -f k8s/helm/grainguard/values.yaml \
+  -f k8s/helm/grainguard/values-dev.yaml \
+  -n grainguard-dev
+```
+
+ArgoCD watches `k8s/argocd/apps/` and auto-syncs on every push to master.
 
 ---
 
@@ -174,22 +229,24 @@ Provisions: VPC · EKS · RDS Postgres · Elasticache Redis · MSK Kafka
 | ADR-003 | SAGA orchestration for device provisioning |
 | ADR-004 | Cassandra TWCS for telemetry time-series |
 | ADR-005 | Postgres RLS for tenant isolation |
-| ADR-006 | Redis locks + etcd for leadership |
+| ADR-006 | Redis locks for distributed coordination |
 | ADR-007 | Reject cross-datastore 2PC |
 | ADR-008 | Kafka KRaft over ZooKeeper |
 | ADR-009 | Serializable isolation for write-skew ops |
-| ADR-010 | etcd leases for singleton job leader election |
+| ADR-010 | Multi-window burn-rate SLOs (Google SRE model) |
 
 ---
 
 ## Roadmap
 
-| Release | Goal | Status |
-|---------|------|--------|
-| R1 | Core correctness loop | ~85% done |
-| R2 | CDC + Search + Messaging | ~80% done |
-| R3 | Scale hardening | ~30% done |
-| R4 | 1B-user hardening | ~10% done |
+| Phase | Goal | Status |
+|-------|------|--------|
+| R1 — Core loop | Ingest, CQRS, outbox, saga | ✅ Done |
+| R2 — CDC + Search | Debezium, Elasticsearch, RabbitMQ | ✅ Done |
+| R3 — Reliability | Helm, ArgoCD, k6 load tests, chaos tests | ✅ Done |
+| R4 — Observability | SLOs, burn-rate alerts, Grafana dashboard, runbooks | ✅ Done |
+| R5 — Security | CSRF, CSP, Trivy, CodeQL, SBOM, STRIDE | 🔜 Next |
+| R6 — SaaS billing | Stripe, tenant onboarding, usage metering | 🔜 Planned |
 
 ---
 
@@ -197,8 +254,8 @@ Provisions: VPC · EKS · RDS Postgres · Elasticache Redis · MSK Kafka
 
 - Kafka ingest: **1,700 events/sec**
 - Gateway p95 latency: **5.89ms**
-- Read model builder: **2,500-3,000 events/sec** sustained
+- Read model builder: **2,500–3,000 events/sec** sustained
 
 ---
 
-*Built as a Staff+/Principal Engineer portfolio reference.*
+*Built as a Staff+/Principal Engineer portfolio reference — demonstrating DDIA patterns, distributed systems, GitOps, SRE practices, and multi-tenant SaaS architecture.*
