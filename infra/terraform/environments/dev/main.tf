@@ -45,3 +45,35 @@ module "msk" {
   private_subnet_ids = module.vpc.private_subnet_ids
   instance_type      = "kafka.t3.small"
 }
+
+module "dynamodb" {
+  source                      = "../../modules/dynamodb"
+  project                     = var.project
+  environment                 = "dev"
+  create_terraform_lock_table = true
+}
+
+module "secrets_manager" {
+  source      = "../../modules/secrets_manager"
+  project     = var.project
+  environment = "dev"
+}
+
+module "iam_irsa" {
+  source                  = "../../modules/iam_irsa"
+  project                 = var.project
+  environment             = "dev"
+  oidc_issuer_url         = module.eks.oidc_issuer_url
+  oidc_provider_arn       = module.eks.oidc_provider_arn
+  k8s_namespace           = "grainguard"
+  secrets_read_policy_arn = module.secrets_manager.secrets_read_policy_arn
+  dynamodb_table_arns     = module.dynamodb.all_table_arns
+}
+
+module "ecr" {
+  source            = "../../modules/ecr"
+  project           = var.project
+  environment       = "dev"
+  eks_node_role_arn = module.eks.node_role_arn
+  ci_role_arn       = module.iam_irsa.ci_push_role_arn
+}
