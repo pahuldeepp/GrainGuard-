@@ -1,0 +1,68 @@
+name: Load Tests
+
+on:
+  # Run on demand or after deploy to staging
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Test type to run'
+        required: true
+        default: 'spike'
+        type: choice
+        options:
+          - spike
+          - soak
+          - stress
+          - all
+      base_url:
+        description: 'Gateway base URL'
+        required: false
+        default: 'http://localhost:3000'
+      bff_url:
+        description: 'BFF base URL'
+        required: false
+        default: 'http://localhost:4000'
+
+jobs:
+  load-test:
+    name: k6 ${{ github.event.inputs.test_type }} test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup k6
+        uses: grafana/setup-k6-action@v1
+
+      - name: Run spike test
+        if: ${{ github.event.inputs.test_type == 'spike' || github.event.inputs.test_type == 'all' }}
+        run: |
+          k6 run tests/load/spike.js \
+            --env BASE_URL=${{ github.event.inputs.base_url }} \
+            --env BFF_URL=${{ github.event.inputs.bff_url }} \
+            --env TEST_TOKEN=${{ secrets.LOAD_TEST_TOKEN }}
+
+      - name: Run soak test
+        if: ${{ github.event.inputs.test_type == 'soak' || github.event.inputs.test_type == 'all' }}
+        run: |
+          k6 run tests/load/soak.js \
+            --env BASE_URL=${{ github.event.inputs.base_url }} \
+            --env BFF_URL=${{ github.event.inputs.bff_url }} \
+            --env TEST_TOKEN=${{ secrets.LOAD_TEST_TOKEN }}
+
+      - name: Run stress test
+        if: ${{ github.event.inputs.test_type == 'stress' || github.event.inputs.test_type == 'all' }}
+        run: |
+          k6 run tests/load/stress.js \
+            --env BASE_URL=${{ github.event.inputs.base_url }} \
+            --env BFF_URL=${{ github.event.inputs.bff_url }} \
+            --env TEST_TOKEN=${{ secrets.LOAD_TEST_TOKEN }}
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-test-results-${{ github.run_id }}
+          path: tests/load/results/
+          retention-days: 30
