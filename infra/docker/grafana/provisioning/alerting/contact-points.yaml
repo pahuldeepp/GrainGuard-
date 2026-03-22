@@ -1,0 +1,33 @@
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: slack-grainguard
+    receivers:
+      - uid: slack-receiver
+        type: slack
+        settings:
+          url: ${SLACK_WEBHOOK_URL}
+          channel: "#grainguard-alerts"
+          username: GrainGuard Alerting
+          icon_emoji: ":warning:"
+          title: |
+            {{ if eq .Status "firing" }}🔴 FIRING{{ else }}✅ RESOLVED{{ end }}: {{ .CommonAnnotations.summary }}
+          text: |
+            *Severity:* {{ .CommonLabels.severity }}
+            *Description:* {{ .CommonAnnotations.description }}
+        disableResolveMessage: false
+
+notificationPolicies:
+  - orgId: 1
+    receiver: slack-grainguard
+    group_by: [alertname, severity]
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h
+    routes:
+      - receiver: slack-grainguard
+        matchers:
+          - severity = critical
+        group_wait: 10s
+        repeat_interval: 1h
