@@ -54,3 +54,6 @@ the operational overhead.
 ### Negative
 - etcd adds operational dependency (Phase 4)
 - Redis single-node is a single point of failure for locks
+
+## Memcached
+Deferred to R3. At 1B-user scale, Redis coordination work (locks, rate limiting, pub/sub, saga state) justifies offloading volatile dashboard reads to a dedicated Memcached tier. Not warranted at current traffic.
