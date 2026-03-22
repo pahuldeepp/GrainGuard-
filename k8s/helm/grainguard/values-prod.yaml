@@ -1,0 +1,84 @@
+# Prod environment overrides — higher replicas, aggressive autoscaling
+image:
+  pullPolicy: Always
+
+services:
+  gateway:
+    replicaCount: 3
+    autoscaling:
+      enabled: true
+      minReplicas: 3
+      maxReplicas: 20
+
+  bff:
+    replicaCount: 3
+    autoscaling:
+      enabled: true
+      minReplicas: 3
+      maxReplicas: 15
+
+  telemetry-service:
+    replicaCount: 3
+    autoscaling:
+      enabled: true
+      minReplicas: 3
+      maxReplicas: 20
+      targetCPUUtilizationPercentage: 50
+
+  saga-orchestrator:
+    replicaCount: 2
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 10
+
+  read-model-builder:
+    replicaCount: 3
+    autoscaling:
+      enabled: true
+      minReplicas: 3
+      maxReplicas: 15
+
+  asset-registry:
+    replicaCount: 2
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 10
+
+  risk-engine:
+    replicaCount: 3
+    autoscaling:
+      enabled: true
+      minReplicas: 3
+      maxReplicas: 15
+      targetCPUUtilizationPercentage: 50
+
+  search-indexer:
+    replicaCount: 2
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 8
+
+  workflow-alerts:
+    replicaCount: 2
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 10
+
+  jobs-worker:
+    replicaCount: 2
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 10
+
+  cassandra-writer:
+    replicaCount: 3
+    autoscaling:
+      enabled: true
+      minReplicas: 3
+      maxReplicas: 15
+      targetCPUUtilizationPercentage: 50

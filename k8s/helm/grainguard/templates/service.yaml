@@ -1,0 +1,30 @@
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+    helm.sh/chart: {{ $.Chart.Name }}-{{ $.Chart.Version }}
+spec:
+  type: {{ $svc.serviceType | default "ClusterIP" }}
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+  ports:
+    - name: http
+      port: {{ $svc.port }}
+      targetPort: {{ $svc.port }}
+      protocol: TCP
+    {{- if $svc.grpcPort }}
+    - name: grpc
+      port: {{ $svc.grpcPort }}
+      targetPort: {{ $svc.grpcPort }}
+      protocol: TCP
+    {{- end }}
+{{- end }}
+{{- end }}

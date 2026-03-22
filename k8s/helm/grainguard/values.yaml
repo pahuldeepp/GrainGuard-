@@ -1,0 +1,389 @@
+namespace: grainguard
+
+image:
+  registry: ghcr.io/pahuldeepp/grainguard
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# ─── Services ────────────────────────────────────────────────────────────────
+services:
+
+  gateway:
+    enabled: true
+    port: 3000
+    healthPort: 8081
+    healthPath: /healthz/live
+    readinessPath: /healthz/ready
+    serviceType: LoadBalancer
+    replicaCount: 2
+    image:
+      tag: latest
+    env:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      GRPC_TARGET: "telemetry-service:50051"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "otel-collector:4317"
+    envFromSecret:
+      - name: READ_DATABASE_URL
+        secretName: postgres-read-secret
+        secretKey: READ_DATABASE_URL
+      - name: JWKS_URL
+        secretName: auth-secret
+        secretKey: JWKS_URL
+      - name: JWT_ISSUER
+        secretName: auth-secret
+        secretKey: JWT_ISSUER
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 10
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 80
+
+  bff:
+    enabled: true
+    port: 4000
+    healthPath: /health
+    serviceType: ClusterIP
+    replicaCount: 2
+    image:
+      tag: latest
+    env:
+      PORT: "4000"
+      READ_DB_HOST: postgres-read
+      READ_DB_PORT: "5432"
+      READ_DB_NAME: grainguard_read
+      READ_DB_USER: postgres
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    envFromSecret:
+      - name: READ_DB_PASSWORD
+        secretName: postgres-read-secret
+        secretKey: POSTGRES_PASSWORD
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 8
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 80
+
+  telemetry-service:
+    enabled: true
+    port: 8081
+    grpcPort: 50051
+    healthPort: 8081
+    healthPath: /healthz/live
+    readinessPath: /healthz/ready
+    serviceType: ClusterIP
+    replicaCount: 2
+    image:
+      tag: latest
+    env:
+      KAFKA_BROKERS: "kafka:9092"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "otel-collector:4317"
+    envFromSecret:
+      - name: WRITE_DB_URL
+        secretName: postgres-secret
+        secretKey: WRITE_DB_URL
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 512Mi
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 12
+      targetCPUUtilizationPercentage: 60
+      targetMemoryUtilizationPercentage: 75
+
+  saga-orchestrator:
+    enabled: true
+    port: 8081
+    healthPath: /healthz/live
+    readinessPath: /healthz/ready
+    serviceType: ClusterIP
+    replicaCount: 2
+    image:
+      tag: latest
+    env:
+      KAFKA_BROKERS: "kafka:9092"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "otel-collector:4317"
+    envFromSecret:
+      - name: WRITE_DB_URL
+        secretName: postgres-secret
+        secretKey: WRITE_DB_URL
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 6
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 80
+
+  read-model-builder:
+    enabled: true
+    port: 8081
+    healthPath: /healthz/live
+    readinessPath: /healthz/ready
+    serviceType: ClusterIP
+    replicaCount: 2
+    image:
+      tag: latest
+    env:
+      KAFKA_BROKERS: "kafka:9092"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "otel-collector:4317"
+    envFromSecret:
+      - name: READ_DB_URL
+        secretName: postgres-read-secret
+        secretKey: READ_DATABASE_URL
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 8
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 80
+
+  cdc-transformer:
+    enabled: true
+    port: 8081
+    healthPath: /healthz/live
+    readinessPath: /healthz/ready
+    serviceType: ClusterIP
+    replicaCount: 1
+    image:
+      tag: latest
+    env:
+      KAFKA_BROKERS: "kafka:9092"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "otel-collector:4317"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    autoscaling:
+      enabled: true
+      minReplicas: 1
+      maxReplicas: 4
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 80
+
+  dlq-reprocessor:
+    enabled: true
+    port: 8081
+    healthPath: /healthz/live
+    readinessPath: /healthz/ready
+    serviceType: ClusterIP
+    replicaCount: 1
+    image:
+      tag: latest
+    env:
+      KAFKA_BROKERS: "kafka:9092"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "otel-collector:4317"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    autoscaling:
+      enabled: false
+
+  asset-registry:
+    enabled: true
+    port: 8081
+    grpcPort: 50052
+    healthPath: /healthz/live
+    readinessPath: /healthz/ready
+    serviceType: ClusterIP
+    replicaCount: 2
+    image:
+      tag: latest
+    env:
+      KAFKA_BROKERS: "kafka:9092"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "otel-collector:4317"
+    envFromSecret:
+      - name: WRITE_DB_URL
+        secretName: postgres-secret
+        secretKey: WRITE_DB_URL
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 6
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 80
+
+  risk-engine:
+    enabled: true
+    port: 8080
+    healthPath: /health
+    serviceType: ClusterIP
+    replicaCount: 2
+    image:
+      tag: latest
+    env:
+      KAFKA_BROKERS: "kafka:9092"
+      RABBITMQ_URL: "amqp://rabbitmq:5672"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "otel-collector:4317"
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 512Mi
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 8
+      targetCPUUtilizationPercentage: 60
+      targetMemoryUtilizationPercentage: 75
+
+  search-indexer:
+    enabled: true
+    port: 8080
+    healthPath: /health
+    serviceType: ClusterIP
+    replicaCount: 1
+    image:
+      tag: latest
+    env:
+      KAFKA_BROKERS: "kafka:9092"
+      ELASTICSEARCH_URL: "http://elasticsearch:9200"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "otel-collector:4317"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    autoscaling:
+      enabled: true
+      minReplicas: 1
+      maxReplicas: 4
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 80
+
+  workflow-alerts:
+    enabled: true
+    port: 8080
+    healthPath: /health
+    serviceType: ClusterIP
+    replicaCount: 2
+    image:
+      tag: latest
+    env:
+      KAFKA_BROKERS: "kafka:9092"
+      RABBITMQ_URL: "amqp://rabbitmq:5672"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "otel-collector:4317"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 6
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 80
+
+  jobs-worker:
+    enabled: true
+    port: 8080
+    healthPath: /health
+    serviceType: ClusterIP
+    replicaCount: 2
+    image:
+      tag: latest
+    env:
+      RABBITMQ_URL: "amqp://rabbitmq:5672"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "otel-collector:4317"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 6
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 80
+
+  cassandra-writer:
+    enabled: true
+    port: 8081
+    healthPath: /healthz/live
+    readinessPath: /healthz/ready
+    serviceType: ClusterIP
+    replicaCount: 2
+    image:
+      tag: latest
+    env:
+      KAFKA_BROKERS: "kafka:9092"
+      CASSANDRA_HOSTS: "cassandra:9042"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "otel-collector:4317"
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 512Mi
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 8
+      targetCPUUtilizationPercentage: 60
+      targetMemoryUtilizationPercentage: 75
