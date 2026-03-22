@@ -1,0 +1,36 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: grainguard-dev
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  labels:
+    environment: dev
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/pahuldeepp/GrainGuard-.git
+    targetRevision: HEAD
+    path: k8s/helm/grainguard
+    helm:
+      valueFiles:
+        - values.yaml
+        - values-dev.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: grainguard-dev
+  syncPolicy:
+    automated:
+      prune: true       # remove resources deleted from git
+      selfHeal: true    # revert manual kubectl changes
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 1m
+  revisionHistoryLimit: 5

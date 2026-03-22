@@ -1,0 +1,24 @@
+# Root "App of Apps" — ArgoCD watches this repo and deploys all child apps.
+# Apply once manually: kubectl apply -f k8s/argocd/app-of-apps.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: grainguard-apps
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/pahuldeepp/GrainGuard-.git
+    targetRevision: HEAD
+    path: k8s/argocd/apps
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
