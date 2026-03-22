@@ -598,3 +598,20 @@ networks:
         condition: service_healthy
     networks:
       - grainguard-net
+
+  asset-registry:
+    build:
+      context: ../..
+      dockerfile: apps/asset-registry/Dockerfile
+    container_name: grainguard-asset-registry
+    restart: unless-stopped
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      COMMANDS_TOPIC: device.commands
+      EVENTS_TOPIC: device.events
+      KAFKA_GROUP_ID: asset-registry
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - grainguard-net
