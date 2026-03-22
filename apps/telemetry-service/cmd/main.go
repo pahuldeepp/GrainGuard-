@@ -205,3 +205,4 @@ func main() {
 		log.Fatal().Err(err).Msg("HTTP server failed")
 	}
 }
+

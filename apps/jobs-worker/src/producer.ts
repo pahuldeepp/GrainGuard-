@@ -35,3 +35,4 @@ export async function publishAlertJob(job: AlertJob): Promise<void> {
   console.log("[producer] alert job queued device=" + job.deviceId);
   await ch.close();
 }
+

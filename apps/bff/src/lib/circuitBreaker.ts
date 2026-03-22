@@ -142,3 +142,4 @@ export const postgresCircuitBreaker = new CircuitBreaker({
   successThreshold: 2,
   timeout:          30_000,
 });
+

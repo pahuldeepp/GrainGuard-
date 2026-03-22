@@ -37,3 +37,4 @@ func (s *CreateDeviceService) Execute(ctx context.Context, tenantID string, seri
 
 	return device, nil
 }
+

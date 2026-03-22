@@ -270,3 +270,4 @@ tags:
     description: Real-time sensor data endpoints
   - name: Operations
     description: Health checks and observability
+

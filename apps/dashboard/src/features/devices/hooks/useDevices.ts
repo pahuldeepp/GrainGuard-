@@ -51,3 +51,4 @@ export function useSearchDevices(query: string, limit = 20) {
         error,
     };
 }
+

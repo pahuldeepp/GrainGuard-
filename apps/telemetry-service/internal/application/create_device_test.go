@@ -130,3 +130,4 @@ func TestNewDevice_SetsFields(t *testing.T) {
 		t.Errorf("CreatedAt %v not in range [%v, %v]", device.CreatedAt, before, after)
 	}
 }
+

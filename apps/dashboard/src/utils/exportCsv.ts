@@ -49,3 +49,4 @@ export function buildCsvFilename(isFiltering: boolean, count: number): string {
   const suffix = isFiltering ? `filtered-${count}` : `all-${count}`;
   return `grainguard-devices-${suffix}-${date}.csv`;
 }
+

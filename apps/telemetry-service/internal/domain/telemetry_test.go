@@ -101,3 +101,4 @@ func TestNewTelemetry_SameDeviceDifferentReadings(t *testing.T) {
 		}
 	}
 }
+

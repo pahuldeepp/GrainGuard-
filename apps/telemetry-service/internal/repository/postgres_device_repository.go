@@ -47,3 +47,4 @@ func (r *PostgresDeviceRepository) FindByID(ctx context.Context, id uuid.UUID) (
 
 	return &d, nil
 }
+

@@ -59,3 +59,4 @@ export const strictRateLimiter = createRateLimiter({
   windowSeconds: 60,
   maxRequests: 100,
 });
+

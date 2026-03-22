@@ -52,3 +52,4 @@ export function handleSummary(data) {
     'scripts/load-tests/results/gateway-summary.json': JSON.stringify(data, null, 2),
   };
 }
+

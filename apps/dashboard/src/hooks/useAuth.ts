@@ -29,3 +29,4 @@ export function useAuth() {
     getToken,
   };
 }
+

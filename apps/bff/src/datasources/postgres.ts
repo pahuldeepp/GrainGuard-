@@ -1,15 +1,15 @@
 import { Pool } from "pg";
 import { postgresCircuitBreaker } from "../lib/circuitBreaker";
+import { cache } from "./redis";
 
 const pool = new Pool({
-  host:     process.env.READ_DB_HOST     || "postgres-read",
+  host:     process.env.READ_DB_HOST     || "pgbouncer",
   port:     parseInt(process.env.READ_DB_PORT || "5432"),
   database: process.env.READ_DB_NAME     || "grainguard_read",
   user:     process.env.READ_DB_USER     || "postgres",
   password: process.env.READ_DB_PASSWORD || "postgres",
-  max: 10,
+  max: 50,
 });
-
 
 // Circuit-breaker-wrapped query helper
 async function cbQuery(text: string, values?: any[]): Promise<import("pg").QueryResult<any>> {
@@ -33,9 +33,6 @@ export async function tenantQuery(
   });
 }
 
-// Tenant-scoped query — sets app.current_tenant_id for RLS enforcement
-// Use this for all queries that should be tenant-isolated
-
 export const db = {
 
   async getDevice(deviceId: string) {
@@ -49,14 +46,29 @@ export const db = {
   },
 
   async getAllDevices(limit: number = 20) {
-    const result = await cbQuery(
-      `SELECT device_id, tenant_id, serial_number, created_at
-       FROM device_projections
-       ORDER BY created_at DESC
-       LIMIT $1`,
-      [limit]
-    );
-    return result.rows;
+    const cacheKey = `devices:all:${limit}`;
+    const cached = await cache.get<any[]>(cacheKey);
+    if (cached) return cached;
+
+    const locked = await cache.acquireLock(cacheKey, 5);
+    if (!locked) {
+      await new Promise(r => setTimeout(r, 100));
+      return await cache.get<any[]>(cacheKey) || [];
+    }
+
+    try {
+      const result = await cbQuery(
+        `SELECT device_id, tenant_id, serial_number, created_at
+         FROM device_projections
+         ORDER BY created_at DESC
+         LIMIT $1`,
+        [limit]
+      );
+      await cache.set(cacheKey, result.rows, 30);
+      return result.rows;
+    } finally {
+      await cache.releaseLock(cacheKey);
+    }
   },
 
   async getDeviceTelemetry(deviceId: string) {
@@ -70,26 +82,43 @@ export const db = {
   },
 
   async getAllTelemetry(limit: number = 20, tenantId?: string) {
-    if (tenantId) {
-      const result = await cbQuery(
-        `SELECT t.device_id, t.temperature, t.humidity, t.recorded_at, t.updated_at, t.version
-         FROM device_telemetry_latest t
-         INNER JOIN device_projections d ON d.device_id = t.device_id
-         WHERE d.tenant_id = $1
-         ORDER BY t.updated_at DESC
-         LIMIT $2`,
-        [tenantId, limit]
-      );
-      return result.rows;
+    const cacheKey = `telemetry:all:${tenantId || "global"}:${limit}`;
+    const cached = await cache.get<any[]>(cacheKey);
+    if (cached) return cached;
+
+    const locked = await cache.acquireLock(cacheKey, 5);
+    if (!locked) {
+      await new Promise(r => setTimeout(r, 100));
+      return await cache.get<any[]>(cacheKey) || [];
     }
-    const result = await cbQuery(
-      `SELECT device_id, temperature, humidity, recorded_at, updated_at, version
-       FROM device_telemetry_latest
-       ORDER BY updated_at DESC
-       LIMIT $1`,
-      [limit]
-    );
-    return result.rows;
+
+    try {
+      if (tenantId) {
+        const result = await cbQuery(
+          `SELECT t.device_id, t.temperature, t.humidity, t.recorded_at, t.updated_at, t.version
+           FROM device_telemetry_latest t
+           INNER JOIN device_projections d ON d.device_id = t.device_id
+           WHERE d.tenant_id = $1
+           ORDER BY t.updated_at DESC
+           LIMIT $2`,
+          [tenantId, limit]
+        );
+        await cache.set(cacheKey, result.rows, 30);
+        return result.rows;
+      }
+
+      const result = await cbQuery(
+        `SELECT device_id, temperature, humidity, recorded_at, updated_at, version
+         FROM device_telemetry_latest
+         ORDER BY updated_at DESC
+         LIMIT $1`,
+        [limit]
+      );
+      await cache.set(cacheKey, result.rows, 30);
+      return result.rows;
+    } finally {
+      await cache.releaseLock(cacheKey);
+    }
   },
 
   async getDeviceWithTelemetry(deviceId: string) {
@@ -133,45 +162,48 @@ export const db = {
   },
 
   async getAllDevicesWithTelemetry(limit: number = 20, tenantId?: string) {
-    if (tenantId) {
+    const cacheKey = `devices:telemetry:${tenantId || "global"}:${limit}`;
+    const cached = await cache.get<any[]>(cacheKey);
+    if (cached) return cached;
+
+    const locked = await cache.acquireLock(cacheKey, 5);
+    if (!locked) {
+      await new Promise(r => setTimeout(r, 100));
+      return await cache.get<any[]>(cacheKey) || [];
+    }
+
+    try {
+      if (tenantId) {
+        const result = await cbQuery(
+          `SELECT
+             d.device_id, d.tenant_id, d.serial_number, d.created_at,
+             t.temperature, t.humidity, t.recorded_at, t.version
+           FROM device_projections d
+           LEFT JOIN device_telemetry_latest t ON d.device_id = t.device_id
+           WHERE d.tenant_id = $1
+           ORDER BY d.created_at DESC
+           LIMIT $2`,
+          [tenantId, limit]
+        );
+        await cache.set(cacheKey, result.rows, 30);
+        return result.rows;
+      }
+
       const result = await cbQuery(
         `SELECT
-           d.device_id,
-           d.tenant_id,
-           d.serial_number,
-           d.created_at,
-           t.temperature,
-           t.humidity,
-           t.recorded_at,
-           t.version
+           d.device_id, d.tenant_id, d.serial_number, d.created_at,
+           t.temperature, t.humidity, t.recorded_at, t.version
          FROM device_projections d
-         LEFT JOIN device_telemetry_latest t
-           ON d.device_id = t.device_id
-         WHERE d.tenant_id = $1
+         LEFT JOIN device_telemetry_latest t ON d.device_id = t.device_id
          ORDER BY d.created_at DESC
-         LIMIT $2`,
-        [tenantId, limit]
+         LIMIT $1`,
+        [limit]
       );
+      await cache.set(cacheKey, result.rows, 30);
       return result.rows;
+    } finally {
+      await cache.releaseLock(cacheKey);
     }
-    const result = await cbQuery(
-      `SELECT
-         d.device_id,
-         d.tenant_id,
-         d.serial_number,
-         d.created_at,
-         t.temperature,
-         t.humidity,
-         t.recorded_at,
-         t.version
-       FROM device_projections d
-       LEFT JOIN device_telemetry_latest t
-         ON d.device_id = t.device_id
-       ORDER BY d.created_at DESC
-       LIMIT $1`,
-      [limit]
-    );
-    return result.rows;
   },
 
   async getDevicesWithCursor(first: number = 20, after: string | null = null, tenantId?: string) {
@@ -264,4 +296,43 @@ export const db = {
       },
     };
   },
+  async createDevice(input: { serialNumber: string; tenantId: string }) {
+    const result = await cbQuery(
+      `INSERT INTO device_projections (device_id, tenant_id, serial_number, created_at)
+       VALUES (gen_random_uuid(), $1, $2, NOW())
+       RETURNING device_id, tenant_id, serial_number, created_at`,
+      [input.tenantId, input.serialNumber]
+    );
+    return {
+      deviceId:     result.rows[0].device_id,
+      tenantId:     result.rows[0].tenant_id,
+      serialNumber: result.rows[0].serial_number,
+      createdAt:    new Date(result.rows[0].created_at).toISOString(),
+    };
+  },
+
+  async updateDevice(deviceId: string, input: { serialNumber?: string }) {
+    const result = await cbQuery(
+      `UPDATE device_projections
+       SET serial_number = COALESCE($1, serial_number)
+       WHERE device_id = $2
+       RETURNING device_id, tenant_id, serial_number, created_at`,
+      [input.serialNumber || null, deviceId]
+    );
+    return {
+      deviceId:     result.rows[0].device_id,
+      tenantId:     result.rows[0].tenant_id,
+      serialNumber: result.rows[0].serial_number,
+      createdAt:    new Date(result.rows[0].created_at).toISOString(),
+    };
+  },
+
+  async deleteDevice(deviceId: string) {
+    await cbQuery(
+      `DELETE FROM device_projections WHERE device_id = $1`,
+      [deviceId]
+    );
+  },
+
 };
+

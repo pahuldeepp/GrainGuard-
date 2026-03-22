@@ -39,3 +39,4 @@ export function startExportWorker(channel: Channel): void {
   });
   console.log("[export] worker listening on " + QUEUES.EXPORTS);
 }
+

@@ -42,3 +42,4 @@ func (r *PostgresOutboxRepository) Insert(
 
 	return err
 }
+

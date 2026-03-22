@@ -49,3 +49,4 @@ export async function logAuditEvent(event: AuditEvent): Promise<void> {
     console.error("[audit] failed to log event:", event.eventType, err);
   }
 }
+

@@ -21,3 +21,4 @@ export default defineConfig([globalIgnores(['dist']), {
     globals: globals.browser,
   },
 }, ...storybook.configs["flat/recommended"]])
+

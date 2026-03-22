@@ -169,3 +169,4 @@ func TestMarshalTelemetry_ProducesValidJSON(t *testing.T) {
 		t.Errorf("eventType: want telemetry.recorded got %v", result["eventType"])
 	}
 }
+

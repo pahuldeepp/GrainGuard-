@@ -46,3 +46,4 @@ func With(fields ...any) zerolog.Logger {
 	}
 	return ctx.Logger()
 }
+

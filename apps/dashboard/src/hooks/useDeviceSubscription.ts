@@ -52,3 +52,4 @@ export function useTenantTelemetrySubscription(tenantId: string) {
     error,
   };
 }
+

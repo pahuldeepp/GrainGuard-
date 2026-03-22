@@ -45,3 +45,4 @@ export function validate(schema: z.ZodSchema, target: SchemaTarget = "body") {
     next();
   };
 }
+

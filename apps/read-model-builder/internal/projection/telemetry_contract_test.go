@@ -182,3 +182,4 @@ func TestEventContract_ProducerPayloadMatchesConsumerStruct(t *testing.T) {
 	assert.NotNil(t, consumed.Data.Temperature, "contract violation: data.temperature missing")
 	assert.NotNil(t, consumed.Data.Humidity, "contract violation: data.humidity missing")
 }
+
