@@ -12,6 +12,14 @@ const ALERT_DLQ      = "grainguard.alerts.dlq";
 const COOLDOWN_MS = 5 * 60 * 1000;
 const cooldowns = new Map<string, number>();
 
+// Sweep expired entries every 10 minutes to prevent unbounded memory growth
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, ts] of cooldowns) {
+    if (now - ts >= COOLDOWN_MS) cooldowns.delete(key);
+  }
+}, 10 * 60 * 1000).unref();
+
 function isOnCooldown(deviceId: string, tenantId: string): boolean {
   const key = `${tenantId}:${deviceId}`;
   const last = cooldowns.get(key);

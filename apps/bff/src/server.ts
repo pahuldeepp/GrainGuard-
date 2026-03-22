@@ -45,8 +45,6 @@ export interface BffContext {
   userId: string;
 }
 
-app.get("/metrics", metricsHandler());
-
 async function startServer() {
   const app = express();
   const httpServer = http.createServer(app);
@@ -116,6 +114,8 @@ async function startServer() {
 
   await server.start();
 
+  app.get("/metrics", metricsHandler());
+
   app.use(
     "/graphql",
     cors<cors.CorsRequest>({
@@ -166,6 +166,18 @@ async function startServer() {
 
   const PORT = parseInt(process.env.PORT || "4000");
 
+  // Centralized error handler — must be registered after all routes
+  app.use((err: Error, req: import("express").Request, res: import("express").Response, next: import("express").NextFunction) => {
+    const requestId = (req.headers["x-request-id"] as string) ?? "unknown";
+    console.error({ requestId, error: err.message, stack: err.stack });
+    if (res.headersSent) return next(err);
+    res.status(500).json({
+      error: "internal_server_error",
+      message: err.message,
+      requestId,
+    });
+  });
+
   await new Promise<void>((resolve) => httpServer.listen({ port: PORT }, resolve));
 
   await startTelemetryWatcher();
@@ -182,16 +194,4 @@ async function startServer() {
 startServer().catch((err) => {
   console.error("Failed to start BFF:", err);
   process.exit(1);
-});
-
-// Centralized error handler
-app.use((err: Error, req: import("express").Request, res: import("express").Response, next: import("express").NextFunction) => {
-  const requestId = (req.headers["x-request-id"] as string) ?? "unknown";
-  console.error({ requestId, error: err.message, stack: err.stack });
-  if (res.headersSent) return next(err);
-  res.status(500).json({
-    error: "internal_server_error",
-    message: err.message,
-    requestId,
-  });
 });
