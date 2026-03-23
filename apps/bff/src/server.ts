@@ -37,12 +37,14 @@ async function verifyToken(token: string) {
   return payload as JWTPayload & {
     "https://grainguard/tenant_id"?: string;
     sub?: string;
+    roles?: string[];
   };
 }
 
 export interface BffContext {
   tenantId: string;
   userId: string;
+  roles: string[];
 }
 
 async function startServer() {
@@ -86,7 +88,11 @@ async function startServer() {
         const payload = await verifyToken(token.substring("Bearer ".length));
         const tenantId = payload["https://grainguard/tenant_id"];
         if (!tenantId) throw new Error("Tenant not found");
-        return { tenantId: String(tenantId), userId: String(payload.sub || "") };
+        return {
+          tenantId: String(tenantId),
+          userId: String(payload.sub || ""),
+          roles: Array.isArray(payload.roles) ? payload.roles : [],
+        };
       },
     },
     wsServer
@@ -153,6 +159,7 @@ async function startServer() {
           return {
             tenantId: String(tenantId),
             userId: String(userId || ""),
+            roles: Array.isArray(payload.roles) ? payload.roles : [],
           };
         } catch (err) {
           if (err instanceof GraphQLError) throw err;

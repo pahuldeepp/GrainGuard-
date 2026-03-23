@@ -84,12 +84,12 @@ class BridgedPubSub extends PubSub {
     await redisPubSub.publish(triggerName, payload);
   }
 
-  asyncIterator<T>(triggers: string | string[]): AsyncIterator<T> {
+  asyncIterator<T>(triggers: string | string[]): AsyncIterableIterator<T> {
     const channels = Array.isArray(triggers) ? triggers : [triggers];
-    return this._makeAsyncIterator<T>(channels);
+    return this._makeAsyncIterableIterator<T>(channels);
   }
 
-  private _makeAsyncIterator<T>(channels: string[]): AsyncIterator<T> {
+  private _makeAsyncIterableIterator<T>(channels: string[]): AsyncIterableIterator<T> {
     const queue: T[] = [];
     const waiters: Array<(value: IteratorResult<T>) => void> = [];
     const unsubscribers: Array<() => Promise<void>> = [];
