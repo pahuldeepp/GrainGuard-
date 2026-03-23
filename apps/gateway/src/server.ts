@@ -3,6 +3,7 @@ import express, { Request, Response, NextFunction } from "express";
 import http from "http";
 import helmet from "helmet";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import { createDevice } from "./services/device";
 import { getDeviceLatestTelemetry } from "./services/device-query";
 import { redis } from "./cache/redis";
@@ -11,9 +12,18 @@ import { logAuditEvent, writePool } from "./lib/audit";
 import { metricsHandler, requestLatency } from "./observability/metrics";
 import { requestIdMiddleware } from "./middleware/requestId";
 import { authMiddleware } from "./middleware/auth";
+import { apiKeyMiddleware } from "./middleware/apiKey";
 import { apiRateLimiter } from "./middleware/rateLimiting";
 import { validate, createDeviceSchema, deviceIdParamSchema } from "./middleware/validation";
 import { apiVersionMiddleware } from "./middleware/apiVersion";
+import { securityHeaders, permissionsPolicy } from "./middleware/securityHeaders";
+import { csrfProtection } from "./middleware/csrf";
+import { billingRouter } from "./routes/billing";
+import { tenantsRouter } from "./routes/tenants";
+import { ssoRouter } from "./routes/sso";
+import { devicesImportRouter } from "./routes/devicesImport";
+import { alertRulesRouter } from "./routes/alertRules";
+import { auditLogRouter } from "./routes/auditLog";
 
 const app = express();
 
@@ -28,27 +38,35 @@ const BFF_HOST = "grainguard-bff";
 const BFF_PORT = 4000;
 
 /**
- * Helmet
+ * Security headers — replaces the old inline helmet() call with our
+ * hardened securityHeaders() + permissionsPolicy() middleware pair.
+ * securityHeaders() pins CSP, HSTS, noSniff, referrerPolicy, etc.
+ * permissionsPolicy() disables camera/mic/GPS/payment/USB browser APIs.
  */
-app.use(
-  helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        scriptSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", "data:"],
-        connectSrc: [
-          "'self'",
-          "http://localhost:5173",
-          "http://localhost:8086",
-          "ws://localhost:8086",
-        ],
-      },
-    },
-    crossOriginEmbedderPolicy: false,
-  })
+app.use(securityHeaders());
+app.use(permissionsPolicy());
+app.use(cookieParser()); // required for req.cookies used by csrfProtection()
+
+/**
+ * Stripe webhook — MUST receive the raw Buffer body so that
+ * stripe.webhooks.constructEvent() can verify the HMAC signature.
+ * Mount BEFORE express.json() so this route is not body-parsed as JSON.
+ */
+app.post(
+  "/billing/webhook",
+  express.raw({ type: "application/json" }), // raw Buffer — not parsed
+  (req, res, next) => {
+    // Forward raw body to the billing router
+    next();
+  }
 );
+
+/**
+ * CSRF protection — applies to all mutating routes (POST/PUT/PATCH/DELETE)
+ * except the Stripe webhook (webhook caller is Stripe, not a browser).
+ * GET/HEAD/OPTIONS are safe by definition and just issue a fresh token.
+ */
+app.use(csrfProtection());
 
 /**
  * CORS
@@ -128,11 +146,54 @@ app.use("/graphql", (req: Request, res: Response) => {
 });
 
 /**
+ * Billing + Tenant REST routes
+ * billingRouter handles /billing/checkout, /billing/subscription, /billing/webhook
+ * tenantsRouter handles /tenants/me and /tenants/me/users
+ * express.json() is scoped to these routers only — the webhook uses raw body above
+ */
+app.use(express.json({ limit: "64kb" }));
+app.use(billingRouter);
+app.use(tenantsRouter);
+app.use(ssoRouter);
+app.use(devicesImportRouter);
+app.use(alertRulesRouter);
+app.use(auditLogRouter);
+
+/**
+ * Telemetry ingest — device auth via API key (not JWT)
+ * POST /ingest is called by physical devices in the field.
+ * Devices don't have browsers so they use X-Api-Key instead of OAuth Bearer.
+ */
+app.post(
+  "/ingest",
+  apiRateLimiter,
+  apiKeyMiddleware,               // resolves tenantId from X-Api-Key header
+  async (req: Request, res: Response) => {
+    // At this point req.user is populated with { sub, tenantId, roles: ["device"] }
+    // Route telemetry payload to the telemetry-service via gRPC (same path as /devices)
+    const tenantId = req.user!.tenantId;
+    try {
+      // Forward the raw payload — telemetry-service validates the schema
+      const result = await createDevice(
+        tenantId,
+        req.body.serialNumber,
+        String(req.requestId),
+        req.user!.sub,
+        undefined            // no auth header — device used API key
+      );
+      return res.json(result);
+    } catch (err) {
+      console.error("[ingest]", err);
+      return res.status(500).json({ error: "ingest_failed" });
+    }
+  }
+);
+
+/**
  * REST routes — express.json() applied only here
  */
 app.post(
   "/devices",
-  express.json({ limit: "10kb" }),
   apiRateLimiter,
   authMiddleware,
   validate(createDeviceSchema, "body"),
