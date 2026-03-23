@@ -16,8 +16,8 @@ CREATE TABLE IF NOT EXISTS tenants (
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_tenants_slug         ON tenants(slug);
-CREATE INDEX idx_tenants_stripe_cust  ON tenants(stripe_customer_id) WHERE stripe_customer_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_tenants_slug         ON tenants(slug);
+CREATE INDEX IF NOT EXISTS idx_tenants_stripe_cust  ON tenants(stripe_customer_id) WHERE stripe_customer_id IS NOT NULL;
 
 -- ── Tenant Users ───────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS tenant_users (
@@ -30,8 +30,8 @@ CREATE TABLE IF NOT EXISTS tenant_users (
     UNIQUE (tenant_id, auth_user_id)
 );
 
-CREATE INDEX idx_tenant_users_tenant   ON tenant_users(tenant_id);
-CREATE INDEX idx_tenant_users_auth_uid ON tenant_users(auth_user_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_users_tenant   ON tenant_users(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_users_auth_uid ON tenant_users(auth_user_id);
 
 -- ── Tenant Invites ─────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS tenant_invites (
@@ -46,8 +46,8 @@ CREATE TABLE IF NOT EXISTS tenant_invites (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_tenant_invites_tenant ON tenant_invites(tenant_id);
-CREATE INDEX idx_tenant_invites_email  ON tenant_invites(email);
+CREATE INDEX IF NOT EXISTS idx_tenant_invites_tenant ON tenant_invites(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_invites_email  ON tenant_invites(email);
 
 -- ── API Keys ───────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS api_keys (
@@ -61,8 +61,8 @@ CREATE TABLE IF NOT EXISTS api_keys (
     last_used_at TIMESTAMPTZ
 );
 
-CREATE INDEX idx_api_keys_tenant ON api_keys(tenant_id);
-CREATE INDEX idx_api_keys_hash   ON api_keys(key_hash) WHERE revoked_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_api_keys_tenant ON api_keys(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_api_keys_hash   ON api_keys(key_hash) WHERE revoked_at IS NULL;
 
 -- ── Alert Rules ────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS alert_rules (
@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS alert_rules (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_alert_rules_tenant ON alert_rules(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_alert_rules_tenant ON alert_rules(tenant_id);
 
 -- ── Bulk Import Jobs ───────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS bulk_import_jobs (
@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS bulk_import_jobs (
     completed_at TIMESTAMPTZ
 );
 
-CREATE INDEX idx_bulk_import_jobs_tenant ON bulk_import_jobs(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bulk_import_jobs_tenant ON bulk_import_jobs(tenant_id, created_at DESC);
 
 -- ── Processed Events (idempotency) ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS processed_events (

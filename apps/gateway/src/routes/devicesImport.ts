@@ -59,6 +59,7 @@ devicesImportRouter.post(
     // Collect CSV lines from the file field
     const lines: string[] = [];
     let headerSeen = false;
+    let serialColIndex = 0; // which CSV column holds serialNumber
 
     bb.on("file", (_fieldname: string, file: NodeJS.ReadableStream) => {
       let buffer = "";
@@ -72,17 +73,25 @@ devicesImportRouter.post(
           const trimmed = line.trim().replace(/\r/g, "");
           if (!trimmed) continue;
           if (!headerSeen) {
-            headerSeen = true; // skip the header row
+            headerSeen = true;
+            // Detect which column is "serialNumber" (case-insensitive)
+            const headers = trimmed.split(",").map((h) => h.trim().toLowerCase());
+            const idx = headers.findIndex((h) => h === "serialnumber" || h === "serial_number" || h === "serial");
+            serialColIndex = idx >= 0 ? idx : 0;
             continue;
           }
-          lines.push(trimmed);
+          const cols = trimmed.split(",");
+          const serial = (cols[serialColIndex] ?? cols[0]).trim();
+          if (serial) lines.push(serial);
         }
       });
 
       file.on("end", () => {
         // Handle last line (no trailing newline)
         if (buffer.trim() && headerSeen) {
-          lines.push(buffer.trim());
+          const cols = buffer.trim().split(",");
+          const serial = (cols[serialColIndex] ?? cols[0]).trim();
+          if (serial) lines.push(serial);
         }
       });
     });
@@ -117,8 +126,8 @@ devicesImportRouter.post(
       // Process each serial number in sequence — avoids thundering-herd on the DB
       for (const serialNumber of lines) {
         try {
-          // Validate format before hitting gRPC
-          if (!/^[A-Z0-9]{4,30}$/.test(serialNumber)) {
+          // Validate format: 3-64 alphanumeric chars, dashes, underscores allowed
+          if (!/^[A-Za-z0-9_-]{3,64}$/.test(serialNumber)) {
             throw new Error("invalid_serial_format");
           }
 
@@ -142,7 +151,7 @@ devicesImportRouter.post(
       // Update job status
       await pool.query(
         `UPDATE bulk_import_jobs
-           SET status = $1, completed_at = NOW(), success_rows = $2, error_rows = $3
+           SET status = $1, completed_at = NOW(), success_rows = $2, failed_rows = $3
          WHERE id = $4`,
         [errors === total ? "failed" : errors > 0 ? "partial" : "completed", done - errors, errors, jobId]
       );
@@ -169,7 +178,7 @@ devicesImportRouter.get(
   authMiddleware,
   async (req: Request, res: Response) => {
     const { rows } = await pool.query(
-      `SELECT id, status, total_rows, success_rows, error_rows, created_at, completed_at
+      `SELECT id, status, total_rows, success_rows, failed_rows, created_at, completed_at
        FROM bulk_import_jobs
        WHERE tenant_id = $1
        ORDER BY created_at DESC

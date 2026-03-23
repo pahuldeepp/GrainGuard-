@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"os"
 	"strings"
@@ -29,7 +30,7 @@ func NewOutboxWorker(pool *pgxpool.Pool) *OutboxWorker {
 
 	writer := &kafka.Writer{
 		Addr:     kafka.TCP(brokerList...),
-		Topic:    "telemetry.events",
+		Topic:    "device.events",
 		Balancer: &kafka.LeastBytes{},
 	}
 
@@ -62,7 +63,7 @@ func (w *OutboxWorker) processBatch(ctx context.Context) {
 	defer tx.Rollback(ctx)
 
 	rows, err := tx.Query(ctx, `
-		SELECT id, event_type, payload_bytes
+		SELECT id, event_type, payload
 		FROM outbox_events
 		WHERE published_at IS NULL
 		ORDER BY created_at
@@ -109,20 +110,21 @@ func (w *OutboxWorker) processBatch(ctx context.Context) {
 	}
 
 	for _, e := range events {
-
-		// 🔥 Unmarshal protobuf envelope (only to extract key)
-		var env eventspb.EventEnvelope
-		if err := proto.Unmarshal(e.payload, &env); err != nil {
-			log.Println("protobuf unmarshal error:", err)
+		protoBytes, err := buildEnvelope(e.id, e.eventType, e.payload)
+		if err != nil {
+			log.Printf("build envelope error (id=%s type=%s): %v", e.id, e.eventType, err)
+			continue
+		}
+		if protoBytes == nil {
+			// unknown event type — mark published to avoid reprocessing
+			_, _ = tx.Exec(ctx, `UPDATE outbox_events SET published_at = NOW() WHERE id = $1`, e.id)
 			continue
 		}
 
-		key := []byte(env.AggregateId)
-
-		err := w.writer.WriteMessages(ctx,
+		err = w.writer.WriteMessages(ctx,
 			kafka.Message{
-				Key:   key,
-				Value: e.payload, // raw protobuf bytes
+				Key:   []byte(e.id),
+				Value: protoBytes,
 				Headers: []kafka.Header{
 					{Key: "event_type", Value: []byte(e.eventType)},
 					{Key: "schema_version", Value: []byte("1")},
@@ -147,5 +149,43 @@ func (w *OutboxWorker) processBatch(ctx context.Context) {
 
 	if err := tx.Commit(ctx); err != nil {
 		log.Println("commit error:", err)
+	}
+}
+
+// buildEnvelope converts a JSON outbox payload into a serialized protobuf EventEnvelope.
+// Returns nil bytes (no error) for unknown event types.
+func buildEnvelope(eventID, eventType string, jsonPayload []byte) ([]byte, error) {
+	switch eventType {
+	case "device_created_v1":
+		var p struct {
+			DeviceID  string `json:"device_id"`
+			TenantID  string `json:"tenant_id"`
+			Serial    string `json:"serial"`
+			CreatedAt string `json:"created_at"`
+		}
+		if err := json.Unmarshal(jsonPayload, &p); err != nil {
+			return nil, err
+		}
+
+		env := &eventspb.EventEnvelope{
+			EventId:          eventID,
+			EventType:        eventType,
+			SchemaVersion:    1,
+			OccurredAtUnixMs: time.Now().UnixMilli(),
+			TenantId:         p.TenantID,
+			AggregateId:      p.DeviceID,
+			Payload: &eventspb.EventEnvelope_DeviceCreatedV1{
+				DeviceCreatedV1: &eventspb.DeviceCreatedV1{
+					DeviceId:  p.DeviceID,
+					TenantId:  p.TenantID,
+					Serial:    p.Serial,
+					CreatedAt: p.CreatedAt,
+				},
+			},
+		}
+		return proto.Marshal(env)
+
+	default:
+		return nil, nil
 	}
 }

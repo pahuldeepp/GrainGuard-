@@ -47,6 +47,16 @@ export async function authMiddleware(
   res: Response,
   next: NextFunction
 ) {
+  // Dev bypass: AUTH_ENABLED=false lets curl tests pass without a JWT.
+  // Tenant ID is read from x-tenant-id header; user gets admin role.
+  if (process.env.AUTH_ENABLED === "false") {
+    const tenantId =
+      (req.headers["x-tenant-id"] as string) ||
+      "11111111-1111-1111-1111-111111111111";
+    req.user = { sub: "dev-user", tenantId, roles: ["admin", "member"] };
+    return next();
+  }
+
   const authHeader = req.headers.authorization;
 
   if (!authHeader?.startsWith("Bearer ")) {

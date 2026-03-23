@@ -149,7 +149,7 @@ services:
       JWKS_URL: https://dev-0saa2rbtwuf2j0e8.us.auth0.com/.well-known/jwks.json
       JWT_ISSUER: https://dev-0saa2rbtwuf2j0e8.us.auth0.com/
       JWT_AUDIENCE: https://api.grainguard.io
-      AUTH_ENABLED: "true"
+      AUTH_ENABLED: "false"
       OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
     depends_on:
       postgres:
@@ -284,11 +284,11 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       READ_DATABASE_URL: postgres://postgres:postgres@postgres-read:5432/grainguard_read?sslmode=disable
-      GRPC_TARGET: telemetry-service:50051
+      GRPC_TARGET: dns:///telemetry-service:50051
       JWKS_URL: https://dev-0saa2rbtwuf2j0e8.us.auth0.com/.well-known/jwks.json
       JWT_ISSUER: https://dev-0saa2rbtwuf2j0e8.us.auth0.com/
       JWT_AUDIENCE: https://api.grainguard.io
-      AUTH_ENABLED: "true"
+      AUTH_ENABLED: "false"
       OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
       ALLOWED_ORIGINS: "http://localhost:5173,http://localhost:5174"
       DASHBOARD_URL: "http://localhost:5173"

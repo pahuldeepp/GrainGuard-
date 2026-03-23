@@ -31,13 +31,13 @@ func (r *PostgresOutboxRepository) Insert(
 
 	_, err = tx.Exec(ctx,
 		`INSERT INTO outbox_events
-		(id, aggregate_type, aggregate_id, event_type, payload_bytes, created_at)
+		(id, aggregate_type, aggregate_id, event_type, payload, created_at)
 		VALUES ($1,$2,$3,$4,$5,NOW())`,
 		id,
 		aggregateType,
 		aggregateID,
 		eventType,
-		payload, // protobuf bytes
+		payload,
 	)
 
 	return err
