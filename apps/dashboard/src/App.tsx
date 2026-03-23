@@ -1,10 +1,10 @@
 import { useEffect } from "react";
 import { ApolloProvider } from "@apollo/client/react";
-import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
+import { Routes, Route, Link } from "react-router-dom";
 import { Toaster } from "react-hot-toast";
 import { useAuth0 } from "@auth0/auth0-react";
 import client from "./lib/apollo";
-import { setGetAccessTokenSilently } from "./lib/auth0";
+import { setGetAccessTokenSilently, setLoginWithRedirect } from "./lib/auth0";
 import { DevicesPage } from "./features/devices/components/DevicesPage";
 import { DeviceDetailPage } from "./features/devices/components/DeviceDetailPage";
 import { BillingPage } from "./features/billing/BillingPage";
@@ -12,6 +12,11 @@ import { OnboardingPage } from "./features/onboarding/OnboardingPage";
 import { SSOPage } from "./features/sso/SSOPage";
 import { AlertRulesPage } from "./features/alerts/AlertRulesPage";
 import { AuditLogPage } from "./features/audit/AuditLogPage";
+import { TeamPage } from "./features/team/TeamPage";
+import { InviteAcceptPage } from "./features/team/InviteAcceptPage";
+import { ApiKeysPage } from "./features/apikeys/ApiKeysPage";
+import { WebhooksPage } from "./features/webhooks/WebhooksPage";
+import { SettingsPage } from "./features/settings/SettingsPage";
 import { ErrorBoundary } from "./shared/components/ErrorBoundary";
 import { NotFound } from "./shared/components/NotFound";
 import { ProtectedRoute } from "./features/auth/ProtectedRoute";
@@ -23,15 +28,15 @@ import { useAuth } from "./hooks/useAuth";
 function AppInner() {
   const { isDark, toggle } = useDarkMode();
   const { user, signOut, isAuthenticated, isAdmin } = useAuth();
-  const { getAccessTokenSilently } = useAuth0();
+  const { getAccessTokenSilently, loginWithRedirect } = useAuth0();
 
   useEffect(() => {
     setGetAccessTokenSilently(getAccessTokenSilently);
-  }, [getAccessTokenSilently]);
+    setLoginWithRedirect(loginWithRedirect);
+  }, [getAccessTokenSilently, loginWithRedirect]);
 
   return (
-    <BrowserRouter>
-      <TenantProvider>
+    <TenantProvider>
         <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
           <nav className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-4 md:px-6 py-4">
             <div className="max-w-7xl mx-auto flex items-center justify-between">
@@ -59,7 +64,19 @@ function AppInner() {
                   <Link to="/audit" className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">Audit</Link>
                 )}
                 {isAuthenticated && isAdmin && (
+                  <Link to="/team" className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">Team</Link>
+                )}
+                {isAuthenticated && isAdmin && (
+                  <Link to="/api-keys" className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">API Keys</Link>
+                )}
+                {isAuthenticated && isAdmin && (
+                  <Link to="/webhooks" className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">Webhooks</Link>
+                )}
+                {isAuthenticated && isAdmin && (
                   <Link to="/sso" className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">SSO</Link>
+                )}
+                {isAuthenticated && (
+                  <Link to="/settings" className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">Settings</Link>
                 )}
                 {isAuthenticated && <TenantSwitcher />}
                 <button
@@ -86,19 +103,34 @@ function AppInner() {
             </div>
           </nav>
           <ErrorBoundary>
-            <ProtectedRoute>
-              <Routes>
-                <Route path="/" element={<DevicesPage />} />
-                <Route path="/devices/:id" element={<DeviceDetailPage />} />
-                <Route path="/billing" element={<BillingPage />} />
-                <Route path="/billing/success" element={<BillingPage />} />
-                <Route path="/onboarding" element={<OnboardingPage />} />
-                <Route path="/sso" element={<SSOPage />} />
-                <Route path="/alerts" element={<AlertRulesPage />} />
-                <Route path="/audit" element={<AuditLogPage />} />
-                <Route path="*" element={<NotFound />} />
-              </Routes>
-            </ProtectedRoute>
+            <Routes>
+              {/* Public — accessible without authentication */}
+              <Route path="/invite/accept" element={<InviteAcceptPage />} />
+
+              {/* Protected — all other routes require login */}
+              <Route
+                path="*"
+                element={
+                  <ProtectedRoute>
+                    <Routes>
+                      <Route path="/" element={<DevicesPage />} />
+                      <Route path="/devices/:id" element={<DeviceDetailPage />} />
+                      <Route path="/billing" element={<BillingPage />} />
+                      <Route path="/billing/success" element={<BillingPage />} />
+                      <Route path="/onboarding" element={<OnboardingPage />} />
+                      <Route path="/sso" element={<SSOPage />} />
+                      <Route path="/alerts" element={<AlertRulesPage />} />
+                      <Route path="/audit" element={<AuditLogPage />} />
+                      <Route path="/team" element={<TeamPage />} />
+                      <Route path="/api-keys" element={<ApiKeysPage />} />
+                      <Route path="/webhooks" element={<WebhooksPage />} />
+                      <Route path="/settings" element={<SettingsPage />} />
+                      <Route path="*" element={<NotFound />} />
+                    </Routes>
+                  </ProtectedRoute>
+                }
+              />
+            </Routes>
           </ErrorBoundary>
         </div>
         <Toaster
@@ -110,8 +142,7 @@ function AppInner() {
             error: { duration: 6000 },
           }}
         />
-      </TenantProvider>
-    </BrowserRouter>
+    </TenantProvider>
   );
 }
 
