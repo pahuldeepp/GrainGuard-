@@ -1,4 +1,4 @@
-﻿import { useEffect } from "react";
+import { useEffect } from "react";
 import { ApolloProvider } from "@apollo/client/react";
 import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
 import { Toaster } from "react-hot-toast";
@@ -7,6 +7,11 @@ import client from "./lib/apollo";
 import { setGetAccessTokenSilently } from "./lib/auth0";
 import { DevicesPage } from "./features/devices/components/DevicesPage";
 import { DeviceDetailPage } from "./features/devices/components/DeviceDetailPage";
+import { BillingPage } from "./features/billing/BillingPage";
+import { OnboardingPage } from "./features/onboarding/OnboardingPage";
+import { SSOPage } from "./features/sso/SSOPage";
+import { AlertRulesPage } from "./features/alerts/AlertRulesPage";
+import { AuditLogPage } from "./features/audit/AuditLogPage";
 import { ErrorBoundary } from "./shared/components/ErrorBoundary";
 import { NotFound } from "./shared/components/NotFound";
 import { ProtectedRoute } from "./features/auth/ProtectedRoute";
@@ -22,12 +27,10 @@ function AppInner() {
 
   useEffect(() => {
     setGetAccessTokenSilently(getAccessTokenSilently);
-    (window as any).__getToken = getAccessTokenSilently; // dev only — remove after testing
   }, [getAccessTokenSilently]);
 
   return (
     <BrowserRouter>
-      {/* TenantProvider wraps everything including navbar */}
       <TenantProvider>
         <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
           <nav className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-4 md:px-6 py-4">
@@ -42,12 +45,21 @@ function AppInner() {
               </div>
               <div className="flex items-center gap-3 md:gap-4 text-sm">
                 {isAuthenticated && (
-                  <Link
-                    to="/"
-                    className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
-                  >
+                  <Link to="/" className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">
                     Devices
                   </Link>
+                )}
+                {isAuthenticated && (
+                  <Link to="/billing" className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">Billing</Link>
+                )}
+                {isAuthenticated && (
+                  <Link to="/alerts" className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">Alerts</Link>
+                )}
+                {isAuthenticated && (
+                  <Link to="/audit" className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">Audit</Link>
+                )}
+                {isAuthenticated && (
+                  <Link to="/sso" className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">SSO</Link>
                 )}
                 {isAuthenticated && <TenantSwitcher />}
                 <button
@@ -78,6 +90,12 @@ function AppInner() {
               <Routes>
                 <Route path="/" element={<DevicesPage />} />
                 <Route path="/devices/:id" element={<DeviceDetailPage />} />
+                <Route path="/billing" element={<BillingPage />} />
+                <Route path="/billing/success" element={<BillingPage />} />
+                <Route path="/onboarding" element={<OnboardingPage />} />
+                <Route path="/sso" element={<SSOPage />} />
+                <Route path="/alerts" element={<AlertRulesPage />} />
+                <Route path="/audit" element={<AuditLogPage />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </ProtectedRoute>
