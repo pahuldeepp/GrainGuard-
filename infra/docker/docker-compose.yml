@@ -107,13 +107,71 @@ services:
         condition: service_healthy
     networks:
       - grainguard-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8083/connectors || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # Bootstraps the Debezium Postgres CDC connector on first start.
+  # Runs once, exits 0 on success (or if connector already registered).
+  connector-init:
+    image: curlimages/curl:8
+    container_name: grainguard-connector-init
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "[connector-init] waiting for Kafka Connect REST API..."
+        until curl -sf http://kafka-connect:8083/connectors > /dev/null; do
+          sleep 3
+        done
+        echo "[connector-init] registering grainguard-postgres-cdc connector..."
+        curl -sf -X POST http://kafka-connect:8083/connectors \
+          -H 'Content-Type: application/json' \
+          -d '{
+            "name": "grainguard-postgres-cdc",
+            "config": {
+              "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+              "tasks.max": "1",
+              "database.hostname": "postgres",
+              "database.port": "5432",
+              "database.user": "postgres",
+              "database.password": "postgres",
+              "database.dbname": "grainguard",
+              "topic.prefix": "grainguard",
+              "plugin.name": "pgoutput",
+              "table.include.list": "public.devices,public.tenants,public.tenant_users,public.telemetry_readings",
+              "publication.autocreate.mode": "filtered",
+              "slot.name": "grainguard_debezium"
+            }
+          }' \
+          && echo "[connector-init] connector registered successfully" \
+          || echo "[connector-init] connector already exists or registration failed (non-fatal)"
+    depends_on:
+      kafka-connect:
+        condition: service_healthy
+    networks:
+      - grainguard-net
 
   redis:
     image: redis:7
     container_name: grainguard-redis
     restart: unless-stopped
+    # Persistence: AOF (every second) + RDB snapshot
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --save 900 1
+      --save 300 10
+      --save 60 10000
     ports:
       - "6379:6379"
+    volumes:
+      - redis-data:/data
     networks:
       - grainguard-net
 
@@ -146,9 +204,9 @@ services:
     environment:
       WRITE_DB_URL: postgres://postgres:postgres@postgres:5432/grainguard?sslmode=disable
       KAFKA_BROKERS: kafka:9092
-      JWKS_URL: https://dev-0saa2rbtwuf2j0e8.us.auth0.com/.well-known/jwks.json
-      JWT_ISSUER: https://dev-0saa2rbtwuf2j0e8.us.auth0.com/
-      JWT_AUDIENCE: https://api.grainguard.io
+      JWKS_URL: https://dev-dz6bl3nngdeib7ro.us.auth0.com/.well-known/jwks.json
+      JWT_ISSUER: https://dev-dz6bl3nngdeib7ro.us.auth0.com/
+      JWT_AUDIENCE: https://api.grainguard.com
       AUTH_ENABLED: "false"
       OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
     depends_on:
@@ -259,12 +317,14 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - PORT=4000
-      - JWKS_URL=https://dev-0saa2rbtwuf2j0e8.us.auth0.com/.well-known/jwks.json
-      - JWT_ISSUER=https://dev-0saa2rbtwuf2j0e8.us.auth0.com/
-      - JWT_AUDIENCE=https://api.grainguard.io
+      - JWKS_URL=https://dev-dz6bl3nngdeib7ro.us.auth0.com/.well-known/jwks.json
+      - JWT_ISSUER=https://dev-dz6bl3nngdeib7ro.us.auth0.com/
+      - JWT_AUDIENCE=https://api.grainguard.com
       - ELASTICSEARCH_URL=http://elasticsearch:9200
       - CASSANDRA_HOSTS=cassandra
       - CASSANDRA_KEYSPACE=grainguard_telemetry
+      - NODE_ENV=development
+      - AUTH_ENABLED=false
     depends_on:
       - postgres-read
       - redis
@@ -285,10 +345,11 @@ services:
       REDIS_PORT: "6379"
       READ_DATABASE_URL: postgres://postgres:postgres@postgres-read:5432/grainguard_read?sslmode=disable
       GRPC_TARGET: dns:///telemetry-service:50051
-      JWKS_URL: https://dev-0saa2rbtwuf2j0e8.us.auth0.com/.well-known/jwks.json
-      JWT_ISSUER: https://dev-0saa2rbtwuf2j0e8.us.auth0.com/
-      JWT_AUDIENCE: https://api.grainguard.io
+      JWKS_URL: https://dev-dz6bl3nngdeib7ro.us.auth0.com/.well-known/jwks.json
+      JWT_ISSUER: https://dev-dz6bl3nngdeib7ro.us.auth0.com/
+      JWT_AUDIENCE: https://api.grainguard.com
       AUTH_ENABLED: "false"
+      NODE_ENV: development
       OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
       ALLOWED_ORIGINS: "http://localhost:5173,http://localhost:5174"
       DASHBOARD_URL: "http://localhost:5173"
@@ -305,10 +366,10 @@ services:
       STRIPE_PRICE_PROFESSIONAL: "${STRIPE_PRICE_PROFESSIONAL:-price_pro_placeholder}"
       STRIPE_PRICE_ENTERPRISE: "${STRIPE_PRICE_ENTERPRISE:-price_enterprise_placeholder}"
       # Auth0 M2M — override via root .env
-      AUTH0_DOMAIN: "${AUTH0_DOMAIN:-dev-0saa2rbtwuf2j0e8.us.auth0.com}"
-      AUTH0_M2M_CLIENT_ID: "${AUTH0_M2M_CLIENT_ID:-}"
-      AUTH0_M2M_CLIENT_SECRET: "${AUTH0_M2M_CLIENT_SECRET:-}"
-      AUTH0_M2M_AUDIENCE: "${AUTH0_M2M_AUDIENCE:-https://dev-0saa2rbtwuf2j0e8.us.auth0.com/api/v2/}"
+      AUTH0_DOMAIN: "${AUTH0_DOMAIN:-dev-dz6bl3nngdeib7ro.us.auth0.com}"
+      AUTH0_MANAGEMENT_CLIENT_ID: "${AUTH0_MANAGEMENT_CLIENT_ID:-}"
+      AUTH0_MANAGEMENT_CLIENT_SECRET: "${AUTH0_MANAGEMENT_CLIENT_SECRET:-}"
+      AUTH0_M2M_AUDIENCE: "${AUTH0_MANAGEMENT_AUDIENCE:-https://dev-dz6bl3nngdeib7ro.us.auth0.com/api/v2/}"
     depends_on:
       redis:
         condition: service_started
@@ -378,28 +439,10 @@ services:
     networks:
       - grainguard-net
 
-  keycloak:
-    image: quay.io/keycloak/keycloak:24.0
-    container_name: keycloak
-    command: start-dev
-    environment:
-      AUTH_ENABLED: "false"
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin
-      KC_HOSTNAME: keycloak
-      KC_HOSTNAME_PORT: 8080
-      KC_HOSTNAME_STRICT: "false"
-    ports:
-      - "8081:8080"
-    volumes:
-      - keycloak_data:/opt/keycloak/data
-    networks:
-      - grainguard-net
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8080/realms/master || exit 1"]
-      interval: 20s
-      timeout: 10s
-      retries: 10
+  # keycloak: removed — the app uses Auth0 exclusively.
+  #   Keeping this service running added 60+ s to startup and consumed
+  #   significant RAM for zero functional benefit.
+  #   Re-add if multi-IdP support is required in the future.
 
   elasticsearch:
     image: elasticsearch:8.13.0
@@ -466,15 +509,9 @@ services:
     networks:
       - grainguard-net
 
-  memcached:
-    image: memcached:1.6-alpine
-    container_name: grainguard-memcached
-    restart: unless-stopped
-    ports:
-      - "11211:11211"
-    command: memcached -m 256
-    networks:
-      - grainguard-net
+  # memcached: removed — no application code connects to it.
+  #   Redis handles all caching.  Re-add if a dedicated session cache
+  #   with different eviction semantics is needed.
 
   search-indexer:
     build:
@@ -505,8 +542,14 @@ services:
     restart: unless-stopped
     environment:
       RABBITMQ_URL: amqp://grainguard:grainguard@rabbitmq:5672/grainguard
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/grainguard?sslmode=disable
+      # Set RESEND_API_KEY and EMAIL_FROM via root .env to enable real email delivery
+      RESEND_API_KEY: "${RESEND_API_KEY:-}"
+      EMAIL_FROM: "${EMAIL_FROM:-GrainGuard <noreply@grainguard.com>}"
     depends_on:
       rabbitmq:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     networks:
       - grainguard-net
@@ -616,11 +659,11 @@ volumes:
   pgdata:
   pgdata_read:
   kafka-data:
-  keycloak_data:
   grafana-data:
   esdata:
   rabbitmq-data:
   cassandra-data:
+  redis-data:       # Redis AOF + RDB persistence
 
 
 networks:
