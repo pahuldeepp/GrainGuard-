@@ -89,6 +89,8 @@ spec:
 
     # ── Availability SLO: 99.9% ──────────────────────────────────────────────
 
+    # Fast burn — consumes 2% of monthly budget in 1h → page now
+    # burn_rate > 14.4  (= 1/0.001 * 0.02 * 720h/1h)
     - alert: AvailabilitySLOFastBurn
       expr: |
         (
@@ -109,6 +111,8 @@ spec:
           SLO target: 99.9% availability.
         runbook_url: "https://github.com/your-org/grainguard/blob/master/docs/runbooks/availability.md"
 
+    # Medium burn — consumes 5% of monthly budget in 6h → ticket
+    # burn_rate > 6
     - alert: AvailabilitySLOMediumBurn
       expr: |
         (
@@ -128,6 +132,8 @@ spec:
           Monthly budget will be exhausted in ~5 days at this rate.
         runbook_url: "https://github.com/your-org/grainguard/blob/master/docs/runbooks/availability.md"
 
+    # Slow burn — informational, 3-day window
+    # burn_rate > 3
     - alert: AvailabilitySLOSlowBurn
       expr: |
         job:http_error_ratio:rate3d{job=~"gateway|bff"} > (3 * 0.001)
