@@ -60,8 +60,18 @@ export class CircuitBreaker {
       const result = await fn();
       this.onSuccess();
       return result;
-    } catch (err) {
-      this.onFailure();
+    } catch (err: any) {
+      // Only count real infrastructure failures (connection loss, timeout).
+      // Bad SQL (invalid UUID, syntax errors) are app bugs, not Postgres outages.
+      const isInfraFailure =
+        err?.code === "ECONNREFUSED" ||
+        err?.code === "ENOTFOUND" ||
+        err?.code === "ETIMEDOUT" ||
+        err?.code === "ECONNRESET" ||
+        err?.message?.includes("Connection terminated") ||
+        err?.message?.includes("connect ECONNREFUSED");
+
+      if (isInfraFailure) this.onFailure();
       throw err;
     }
   }

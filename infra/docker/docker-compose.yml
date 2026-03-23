@@ -114,6 +114,29 @@ services:
       retries: 10
       start_period: 30s
 
+  # db-migrate: applies all pending *.up.sql migrations on every startup.
+  # Idempotent — uses a schema_migrations table to skip already-applied files.
+  db-migrate:
+    image: postgres:16-alpine
+    container_name: grainguard-db-migrate
+    restart: "no"
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: grainguard
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      MIGRATIONS_DIR: /migrations
+    volumes:
+      - ../../apps/telemetry-service/migrations:/migrations:ro
+      - ../../infra/scripts/migrate.sh:/migrate.sh:ro
+    entrypoint: ["sh", "/migrate.sh"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - grainguard-net
+
   # Bootstraps the Debezium Postgres CDC connector on first start.
   # Runs once, exits 0 on success (or if connector already registered).
   connector-init:

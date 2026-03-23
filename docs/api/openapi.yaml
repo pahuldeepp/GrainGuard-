@@ -23,7 +23,7 @@ servers:
   - url: http://localhost:8086
     description: Local development
     x-internal: true
-  - url: https://api.grainguard.io
+  - url: https://api.grainguard.com
     description: Production
 
 security:

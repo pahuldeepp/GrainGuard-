@@ -5,12 +5,12 @@ on:
     branches: ["master"]
 
 env:
-  REGISTRY: ghcr.io
+  REGISTRY:     ghcr.io
   IMAGE_PREFIX: ghcr.io/pahuldeepp/grainguard
 
 jobs:
   build-and-push:
-    name: Build & Push Images
+    name: Build & Push — ${{ matrix.service.name }}
     runs-on: ubuntu-latest
 
     permissions:
@@ -21,6 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         service:
+          # ── Original services ──────────────────────────────────────────
           - name: read-model-builder
             dockerfile: apps/read-model-builder/Dockerfile
           - name: telemetry-service
@@ -35,6 +36,21 @@ jobs:
             dockerfile: apps/bff/Dockerfile
           - name: gateway
             dockerfile: apps/gateway/Dockerfile
+          # ── Previously missing services ───────────────────────────────
+          - name: cassandra-writer
+            dockerfile: apps/cassandra-writer/Dockerfile
+          - name: asset-registry
+            dockerfile: apps/asset-registry/Dockerfile
+          - name: load-generator
+            dockerfile: apps/load-generator/Dockerfile
+          - name: jobs-worker
+            dockerfile: apps/jobs-worker/Dockerfile
+          - name: workflow-alerts
+            dockerfile: apps/workflow-alerts/Dockerfile
+          - name: risk-engine
+            dockerfile: apps/risk-engine/Dockerfile
+          - name: search-indexer
+            dockerfile: apps/search-indexer/Dockerfile
 
     steps:
       - name: Checkout
@@ -46,7 +62,7 @@ jobs:
           go-version: "1.24"
           cache: true
 
-      - name: Build & Vet
+      - name: Build & Vet (Go)
         run: |
           go build ./...
           go vet ./...

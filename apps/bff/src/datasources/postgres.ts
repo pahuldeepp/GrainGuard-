@@ -2,12 +2,17 @@ import { Pool } from "pg";
 import { postgresCircuitBreaker } from "../lib/circuitBreaker";
 import { cache } from "./redis";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Returns true for valid UUID v4 strings — guards against bad JWT claims */
+export function isValidUuid(value: unknown): value is string {
+  return typeof value === "string" && UUID_RE.test(value);
+}
+
 const pool = new Pool({
-  host:     process.env.READ_DB_HOST     || "pgbouncer",
-  port:     parseInt(process.env.READ_DB_PORT || "5432"),
-  database: process.env.READ_DB_NAME     || "grainguard_read",
-  user:     process.env.READ_DB_USER     || "postgres",
-  password: process.env.READ_DB_PASSWORD || "postgres",
+  connectionString:
+    process.env.READ_DATABASE_URL ||
+    `postgres://${process.env.READ_DB_USER ?? "postgres"}:${process.env.READ_DB_PASSWORD ?? "postgres"}@${process.env.READ_DB_HOST ?? "postgres-read"}:${process.env.READ_DB_PORT ?? "5432"}/${process.env.READ_DB_NAME ?? "grainguard_read"}`,
   max: 50,
 });
 
