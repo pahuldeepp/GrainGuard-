@@ -10,15 +10,12 @@
 //   create:organization_invitations
 //   read:users  update:users
 
-const AUTH0_DOMAIN   = process.env.AUTH0_DOMAIN!;
-const M2M_CLIENT_ID  = process.env.AUTH0_MANAGEMENT_CLIENT_ID!;
-const M2M_CLIENT_SEC = process.env.AUTH0_MANAGEMENT_CLIENT_SECRET!;
+const AUTH0_DOMAIN   = process.env.AUTH0_DOMAIN ?? "";
+const M2M_CLIENT_ID  = process.env.AUTH0_MANAGEMENT_CLIENT_ID ?? "";
+const M2M_CLIENT_SEC = process.env.AUTH0_MANAGEMENT_CLIENT_SECRET ?? "";
 
-if (!AUTH0_DOMAIN || !M2M_CLIENT_ID || !M2M_CLIENT_SEC) {
-  throw new Error(
-    "AUTH0_DOMAIN, AUTH0_MANAGEMENT_CLIENT_ID, AUTH0_MANAGEMENT_CLIENT_SECRET must be set"
-  );
-}
+// Not validated at startup — only SSO routes call these functions.
+// If the env vars are missing, calls to mgmt() will throw at request time.
 
 const MGMT_AUDIENCE = `https://${AUTH0_DOMAIN}/api/v2/`;
 
@@ -29,6 +26,12 @@ let cachedToken: string | null = null;
 let tokenExpiry  = 0;
 
 async function getManagementToken(): Promise<string> {
+  if (!AUTH0_DOMAIN || !M2M_CLIENT_ID || !M2M_CLIENT_SEC) {
+    throw new Error(
+      "SSO not configured: AUTH0_DOMAIN, AUTH0_MANAGEMENT_CLIENT_ID, AUTH0_MANAGEMENT_CLIENT_SECRET must be set"
+    );
+  }
+
   if (cachedToken && Date.now() < tokenExpiry - 60_000) {
     return cachedToken;
   }
