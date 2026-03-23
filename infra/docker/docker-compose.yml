@@ -290,6 +290,25 @@ services:
       JWT_AUDIENCE: https://api.grainguard.io
       AUTH_ENABLED: "true"
       OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
+      ALLOWED_ORIGINS: "http://localhost:5173,http://localhost:5174"
+      DASHBOARD_URL: "http://localhost:5173"
+      # Write DB (Postgres primary)
+      WRITE_DB_HOST: postgres
+      WRITE_DB_PORT: "5432"
+      WRITE_DB_NAME: grainguard
+      WRITE_DB_USER: postgres
+      WRITE_DB_PASSWORD: postgres
+      # Stripe — override via root .env
+      STRIPE_SECRET_KEY: "${STRIPE_SECRET_KEY:-sk_test_placeholder}"
+      STRIPE_WEBHOOK_SECRET: "${STRIPE_WEBHOOK_SECRET:-whsec_placeholder}"
+      STRIPE_PRICE_STARTER: "${STRIPE_PRICE_STARTER:-price_starter_placeholder}"
+      STRIPE_PRICE_PROFESSIONAL: "${STRIPE_PRICE_PROFESSIONAL:-price_pro_placeholder}"
+      STRIPE_PRICE_ENTERPRISE: "${STRIPE_PRICE_ENTERPRISE:-price_enterprise_placeholder}"
+      # Auth0 M2M — override via root .env
+      AUTH0_DOMAIN: "${AUTH0_DOMAIN:-dev-0saa2rbtwuf2j0e8.us.auth0.com}"
+      AUTH0_M2M_CLIENT_ID: "${AUTH0_M2M_CLIENT_ID:-}"
+      AUTH0_M2M_CLIENT_SECRET: "${AUTH0_M2M_CLIENT_SECRET:-}"
+      AUTH0_M2M_AUDIENCE: "${AUTH0_M2M_AUDIENCE:-https://dev-0saa2rbtwuf2j0e8.us.auth0.com/api/v2/}"
     depends_on:
       redis:
         condition: service_started
