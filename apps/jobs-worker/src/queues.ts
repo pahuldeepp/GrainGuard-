@@ -30,6 +30,7 @@ export interface WebhookJob {
   secret: string;
   eventType: string;
   attempt: number;
+  endpointId?: string;
 }
 
 export interface ExportJob {
@@ -48,5 +49,7 @@ export interface AlertJob {
   value: number;
   threshold: number;
   recipients: string[];
+  level?: string;
+  score?: number;
 }
 

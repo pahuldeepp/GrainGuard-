@@ -4,6 +4,7 @@ import { startEmailWorker } from "./handlers/email";
 import { startWebhookWorker } from "./handlers/webhook";
 import { startExportWorker } from "./handlers/export";
 import { startAlertWorker } from "./handlers/alert";
+import { startDigestScheduler } from "./handlers/digest";
 
 async function main() {
   console.log("[jobs-worker] starting...");
@@ -15,6 +16,7 @@ async function main() {
   startWebhookWorker(channel);
   startExportWorker(channel);
   startAlertWorker(channel);
+  startDigestScheduler(channel);
 
   console.log("[jobs-worker] all workers running");
 
