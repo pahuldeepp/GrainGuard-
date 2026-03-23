@@ -3,16 +3,22 @@ import { useAuth0 } from "@auth0/auth0-react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import { useTenantContext } from "../tenancy/TenantContext";
+import { useEffect } from "react";
 
 const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL || "http://localhost:3000";
 
 export function OnboardingPage() {
-  const { user, getAccessTokenSilently } = useAuth0();
+  const { user, getAccessTokenSilently, loginWithRedirect } = useAuth0();
   const navigate = useNavigate();
-  const { setActiveTenant } = useTenantContext();
+  const { activeTenantId, setActiveTenant } = useTenantContext();
   const [orgName, setOrgName] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // If tenant_id arrived in the JWT (e.g. after silent re-auth), go straight to dashboard
+  useEffect(() => {
+    if (activeTenantId) navigate("/", { replace: true });
+  }, [activeTenantId, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,9 +48,15 @@ export function OnboardingPage() {
       }
 
       const { tenantId } = await res.json();
+      // Optimistically set so UI is usable immediately
       setActiveTenant(tenantId);
       toast.success("Organisation created! Welcome to GrainGuard.");
-      navigate("/");
+
+      // Force Auth0 to issue a fresh token with the new tenant_id & admin role.
+      // This redirects to Auth0 (already logged in, so no login screen) and back.
+      await loginWithRedirect({
+        appState: { returnTo: "/" },
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {

@@ -8,7 +8,6 @@ interface AlertRule {
   metric: string;
   operator: string;
   threshold: number;
-  device_type: string | null;
   enabled: boolean;
   created_at: string;
 }
@@ -30,7 +29,7 @@ async function apiFetch(path: string, options: RequestInit = {}) {
   return res.json();
 }
 
-const EMPTY_FORM = { name: "", metric: "temperature", operator: ">", threshold: "", device_type: "" };
+const EMPTY_FORM = { name: "", metric: "temperature", operator: ">", threshold: "" };
 
 export function AlertRulesPage() {
   const [rules, setRules]     = useState<AlertRule[]>([]);
@@ -60,11 +59,10 @@ export function AlertRulesPage() {
       await apiFetch("/alert-rules", {
         method: "POST",
         body: JSON.stringify({
-          name:        form.name,
-          metric:      form.metric,
-          operator:    form.operator,
-          threshold:   parseFloat(form.threshold),
-          device_type: form.device_type || null,
+          name:      form.name,
+          metric:    form.metric,
+          operator:  form.operator,
+          threshold: parseFloat(form.threshold),
         }),
       });
       toast.success("Alert rule created");
@@ -144,10 +142,6 @@ export function AlertRulesPage() {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Threshold</label>
               <input className={`${inputCls} w-full`} type="number" step="any" value={form.threshold} onChange={(e) => setForm((f) => ({ ...f, threshold: e.target.value }))} placeholder="e.g. 35" required />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Device Type <span className="text-gray-400 font-normal">(optional)</span></label>
-              <input className={`${inputCls} w-full`} value={form.device_type} onChange={(e) => setForm((f) => ({ ...f, device_type: e.target.value }))} placeholder="Leave blank for all types" />
-            </div>
             <div className="sm:col-span-2 flex gap-3 justify-end">
               <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-sm border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800">Cancel</button>
               <button type="submit" disabled={saving} className="px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center gap-2">
@@ -170,7 +164,7 @@ export function AlertRulesPage() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
               <tr>
-                {["Name", "Condition", "Device Type", "Enabled", ""].map((h) => (
+                {["Name", "Condition", "Enabled", ""].map((h) => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{h}</th>
                 ))}
               </tr>
@@ -182,7 +176,6 @@ export function AlertRulesPage() {
                   <td className="px-4 py-3 text-gray-600 dark:text-gray-400 font-mono">
                     {rule.metric} {rule.operator} {rule.threshold}
                   </td>
-                  <td className="px-4 py-3 text-gray-500 dark:text-gray-400">{rule.device_type ?? "All"}</td>
                   <td className="px-4 py-3">
                     <button
                       onClick={() => toggleRule(rule)}

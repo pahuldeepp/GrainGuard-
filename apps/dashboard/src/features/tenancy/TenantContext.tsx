@@ -1,7 +1,8 @@
 ﻿import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
 
-const TENANT_CLAIM = "https://grainguard/tenant_id";
+// Auth0 Action injects claims under https://grainguard.com/ namespace
+const TENANT_CLAIM = "https://grainguard.com/tenant_id";
 
 interface TenantContextValue {
   activeTenantId: string | null;
