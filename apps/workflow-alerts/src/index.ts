@@ -1,5 +1,5 @@
 import { Kafka } from "kafkajs";
-import amqp, { Channel, Connection } from "amqplib";
+import amqp, { Channel, ChannelModel } from "amqplib";
 
 const KAFKA_BROKERS  = (process.env.KAFKA_BROKERS || "kafka:9092").split(",");
 const RISK_TOPIC     = process.env.RISK_SCORES_TOPIC || "risk.scores";
@@ -31,7 +31,7 @@ function setCooldown(deviceId: string, tenantId: string): void {
   cooldowns.set(`${tenantId}:${deviceId}`, Date.now());
 }
 
-async function connectRabbitMQ(retries = 10, delay = 3000): Promise<{ conn: Connection; ch: Channel }> {
+async function connectRabbitMQ(retries = 10, delay = 3000): Promise<{ conn: ChannelModel; ch: Channel }> {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       const conn = await amqp.connect(RABBITMQ_URL);
