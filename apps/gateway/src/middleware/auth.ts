@@ -76,12 +76,14 @@ export async function authMiddleware(
       return res.status(403).json({ error: "tenant_missing" });
     }
 
+    const rawRoles =
+      claims.roles ??
+      (claims as any)["https://grainguard/roles"];
+
     req.user = {
       sub: String(claims.sub || ""),
       tenantId: String(tenantId),
-      roles: Array.isArray(claims.roles)
-        ? claims.roles.map(String)
-        : undefined,
+      roles: Array.isArray(rawRoles) ? rawRoles.map(String) : undefined,
       scopes:
         typeof claims.scope === "string"
           ? claims.scope.split(" ")

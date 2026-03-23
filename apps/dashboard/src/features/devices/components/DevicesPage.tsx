@@ -1,4 +1,5 @@
 ﻿import { useState, useMemo, useCallback } from "react";
+import { Navigate } from "react-router-dom";
 import { useDevices, useSearchDevices } from "../hooks/useDevices";
 import { useDebounce } from "../../../hooks/useDebounce";
 import { DeviceTable } from "./DeviceTable";
@@ -70,15 +71,7 @@ export function DevicesPage() {
   }, [filteredDevices, isFiltering]);
 
   if (!activeTenantId) {
-    return (
-      <div className="p-8">
-        <EmptyState
-          icon="🏢"
-          title="No tenant assigned"
-          description="Your account is not associated with any tenant. Contact your administrator."
-        />
-      </div>
-    );
+    return <Navigate to="/onboarding" replace />;
   }
 
   if (error) {

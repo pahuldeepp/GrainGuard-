@@ -2,12 +2,14 @@ import { useState } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
+import { useTenantContext } from "../tenancy/TenantContext";
 
 const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL || "http://localhost:3000";
 
 export function OnboardingPage() {
   const { user, getAccessTokenSilently } = useAuth0();
   const navigate = useNavigate();
+  const { setActiveTenant } = useTenantContext();
   const [orgName, setOrgName] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +41,8 @@ export function OnboardingPage() {
         throw new Error(body?.error || "Registration failed");
       }
 
+      const { tenantId } = await res.json();
+      setActiveTenant(tenantId);
       toast.success("Organisation created! Welcome to GrainGuard.");
       navigate("/");
     } catch (err) {

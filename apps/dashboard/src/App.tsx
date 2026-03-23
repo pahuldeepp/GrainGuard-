@@ -22,7 +22,7 @@ import { useAuth } from "./hooks/useAuth";
 
 function AppInner() {
   const { isDark, toggle } = useDarkMode();
-  const { user, signOut, isAuthenticated } = useAuth();
+  const { user, signOut, isAuthenticated, isAdmin } = useAuth();
   const { getAccessTokenSilently } = useAuth0();
 
   useEffect(() => {
@@ -49,16 +49,16 @@ function AppInner() {
                     Devices
                   </Link>
                 )}
-                {isAuthenticated && (
+                {isAuthenticated && isAdmin && (
                   <Link to="/billing" className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">Billing</Link>
                 )}
-                {isAuthenticated && (
+                {isAuthenticated && isAdmin && (
                   <Link to="/alerts" className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">Alerts</Link>
                 )}
-                {isAuthenticated && (
+                {isAuthenticated && isAdmin && (
                   <Link to="/audit" className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">Audit</Link>
                 )}
-                {isAuthenticated && (
+                {isAuthenticated && isAdmin && (
                   <Link to="/sso" className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">SSO</Link>
                 )}
                 {isAuthenticated && <TenantSwitcher />}

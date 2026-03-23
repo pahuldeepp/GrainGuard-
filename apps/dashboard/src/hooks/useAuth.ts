@@ -10,6 +10,10 @@ export function useAuth() {
     getAccessTokenSilently,
   } = useAuth0();
 
+  const roles: string[] =
+    (user?.["https://grainguard/roles"] as string[]) ?? [];
+  const isAdmin = roles.includes("admin");
+
   const signOut = () =>
     logout({ logoutParams: { returnTo: window.location.origin } });
 
@@ -24,6 +28,7 @@ export function useAuth() {
     user,
     isAuthenticated,
     isLoading,
+    isAdmin,
     login: loginWithRedirect,
     signOut,
     getToken,
