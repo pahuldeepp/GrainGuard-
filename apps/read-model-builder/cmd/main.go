@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"sync"
 	"syscall"
@@ -111,8 +112,8 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("db config parse failed")
 	}
-	poolConfig.MaxConns = 25
-	poolConfig.MinConns = 5
+	poolConfig.MaxConns = 50
+	poolConfig.MinConns = 10
 	poolConfig.MaxConnLifetime = 5 * time.Minute
 	poolConfig.MaxConnIdleTime = 1 * time.Minute
 
@@ -129,7 +130,7 @@ func main() {
 
 	// Kafka consumers
 	var wg sync.WaitGroup
-	workerCount := getenvInt("WORKER_COUNT", 16)
+	workerCount := getenvInt("WORKER_COUNT", runtime.NumCPU()*2)
 
 	telemetryConsumer := consumer.NewKafkaConsumerFromEnv("telemetry.events", getenv("KAFKA_GROUP_ID", "read-model-builder"))
 	batchHandler := consumer.NewBatchEnvelopeHandler(pool, redisClient)

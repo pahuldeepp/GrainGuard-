@@ -2,10 +2,13 @@ import { Router, Request, Response } from "express";
 import { v4 as uuidv4 } from "uuid";
 import { pool } from "../lib/db";
 import { authMiddleware } from "../lib/auth";
+import { apiRateLimiter } from "../middleware/rateLimiting";
 import { setUserTenantId, assignRoleByName, inviteToOrg } from "../lib/auth0-mgmt";
 import { writeAuditLog } from "../lib/audit";
 
 export const teamRouter = Router();
+
+teamRouter.use(apiRateLimiter);
 
 function requireAdmin(req: Request, res: Response): boolean {
   if (req.user?.role !== "admin") {

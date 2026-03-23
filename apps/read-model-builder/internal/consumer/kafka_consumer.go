@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	batchSize    = 64                    // max events per batch before flushing
-	batchTimeout = 10 * time.Millisecond // max wait before flushing a partial batch
+	batchSize    = 256                   // max events per batch before flushing
+	batchTimeout = 50 * time.Millisecond // max wait before flushing a partial batch
 )
 
 type KafkaConsumer struct {
