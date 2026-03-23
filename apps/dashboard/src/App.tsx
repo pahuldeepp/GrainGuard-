@@ -17,6 +17,8 @@ import { InviteAcceptPage } from "./features/team/InviteAcceptPage";
 import { ApiKeysPage } from "./features/apikeys/ApiKeysPage";
 import { WebhooksPage } from "./features/webhooks/WebhooksPage";
 import { SettingsPage } from "./features/settings/SettingsPage";
+import { BillingSuccessPage } from "./features/billing/BillingSuccessPage";
+import { SuperAdminPage } from "./features/admin/SuperAdminPage";
 import { ErrorBoundary } from "./shared/components/ErrorBoundary";
 import { NotFound } from "./shared/components/NotFound";
 import { ProtectedRoute } from "./features/auth/ProtectedRoute";
@@ -27,7 +29,7 @@ import { useAuth } from "./hooks/useAuth";
 
 function AppInner() {
   const { isDark, toggle } = useDarkMode();
-  const { user, signOut, isAuthenticated, isAdmin } = useAuth();
+  const { user, signOut, isAuthenticated, isAdmin, isSuperAdmin } = useAuth();
   const { getAccessTokenSilently, loginWithRedirect } = useAuth0();
 
   useEffect(() => {
@@ -78,6 +80,9 @@ function AppInner() {
                 {isAuthenticated && (
                   <Link to="/settings" className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">Settings</Link>
                 )}
+                {isAuthenticated && isSuperAdmin && (
+                  <Link to="/admin" className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 font-medium">Admin</Link>
+                )}
                 {isAuthenticated && <TenantSwitcher />}
                 <button
                   onClick={toggle}
@@ -116,7 +121,7 @@ function AppInner() {
                       <Route path="/" element={<DevicesPage />} />
                       <Route path="/devices/:id" element={<DeviceDetailPage />} />
                       <Route path="/billing" element={<BillingPage />} />
-                      <Route path="/billing/success" element={<BillingPage />} />
+                      <Route path="/billing/success" element={<BillingSuccessPage />} />
                       <Route path="/onboarding" element={<OnboardingPage />} />
                       <Route path="/sso" element={<SSOPage />} />
                       <Route path="/alerts" element={<AlertRulesPage />} />
@@ -125,6 +130,7 @@ function AppInner() {
                       <Route path="/api-keys" element={<ApiKeysPage />} />
                       <Route path="/webhooks" element={<WebhooksPage />} />
                       <Route path="/settings" element={<SettingsPage />} />
+                      <Route path="/admin" element={<SuperAdminPage />} />
                       <Route path="*" element={<NotFound />} />
                     </Routes>
                   </ProtectedRoute>

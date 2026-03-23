@@ -31,6 +31,7 @@ import { devicesRouter } from "./routes/devices";
 import { accountRouter } from "./routes/account";
 import { webhooksRouter } from "./routes/webhooks";
 import { notificationPrefsRouter } from "./routes/notificationPreferences";
+import { adminRouter } from "./routes/admin";
 
 // ── Startup environment validation ────────────────────────────────────────
 (function validateEnv() {
@@ -218,6 +219,7 @@ app.use(devicesRouter);
 app.use(accountRouter);
 app.use(webhooksRouter);
 app.use(notificationPrefsRouter);
+app.use(adminRouter);
 
 /**
  * Telemetry ingest — device auth via API key (not JWT)
@@ -335,8 +337,28 @@ app.get(
   }
 );
 
+// Liveness probe — always 200 if the process is running
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok" });
+  res.json({ status: "ok", uptime: process.uptime() });
+});
+
+// Readiness probe — checks DB + Redis connectivity
+app.get("/health/ready", async (_req, res) => {
+  const checks: Record<string, string> = {};
+  try {
+    await pool.query("SELECT 1");
+    checks.postgres = "ok";
+  } catch {
+    checks.postgres = "error";
+  }
+  try {
+    await redis.ping();
+    checks.redis = "ok";
+  } catch {
+    checks.redis = "error";
+  }
+  const allOk = Object.values(checks).every((v) => v === "ok");
+  return res.status(allOk ? 200 : 503).json({ status: allOk ? "ok" : "degraded", checks });
 });
 
 app.get("/metrics", metricsHandler());
