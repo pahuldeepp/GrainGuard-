@@ -48,8 +48,8 @@ export async function authMiddleware(
   next: NextFunction
 ) {
   // Dev bypass: AUTH_ENABLED=false lets curl tests pass without a JWT.
-  // Tenant ID is read from x-tenant-id header; user gets admin role.
-  if (process.env.AUTH_ENABLED === "false") {
+  // Only allowed in non-production environments.
+  if (process.env.AUTH_ENABLED === "false" && process.env.NODE_ENV !== "production") {
     const tenantId =
       (req.headers["x-tenant-id"] as string) ||
       "11111111-1111-1111-1111-111111111111";
@@ -80,7 +80,7 @@ export async function authMiddleware(
 
     const tenantId =
       claims.tenant_id ||
-      (claims as any)["https://grainguard/tenant_id"];
+      (claims as any)["https://grainguard.com/tenant_id"];
 
     if (!tenantId) {
       return res.status(403).json({ error: "tenant_missing" });
@@ -88,7 +88,7 @@ export async function authMiddleware(
 
     const rawRoles =
       claims.roles ??
-      (claims as any)["https://grainguard/roles"];
+      (claims as any)["https://grainguard.com/roles"];
 
     req.user = {
       sub: String(claims.sub || ""),

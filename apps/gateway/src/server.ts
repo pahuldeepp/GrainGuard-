@@ -30,6 +30,7 @@ import { apiKeysRouter } from "./routes/apiKeys";
 import { devicesRouter } from "./routes/devices";
 import { accountRouter } from "./routes/account";
 import { webhooksRouter } from "./routes/webhooks";
+import { notificationPrefsRouter } from "./routes/notificationPreferences";
 
 // ── Startup environment validation ────────────────────────────────────────
 (function validateEnv() {
@@ -216,6 +217,7 @@ app.use(apiKeysRouter);
 app.use(devicesRouter);
 app.use(accountRouter);
 app.use(webhooksRouter);
+app.use(notificationPrefsRouter);
 
 /**
  * Telemetry ingest — device auth via API key (not JWT)

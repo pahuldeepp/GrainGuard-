@@ -1,52 +1,67 @@
-import { Pool } from "pg";
+import { pool } from "./db";
 
-// Write pool — points to primary DB, not read replica
-export const writePool = new Pool({
-  host:     process.env.WRITE_DB_HOST     || "postgres",
-  port:     parseInt(process.env.WRITE_DB_PORT || "5432"),
-  database: process.env.WRITE_DB_NAME     || "grainguard",
-  user:     process.env.WRITE_DB_USER     || "postgres",
-  password: process.env.WRITE_DB_PASSWORD || "postgres",
-  max: 5,
-});
-
+// ── Audit event types ────────────────────────────────────────────────────────
 export type AuditEventType =
-  | "device.created"
-  | "device.creation_failed"
-  | "device.telemetry_queried"
-  | "auth.unauthorized"
-  | "admin.action";
+  // Auth
+  | "auth.login"
+  | "auth.logout"
+  | "auth.sso_configured"
+  | "auth.sso_removed"
+  // Team
+  | "team.member_invited"
+  | "team.invite_accepted"
+  | "team.invite_revoked"
+  | "team.member_removed"
+  | "team.member_role_changed"
+  // Alert rules
+  | "alert_rule.created"
+  | "alert_rule.updated"
+  | "alert_rule.deleted"
+  // Billing
+  | "billing.checkout_started"
+  | "billing.subscription_created"
+  | "billing.subscription_cancelled"
+  | "billing.subscription_updated"
+  | "billing.portal_accessed"
+  // API keys
+  | "api_key.created"
+  | "api_key.revoked"
+  // Devices
+  | "device.registered"
+  | "device.deleted";
 
 export interface AuditEvent {
-  eventType: AuditEventType;
-  actorId: string;
   tenantId: string;
-  resourceType: string;
-  resourceId?: string;
-  payload?: Record<string, any>;
+  actorId: string;       // auth0 sub
+  actorEmail?: string;
+  eventType: AuditEventType;
+  resourceId?: string;   // e.g. invite id, rule id, device id
+  resourceType?: string; // e.g. "invite", "alert_rule", "device"
+  meta?: Record<string, unknown>;
   ipAddress?: string;
-  userAgent?: string;
 }
 
-export async function logAuditEvent(event: AuditEvent): Promise<void> {
+export async function writeAuditLog(event: AuditEvent): Promise<void> {
   try {
-    await writePool.query(
-      `INSERT INTO audit_events
-       (event_type, actor_id, tenant_id, resource_type, resource_id, payload, ip_address, user_agent)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    await pool.query(
+      `INSERT INTO audit_logs
+         (id, tenant_id, actor_id, actor_email, event_type,
+          resource_id, resource_type, meta, ip_address, created_at)
+       VALUES
+         (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
       [
-        event.eventType,
-        event.actorId,
         event.tenantId,
-        event.resourceType,
-        event.resourceId || null,
-        JSON.stringify(event.payload || {}),
-        event.ipAddress || null,
-        event.userAgent || null,
+        event.actorId,
+        event.actorEmail ?? null,
+        event.eventType,
+        event.resourceId ?? null,
+        event.resourceType ?? null,
+        event.meta ? JSON.stringify(event.meta) : null,
+        event.ipAddress ?? null,
       ]
     );
   } catch (err) {
-    console.error("[audit] failed to log event:", event.eventType, err);
+    // Audit failures must never crash the request — log and continue
+    console.error("[audit] failed to write audit log:", err);
   }
 }
-

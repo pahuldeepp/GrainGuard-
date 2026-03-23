@@ -31,16 +31,21 @@ const proto = grpc.loadPackageDefinition(packageDefinition) as any;
 // volumes:
 //   - ../certs:/certs
 
-const ca = fs.readFileSync("/certs/ca.crt");
-const clientCert = fs.readFileSync("/certs/gateway-client.crt");
-const clientKey = fs.readFileSync("/certs/gateway-client.key");
+
+
+
 
 // Secure TLS credentials
-const credentials = grpc.credentials.createSsl(
-  ca,
-  clientKey,
-  clientCert
-);
+const credentials = !fs.existsSync("/certs/ca.crt")
+  ? grpc.credentials.createInsecure()
+  : grpc.credentials.createSsl(
+      fs.readFileSync("/certs/ca.crt"),
+      fs.readFileSync("/certs/gateway-client.key"),
+      fs.readFileSync("/certs/gateway-client.crt")
+    );
+
+
+
 
 /* =========================================
    🎯 Create Secure gRPC Client

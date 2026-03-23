@@ -1,10 +1,13 @@
 import { Router, Request, Response } from "express";
 import { authMiddleware } from "../middleware/auth";
-import { pool } from "../database/db";
+import { bulkRateLimiter } from "../middleware/rateLimiting";
+import { writePool as pool } from "../database/db";
 import { createDevice } from "../services/device";
 import Busboy from "busboy";
 
 export const devicesImportRouter = Router();
+
+devicesImportRouter.use(bulkRateLimiter);
 
 // ── POST /devices/bulk ────────────────────────────────────────────────────────
 // Accepts a multipart CSV upload. Each row is a serial number.

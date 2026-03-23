@@ -1,12 +1,14 @@
 import { Router, Request, Response } from "express";
-import { pool } from "../database/db";
+import { writePool as pool } from "../database/db";
+import { setUserTenantId, assignRoleByName } from "../lib/auth0Management";
+import { publicRateLimiter } from "../middleware/rateLimiting";
 import { v4 as uuidv4 } from "uuid";
 
 export const tenantsRouter = Router();
 
 // Public endpoint — called during signup before JWT exists
-// Protected by a signup secret to prevent abuse
-tenantsRouter.post("/tenants/register", async (req: Request, res: Response) => {
+// Rate-limited by IP to prevent abuse (scoped here, not at app.use level)
+tenantsRouter.post("/tenants/register", publicRateLimiter, async (req: Request, res: Response) => {
   const { orgName, email, authUserId } = req.body as {
     orgName: string;
     email: string;
@@ -37,6 +39,18 @@ tenantsRouter.post("/tenants/register", async (req: Request, res: Response) => {
     );
 
     await pool.query("COMMIT");
+
+    // Set tenant_id in Auth0 app_metadata so it appears in all future JWTs.
+    // Also assign the admin role so the first user gets full access.
+    // Both are non-fatal — DB record is the source of truth.
+    Promise.all([
+      setUserTenantId(authUserId, tenantId).catch((e) =>
+        console.error("[tenants] failed to set Auth0 app_metadata:", e)
+      ),
+      assignRoleByName(authUserId, "admin").catch((e) =>
+        console.error("[tenants] failed to assign admin role:", e)
+      ),
+    ]);
 
     return res.status(201).json({ tenantId, slug });
   } catch (err: any) {

@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { authMiddleware } from "../middleware/auth";
-import { pool } from "../database/db";
+import { apiRateLimiter } from "../middleware/rateLimiting";
+import { writePool as pool } from "../database/db";
 import {
   createOrganization,
   createSamlConnection,
@@ -11,6 +12,8 @@ import {
 } from "../lib/auth0Management";
 
 export const ssoRouter = Router();
+
+ssoRouter.use(apiRateLimiter);
 
 // All SSO routes require the caller to be an admin of the tenant
 function requireAdmin(req: Request, res: Response): boolean {

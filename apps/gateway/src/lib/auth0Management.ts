@@ -82,6 +82,47 @@ async function mgmt(
   return res.json();
 }
 
+// ── User onboarding operations ────────────────────────────────────────────────
+
+/**
+ * Sets app_metadata.tenant_id on a user so the Login Action
+ * injects it into every subsequent JWT automatically.
+ */
+export async function setUserTenantId(
+  authUserId: string,
+  tenantId: string
+): Promise<void> {
+  await mgmt(`users/${encodeURIComponent(authUserId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ app_metadata: { tenant_id: tenantId } }),
+  });
+}
+
+/**
+ * Finds the Auth0 role named `roleName` and assigns it to the user.
+ * Silently no-ops if the role isn't found (don't break onboarding).
+ */
+export async function assignRoleByName(
+  authUserId: string,
+  roleName: string
+): Promise<void> {
+  try {
+    const roles: Array<{ id: string; name: string }> = await mgmt("roles?per_page=50");
+    const role = roles.find((r) => r.name === roleName);
+    if (!role) {
+      console.warn(`[auth0] role "${roleName}" not found — skipping assignment`);
+      return;
+    }
+    await mgmt(`users/${encodeURIComponent(authUserId)}/roles`, {
+      method: "POST",
+      body: JSON.stringify({ roles: [role.id] }),
+    });
+  } catch (err) {
+    // Non-fatal — user can still proceed without the role
+    console.warn(`[auth0] assignRoleByName failed:`, err);
+  }
+}
+
 // ── Organization operations ───────────────────────────────────────────────────
 
 /**
