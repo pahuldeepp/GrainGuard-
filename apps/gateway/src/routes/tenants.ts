@@ -43,7 +43,7 @@ tenantsRouter.post("/tenants/register", publicRateLimiter, async (req: Request, 
     // Set tenant_id in Auth0 app_metadata so it appears in all future JWTs.
     // Also assign the admin role so the first user gets full access.
     // Both are non-fatal — DB record is the source of truth.
-    Promise.all([
+    await Promise.all([
       setUserTenantId(authUserId, tenantId).catch((e) =>
         console.error("[tenants] failed to set Auth0 app_metadata:", e)
       ),

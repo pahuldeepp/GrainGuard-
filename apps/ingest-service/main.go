@@ -75,9 +75,18 @@ func (c *apiKeyCache) get(keyHash string) (*apiKeyEntry, bool) {
 		return nil, false
 	}
 	if time.Since(entry.CachedAt) > c.ttl {
+		// Re-check under write lock to avoid race between TTL check and delete
 		c.mu.Lock()
-		delete(c.entries, keyHash)
+		entry, ok = c.entries[keyHash]
+		if ok && time.Since(entry.CachedAt) > c.ttl {
+			delete(c.entries, keyHash)
+			c.mu.Unlock()
+			return nil, false
+		}
 		c.mu.Unlock()
+		if ok {
+			return entry, true
+		}
 		return nil, false
 	}
 	return entry, true
@@ -376,9 +385,9 @@ func resolveAPIKey(ctx context.Context, rawKey string) (*apiKeyEntry, error) {
 		return entry, nil
 	}
 
-	// 2. Redis cache (~0.5ms)
+	// 2. Redis cache (~0.5ms) — use hash not raw key
 	if rdb != nil {
-		cached, err := rdb.Get(ctx, "apikey:"+rawKey).Result()
+		cached, err := rdb.Get(ctx, "apikey:"+keyHash).Result()
 		if err == nil && cached != "" {
 			var entry apiKeyEntry
 			if json.Unmarshal([]byte(cached), &entry) == nil {
@@ -417,7 +426,7 @@ func resolveAPIKey(ctx context.Context, rawKey string) (*apiKeyEntry, error) {
 	cache.set(keyHash, entry)
 	if rdb != nil {
 		data, _ := json.Marshal(map[string]string{"TenantID": tenantID, "KeyID": keyID})
-		rdb.Set(ctx, "apikey:"+rawKey, data, 5*time.Minute)
+		rdb.Set(ctx, "apikey:"+keyHash, data, 5*time.Minute)
 	}
 
 	return entry, nil

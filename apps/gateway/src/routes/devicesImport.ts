@@ -114,6 +114,25 @@ devicesImportRouter.post(
         return;
       }
 
+      // Check device quota before starting import
+      try {
+        const { checkDeviceQuota } = await import("../services/planEnforcement");
+        const quotaCheck = await checkDeviceQuota(tenantId, total);
+        if (!quotaCheck.allowed) {
+          emit({
+            error: "device_limit_reached",
+            message: quotaCheck.message,
+            currentCount: quotaCheck.currentCount,
+            maxDevices: quotaCheck.maxDevices,
+            plan: quotaCheck.plan,
+          });
+          res.end();
+          return;
+        }
+      } catch (err) {
+        console.warn("[bulk-import] quota check failed, proceeding:", err);
+      }
+
       // Persist a bulk_import_job row so admins can see history
       const jobRow = await pool.query(
         `INSERT INTO bulk_import_jobs (tenant_id, created_by, total_rows, status)

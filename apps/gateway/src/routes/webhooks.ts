@@ -43,7 +43,7 @@ webhooksRouter.post(
   "/webhooks",
   authMiddleware,
   async (req: Request, res: Response) => {
-    if (req.user?.role !== "admin") {
+    if (!req.user?.roles?.includes("admin")) {
       return res.status(403).json({ error: "admin_required" });
     }
 
@@ -85,14 +85,15 @@ webhooksRouter.post(
     await writeAuditLog({
       tenantId:     req.user!.tenantId,
       actorId:      req.user!.sub,
-      eventType:    "api_key.created",  // closest available type
+      eventType:    "webhook_endpoint.created",
       resourceId:   rows[0].id,
       resourceType: "webhook_endpoint",
       meta:         { url, eventTypes: filteredTypes },
       ipAddress:    req.ip,
     });
 
-    // Return the signing secret ONCE — never stored in plaintext after this response
+    // Return the signing secret ONCE — never stored in plaintext after this response.
+    // Secret is shown only in this response; subsequent GETs never expose it.
     return res.status(201).json({ ...rows[0], secret });
   }
 );
@@ -102,7 +103,7 @@ webhooksRouter.patch(
   "/webhooks/:id",
   authMiddleware,
   async (req: Request, res: Response) => {
-    if (req.user?.role !== "admin") {
+    if (!req.user?.roles?.includes("admin")) {
       return res.status(403).json({ error: "admin_required" });
     }
 
@@ -148,7 +149,7 @@ webhooksRouter.delete(
   "/webhooks/:id",
   authMiddleware,
   async (req: Request, res: Response) => {
-    if (req.user?.role !== "admin") {
+    if (!req.user?.roles?.includes("admin")) {
       return res.status(403).json({ error: "admin_required" });
     }
 
@@ -170,7 +171,7 @@ webhooksRouter.get(
   "/webhooks/:id/deliveries",
   authMiddleware,
   async (req: Request, res: Response) => {
-    if (req.user?.role !== "admin") {
+    if (!req.user?.roles?.includes("admin")) {
       return res.status(403).json({ error: "admin_required" });
     }
 
@@ -201,7 +202,7 @@ webhooksRouter.post(
   "/webhooks/:id/test",
   authMiddleware,
   async (req: Request, res: Response) => {
-    if (req.user?.role !== "admin") {
+    if (!req.user?.roles?.includes("admin")) {
       return res.status(403).json({ error: "admin_required" });
     }
 

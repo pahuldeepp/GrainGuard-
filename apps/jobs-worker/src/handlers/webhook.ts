@@ -54,12 +54,18 @@ async function updateEndpointStatus(
   try {
     if (success) {
       await db.query(
-        `UPDATE webhook_endpoints SET last_error = NULL, last_error_at = NULL WHERE id = $1`,
+        `UPDATE webhook_endpoints
+         SET last_error = NULL, last_error_at = NULL, updated_at = NOW()
+         WHERE id = $1`,
         [endpointId]
       );
     } else {
+      // Atomic conditional update — only overwrite if our error is newer
       await db.query(
-        `UPDATE webhook_endpoints SET last_error = $1, last_error_at = NOW() WHERE id = $2`,
+        `UPDATE webhook_endpoints
+         SET last_error = $1, last_error_at = NOW(), updated_at = NOW()
+         WHERE id = $2
+           AND (last_error_at IS NULL OR last_error_at < NOW() - INTERVAL '1 second')`,
         [errorMessage?.slice(0, 500) ?? "Unknown error", endpointId]
       );
     }
@@ -76,8 +82,10 @@ async function deliverWebhook(
   const timestamp = Date.now();
   const signature = signPayload(body, job.secret);
 
+  // Log only the host — URL query params may contain secrets
+  const urlHost = (() => { try { return new URL(job.url).host; } catch { return "unknown"; } })();
   console.log(
-    `[webhook] delivering ${job.eventType} to ${job.url} tenant=${job.tenantId} attempt=${attempt + 1}`
+    `[webhook] delivering ${job.eventType} to ${urlHost} tenant=${job.tenantId} attempt=${attempt + 1}`
   );
 
   const start = Date.now();
@@ -100,14 +108,14 @@ async function deliverWebhook(
   if (!response.ok) {
     throw Object.assign(
       new Error(
-        `Webhook delivery failed: HTTP ${response.status} from ${job.url}`
+        `Webhook delivery failed: HTTP ${response.status} from ${urlHost}`
       ),
       { statusCode: response.status, durationMs }
     );
   }
 
   console.log(
-    `[webhook] delivered successfully to ${job.url} status=${response.status} duration=${durationMs}ms`
+    `[webhook] delivered successfully to ${urlHost} status=${response.status} duration=${durationMs}ms`
   );
 
   return { statusCode: response.status, durationMs };

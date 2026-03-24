@@ -21,13 +21,19 @@ adminRouter.get(
   async (req: Request, res: Response) => {
     if (!requireSuperAdmin(req, res)) return;
 
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 50));
+    const offset = (page - 1) * limit;
+
     const { rows } = await pool.query(
       `SELECT
          t.id, t.name, t.slug, t.plan, t.subscription_status, t.created_at,
          (SELECT COUNT(*) FROM devices d WHERE d.tenant_id = t.id)::int AS device_count,
          (SELECT COUNT(*) FROM tenant_users tu WHERE tu.tenant_id = t.id)::int AS member_count
        FROM tenants t
-       ORDER BY t.created_at DESC`
+       ORDER BY t.created_at DESC
+       LIMIT $1 OFFSET $2`,
+      [limit, offset]
     );
 
     return res.json(rows);

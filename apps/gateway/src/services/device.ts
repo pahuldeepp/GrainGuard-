@@ -70,10 +70,10 @@ export function createDevice(
   return new Promise((resolve, reject) => {
     const metadata = new grpc.Metadata();
 
-    // 🔥 Correlation ID
+    // Correlation ID
     if (requestId) metadata.set("x-request-id", requestId);
 
-    // 🔐 Tenant isolation
+    // Tenant isolation
     metadata.set("x-tenant-id", tenantId);
 
     // Optional user propagation
@@ -84,12 +84,16 @@ export function createDevice(
       metadata.set("authorization", jwtToken);
     }
 
+    // 10s deadline — prevents hanging if telemetry-service is down
+    const deadline = new Date(Date.now() + 10_000);
+
     client.CreateDevice(
       {
         tenant_id: tenantId,
         serial_number: serial,
       },
       metadata,
+      { deadline },
       (err: any, response: any) => {
         if (err) {
           return reject(err);

@@ -8,6 +8,8 @@ export const billingRouter = Router();
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2024-11-20.acacia",
+  timeout: 15_000,       // 15s timeout on all Stripe API calls
+  maxNetworkRetries: 2,  // auto-retry on network errors
 });
 
 const GATEWAY_URL  = process.env.GATEWAY_URL  || "http://localhost:3000";
