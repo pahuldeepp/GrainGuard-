@@ -105,9 +105,4 @@ export const publicRateLimiter = createRateLimiter({
   keyPrefix:     "public",
 });
 
-/** IoT device ingest — high throughput per device/tenant */
-export const ingestRateLimiter = createRateLimiter({
-  windowSeconds: 60,
-  maxRequests:   500,
-  keyPrefix:     "ingest",
-});
+// ingestRateLimiter removed — device ingest moved to Go ingest-service (:3001)

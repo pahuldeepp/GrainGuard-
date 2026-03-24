@@ -13,8 +13,8 @@ import { writePool } from "./database/db";
 import { metricsHandler, requestLatency } from "./observability/metrics";
 import { requestIdMiddleware } from "./middleware/requestId";
 import { authMiddleware } from "./middleware/auth";
-import { apiKeyMiddleware } from "./middleware/apiKey";
-import { apiRateLimiter, ingestRateLimiter } from "./middleware/rateLimiting";
+// apiKeyMiddleware removed — device ingest moved to Go ingest-service
+import { apiRateLimiter } from "./middleware/rateLimiting";
 import { validate, createDeviceSchema, deviceIdParamSchema } from "./middleware/validation";
 import { apiVersionMiddleware } from "./middleware/apiVersion";
 import { securityHeaders, permissionsPolicy } from "./middleware/securityHeaders";
@@ -222,38 +222,18 @@ app.use(notificationPrefsRouter);
 app.use(adminRouter);
 
 /**
- * Telemetry ingest — device auth via API key (not JWT)
- * POST /ingest is called by physical devices in the field.
- * Devices don't have browsers so they use X-Api-Key instead of OAuth Bearer.
+ * Telemetry ingest — DEPRECATED on Gateway.
+ * Devices should POST to the dedicated Go ingest-service (:3001/ingest) directly.
+ * This stub returns a 308 redirect hint for any device still pointing here.
  */
-app.post(
-  "/ingest",
-  ingestRateLimiter,              // IP-based pre-auth flood guard
-  apiKeyMiddleware,               // resolves tenantId from X-Api-Key header
-  async (req: Request, res: Response) => {
-    // At this point req.user is populated with { sub, tenantId, roles: ["device"] }
-    // Route telemetry payload to the telemetry-service via gRPC (same path as /devices)
-    const tenantId = req.user!.tenantId;
-    try {
-      // Forward the raw payload — telemetry-service validates the schema
-      const result = await createDevice(
-        tenantId,
-        req.body.serialNumber,
-        String(req.requestId),
-        req.user!.sub,
-        undefined            // no auth header — device used API key
-      );
-      return res.json(result);
-    } catch (err) {
-      console.error("[ingest]", err);
-      return res.status(500).json({ error: "ingest_failed" });
-    }
-  }
-);
+app.post("/ingest", (_req: Request, res: Response) => {
+  res.status(308).json({
+    error: "moved_permanently",
+    message: "Device ingest has moved to the dedicated ingest service on port 3001",
+    location: "/ingest on ingest-service:3001",
+  });
+});
 
-/**
- * REST routes — express.json() applied only here
- */
 app.post(
   "/devices",
   authMiddleware,    // auth first → req.user.tenantId is set for the rate limiter

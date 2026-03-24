@@ -640,6 +640,34 @@ services:
         condition: service_healthy
     networks:
       - grainguard-net
+  ingest-service:
+    build:
+      context: ../../
+      dockerfile: apps/ingest-service/Dockerfile
+    container_name: grainguard-ingest-service
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_TOPIC: telemetry.events
+      KAFKA_BATCH_SIZE: "200"
+      KAFKA_BATCH_TIMEOUT_MS: "5"
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/grainguard?sslmode=disable
+      REDIS_ADDR: redis:6379
+      DB_MAX_CONNS: "10"
+      REDIS_POOL_SIZE: "20"
+      API_KEY_CACHE_TTL_SECONDS: "300"
+      PORT: "3001"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - grainguard-net
 
   workflow-alerts:
     build:

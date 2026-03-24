@@ -4,12 +4,16 @@ on:
   push:
     branches: ["**"]
   pull_request:
-    branches: ["**"]
+    branches: [master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  # ── Go services ─────────────────────────────────────────────────────────────
-  go:
-    name: Go — Build & Test
+  # ─── Go: lint, vet, build, test ───────────────────────────────
+  go-lint:
+    name: Go Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,7 +23,24 @@ jobs:
           go-version: "1.24"
           cache: true
 
-      - name: Download dependencies
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.62
+          args: --timeout=5m
+
+  go-test:
+    name: Go Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - name: Download deps
         run: go mod download
 
       - name: Build
@@ -28,92 +49,205 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      - name: Test
-        run: go test -race -count=1 ./...
+      - name: Test with race detector
+        run: go test -race -count=1 -coverprofile=coverage-go.out ./...
 
-  # ── Node.js apps ─────────────────────────────────────────────────────────────
-  node:
-    name: Node — ${{ matrix.app }}
+      - name: Upload Go coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-go
+          path: coverage-go.out
+          retention-days: 7
+
+  # ─── TypeScript: lint + typecheck ─────────────────────────────
+  ts-lint:
+    name: TS Lint — ${{ matrix.app }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        app:
-          - apps/gateway
-          - apps/dashboard
-          - apps/workflow-alerts
-          - apps/bff
-          - apps/jobs-worker
-
+        app: [gateway, bff, jobs-worker, dashboard]
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
-          cache-dependency-path: ${{ matrix.app }}/package-lock.json
 
-      - name: Install dependencies
-        working-directory: ${{ matrix.app }}
-        run: npm ci
+      - name: Install deps
+        run: npm ci || npm install
+        working-directory: apps/${{ matrix.app }}
 
-      - name: Type-check
-        working-directory: ${{ matrix.app }}
-        # Not every app has a tsc script — skip gracefully
-        run: npm run typecheck --if-present || npx tsc --noEmit --skipLibCheck 2>/dev/null || true
+      - name: ESLint
+        run: npm run lint
+        working-directory: apps/${{ matrix.app }}
 
-      - name: Lint
-        working-directory: ${{ matrix.app }}
-        run: npm run lint --if-present || true
+      - name: Typecheck
+        run: npm run typecheck || npm run build
+        working-directory: apps/${{ matrix.app }}
 
-      - name: Test
-        working-directory: ${{ matrix.app }}
-        run: npm test --if-present || true
-
-      - name: Build
-        working-directory: ${{ matrix.app }}
-        run: npm run build --if-present || true
-
-  # ── Python services ──────────────────────────────────────────────────────────
-  python:
-    name: Python — ${{ matrix.app }}
+  # ─── Gateway unit tests ──────────────────────────────────────
+  gateway-test:
+    name: Gateway Tests
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        app:
-          - apps/risk-engine
-          - apps/search-indexer
-
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-node@v4
         with:
-          python-version: "3.12"
+          node-version: "20"
 
-      - name: Install dependencies
-        working-directory: ${{ matrix.app }}
-        run: |
-          pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+      - name: Install deps
+        run: npm ci || npm install
+        working-directory: apps/gateway
 
-      - name: Lint (ruff)
-        working-directory: ${{ matrix.app }}
-        run: |
-          pip install ruff --quiet
-          ruff check . || true
+      - name: Run tests
+        run: npx jest --passWithNoTests --coverage --forceExit
+        working-directory: apps/gateway
+        env:
+          NODE_ENV: test
+          AUTH_ENABLED: "false"
 
-      - name: Type-check (mypy)
-        working-directory: ${{ matrix.app }}
-        run: |
-          pip install mypy --quiet
-          mypy . --ignore-missing-imports || true
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-gateway
+          path: apps/gateway/coverage/
+          retention-days: 7
 
-      - name: Test (pytest)
-        working-directory: ${{ matrix.app }}
+  # ─── Dashboard unit tests (Vitest) ───────────────────────────
+  dashboard-test:
+    name: Dashboard Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install deps
+        run: npm ci || npm install
+        working-directory: apps/dashboard
+
+      - name: Run Vitest
+        run: npx vitest run --coverage --reporter=default --reporter=junit --outputFile=test-results.xml
+        working-directory: apps/dashboard
+        env:
+          NODE_ENV: test
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-dashboard
+          path: apps/dashboard/coverage/
+          retention-days: 7
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-dashboard
+          path: apps/dashboard/test-results.xml
+          retention-days: 7
+
+  # ─── Dashboard build (catches import / bundle errors) ────────
+  dashboard-build:
+    name: Dashboard Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install deps
+        run: npm ci || npm install
+        working-directory: apps/dashboard
+
+      - name: Build
+        run: npm run build
+        working-directory: apps/dashboard
+        env:
+          VITE_AUTH0_DOMAIN: placeholder.auth0.com
+          VITE_AUTH0_CLIENT_ID: placeholder
+          VITE_AUTH0_AUDIENCE: placeholder
+          VITE_BFF_URL: http://localhost:4000
+          VITE_GATEWAY_URL: http://localhost:3000
+
+      - name: Check bundle size
         run: |
-          pip install pytest --quiet
-          pytest --tb=short -q || true
+          SIZE=$(du -sk dist/ | cut -f1)
+          echo "Bundle size: ${SIZE}KB"
+          if [ "$SIZE" -gt 5120 ]; then
+            echo "::warning::Bundle size ${SIZE}KB exceeds 5MB budget"
+          fi
+        working-directory: apps/dashboard
+
+  # ─── Docker build smoke test (PRs only) ──────────────────────
+  docker-build:
+    name: Docker Build — ${{ matrix.service.name }}
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - name: gateway
+            dockerfile: apps/gateway/Dockerfile
+          - name: bff
+            dockerfile: apps/bff/Dockerfile
+          - name: ingest-service
+            dockerfile: apps/ingest-service/Dockerfile
+          - name: cassandra-writer
+            dockerfile: apps/cassandra-writer/Dockerfile
+          - name: cdc-transformer
+            dockerfile: apps/cdc-transformer/Dockerfile
+          - name: read-model-builder
+            dockerfile: apps/read-model-builder/Dockerfile
+          - name: saga-orchestrator
+            dockerfile: apps/saga-orchestrator/Dockerfile
+          - name: telemetry-service
+            dockerfile: apps/telemetry-service/Dockerfile
+          - name: dlq-reprocessor
+            dockerfile: apps/dlq-reprocessor/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build ${{ matrix.service.name }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.service.dockerfile }}
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ─── PR gate — all checks must pass ─────────────────────────
+  ci-gate:
+    name: CI Gate
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - go-lint
+      - go-test
+      - ts-lint
+      - gateway-test
+      - dashboard-test
+      - dashboard-build
+    steps:
+      - name: Check results
+        run: |
+          results=("${{ needs.go-lint.result }}" "${{ needs.go-test.result }}" \
+                   "${{ needs.ts-lint.result }}" "${{ needs.gateway-test.result }}" \
+                   "${{ needs.dashboard-test.result }}" "${{ needs.dashboard-build.result }}")
+          for r in "${results[@]}"; do
+            if [[ "$r" == "failure" ]]; then
+              echo "::error::One or more CI checks failed"
+              exit 1
+            fi
+          done
+          echo "All CI checks passed"
