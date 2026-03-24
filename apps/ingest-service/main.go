@@ -49,14 +49,14 @@ func getenvInt(k string, def int) int {
 // ── API Key cache ───────────────────────────────────────────────────────────
 
 type apiKeyEntry struct {
-	TenantID string `json:"TenantID"`
-	KeyID    string `json:"KeyID"`
+	TenantID string
+	KeyID    string
 	CachedAt time.Time
 }
 
 type apiKeyCache struct {
 	mu      sync.RWMutex
-	entries map[string]*apiKeyEntry // key_hash -> entry
+	entries map[string]*apiKeyEntry // key_hash → entry
 	ttl     time.Duration
 }
 
@@ -120,7 +120,7 @@ func main() {
 
 	// ── Kafka writer ────────────────────────────────────────────────────────
 	brokers := strings.Split(getenv("KAFKA_BROKERS", "kafka:9092"), ",")
-	kafkaTopic = getenv("KAFKA_TOPIC", "telemetry.events")
+	kafkaTopic = getenv("KAFKA_TOPIC", "telemetry.ingest")
 
 	writer = &kafka.Writer{
 		Addr:         kafka.TCP(brokers...),
@@ -237,7 +237,7 @@ func handleIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ── Auth: API key -> tenant lookup ───────────────────────────────────────
+	// ── Auth: API key → tenant lookup ───────────────────────────────────────
 	apiKey := r.Header.Get("X-Api-Key")
 	if apiKey == "" {
 		rejected.Add(1)
@@ -260,11 +260,10 @@ func handleIngest(w http.ResponseWriter, r *http.Request) {
 
 	// ── Read body ───────────────────────────────────────────────────────────
 	buf := bodyPool.Get().([]byte)
-	buf = buf[:cap(buf)]
 	defer func() { bodyPool.Put(buf[:0]) }()
 
 	lr := io.LimitReader(r.Body, 4096)
-	n, err := io.ReadFull(lr, buf)
+	n, err := io.ReadFull(lr, buf[:cap(buf)])
 	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
 		rejected.Add(1)
 		writeJSON(w, 400, `{"error":"bad_request"}`)
@@ -365,7 +364,7 @@ func handleReady(w http.ResponseWriter, r *http.Request) {
 	w.Write(resp)
 }
 
-// ── API Key resolution (in-memory cache -> Redis -> Postgres) ───────────────
+// ── API Key resolution (in-memory cache → Redis → Postgres) ─────────────────
 
 func resolveAPIKey(ctx context.Context, rawKey string) (*apiKeyEntry, error) {
 	// Hash the key the same way the Gateway does: SHA256 hex

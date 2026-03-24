@@ -1,0 +1,23 @@
+{{- range $svcName, $svc := .Values.services }}
+{{- if $svc.enabled }}
+{{- $cfg := index $.Values $svcName | default dict }}
+{{- if and $cfg $cfg.image $cfg.image.repository }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $svcName }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "grainguard.labels" $ | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ $svcName }}
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+  ports:
+    - port: {{ $cfg.port }}
+      targetPort: {{ $cfg.port }}
+      protocol: TCP
+{{- end }}
+{{- end }}
+{{- end }}

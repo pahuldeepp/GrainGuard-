@@ -1,0 +1,33 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: grainguard
+  namespace: argocd
+spec:
+  description: GrainGuard platform project
+  sourceRepos:
+    - https://github.com/your-org/grainguard
+  destinations:
+    - namespace: grainguard-dev
+      server: https://kubernetes.default.svc
+    - namespace: grainguard-prod
+      server: https://kubernetes.default.svc
+    - namespace: argocd
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+  roles:
+    - name: dev-deployer
+      description: Can sync dev only
+      policies:
+        - p, proj:grainguard:dev-deployer, applications, sync, grainguard/grainguard-dev, allow
+        - p, proj:grainguard:dev-deployer, applications, get,  grainguard/grainguard-dev, allow
+    - name: prod-deployer
+      description: Can sync prod (humans only, not CI)
+      policies:
+        - p, proj:grainguard:prod-deployer, applications, sync, grainguard/grainguard-prod, allow
+        - p, proj:grainguard:prod-deployer, applications, get,  grainguard/grainguard-prod, allow

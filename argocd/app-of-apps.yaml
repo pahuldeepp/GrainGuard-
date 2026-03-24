@@ -1,0 +1,24 @@
+# Root Application — manages all child Applications via App-of-Apps pattern
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: grainguard-apps
+  namespace: argocd
+  # Cascade delete: removing this app also removes all children
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/your-org/grainguard
+    targetRevision: HEAD
+    path: argocd/environments   # folder containing per-env Application manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

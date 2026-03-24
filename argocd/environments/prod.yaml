@@ -1,0 +1,33 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: grainguard-prod
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/your-org/grainguard
+    targetRevision: HEAD
+    path: helm/grainguard
+    helm:
+      valueFiles:
+        - values.yaml
+        - values.prod.yaml
+      parameters:
+        - name: gateway.image.tag
+          value: "latest"
+        - name: bff.image.tag
+          value: "latest"
+        - name: ingestService.image.tag
+          value: "latest"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: grainguard-prod
+  syncPolicy:
+    # Production requires manual sync — no automated deploys
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  revisionHistoryLimit: 10

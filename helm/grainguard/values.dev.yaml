@@ -1,0 +1,78 @@
+global:
+  imagePullPolicy: Always
+  env: dev
+
+gateway:
+  replicaCount: 1
+  hpa: { enabled: false }
+  pdb: { enabled: false }
+  env:
+    NODE_ENV: development
+
+bff:
+  replicaCount: 1
+  hpa: { enabled: false }
+  pdb: { enabled: false }
+
+dashboard:
+  replicaCount: 1
+  hpa: { enabled: false }
+  pdb: { enabled: false }
+
+telemetryIngest:
+  replicaCount: 1
+  hpa: { enabled: false }
+  pdb: { enabled: false }
+
+assetRegistry:
+  replicaCount: 1
+  hpa: { enabled: false }
+  pdb: { enabled: false }
+
+riskEngine:
+  replicaCount: 1
+  hpa: { enabled: false }
+  pdb: { enabled: false }
+
+workflowAlerts:
+  replicaCount: 1
+  hpa: { enabled: false }
+  pdb: { enabled: false }
+
+searchIndexer:
+  replicaCount: 1
+  hpa: { enabled: false }
+  pdb: { enabled: false }
+
+jobsWorker:
+  replicaCount: 1
+  hpa: { enabled: false }
+  pdb: { enabled: false }
+
+readModelBuilder:
+  replicaCount: 1
+  hpa: { enabled: false }
+  pdb: { enabled: false }
+
+cdcTransformer:
+  replicaCount: 1
+  hpa: { enabled: false }
+  pdb: { enabled: false }
+
+sagaOrchestrator:
+  replicaCount: 1
+  hpa: { enabled: false }
+  pdb: { enabled: false }
+
+ingestService:
+  replicaCount: 1
+  hpa: { enabled: false }
+  pdb: { enabled: false }
+
+ingress:
+  enabled: true
+  hosts:
+    - host: grainguard.dev.local
+      paths:
+        - { path: /graphql, pathType: Prefix, service: gateway, port: 3000 }
+        - { path: /,        pathType: Prefix, service: dashboard, port: 80 }
