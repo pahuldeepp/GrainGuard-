@@ -179,11 +179,204 @@ services:
     networks:
       - grainguard-net
 
+  # ── PgBouncer Write Pool ─────────────────────────────────────────────
+  # All write services connect to pgbouncer-write:6432 instead of postgres:5432
+  pgbouncer-write:
+    image: edoburu/pgbouncer:1.22.0
+    container_name: grainguard-pgbouncer-write
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/grainguard
+      POOL_MODE: transaction
+      DEFAULT_POOL_SIZE: "50"
+      MIN_POOL_SIZE: "10"
+      RESERVE_POOL_SIZE: "10"
+      MAX_CLIENT_CONN: "1000"
+      MAX_DB_CONNECTIONS: "60"
+      SERVER_IDLE_TIMEOUT: "300"
+      QUERY_TIMEOUT: "30"
+      AUTH_TYPE: md5
+    ports:
+      - "6432:6432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - grainguard-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── PgBouncer Read Pool ─────────────────────────────────────────────
+  pgbouncer-read:
+    image: edoburu/pgbouncer:1.22.0
+    container_name: grainguard-pgbouncer-read
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres-read:5432/grainguard_read
+      POOL_MODE: transaction
+      DEFAULT_POOL_SIZE: "80"
+      MIN_POOL_SIZE: "15"
+      RESERVE_POOL_SIZE: "15"
+      MAX_CLIENT_CONN: "1500"
+      MAX_DB_CONNECTIONS: "100"
+      SERVER_IDLE_TIMEOUT: "300"
+      QUERY_TIMEOUT: "15"
+      AUTH_TYPE: md5
+    ports:
+      - "6433:6432"
+    depends_on:
+      postgres-read:
+        condition: service_healthy
+    networks:
+      - grainguard-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis Cluster (6 nodes: 3 masters + 3 replicas) ────────────────
+  redis-node-1:
+    image: redis:7
+    container_name: grainguard-redis-1
+    restart: unless-stopped
+    command: >
+      redis-server
+      --port 6379
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-node-1:/data
+    networks:
+      - grainguard-net
+
+  redis-node-2:
+    image: redis:7
+    container_name: grainguard-redis-2
+    restart: unless-stopped
+    command: >
+      redis-server
+      --port 6379
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-node-2:/data
+    networks:
+      - grainguard-net
+
+  redis-node-3:
+    image: redis:7
+    container_name: grainguard-redis-3
+    restart: unless-stopped
+    command: >
+      redis-server
+      --port 6379
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-node-3:/data
+    networks:
+      - grainguard-net
+
+  redis-node-4:
+    image: redis:7
+    container_name: grainguard-redis-4
+    restart: unless-stopped
+    command: >
+      redis-server
+      --port 6379
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-node-4:/data
+    networks:
+      - grainguard-net
+
+  redis-node-5:
+    image: redis:7
+    container_name: grainguard-redis-5
+    restart: unless-stopped
+    command: >
+      redis-server
+      --port 6379
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-node-5:/data
+    networks:
+      - grainguard-net
+
+  redis-node-6:
+    image: redis:7
+    container_name: grainguard-redis-6
+    restart: unless-stopped
+    command: >
+      redis-server
+      --port 6379
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-node-6:/data
+    networks:
+      - grainguard-net
+
+  # Initialize the Redis cluster after all nodes are up
+  redis-cluster-init:
+    image: redis:7
+    container_name: grainguard-redis-cluster-init
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting for Redis nodes..."
+        sleep 10
+        redis-cli --cluster create \
+          redis-node-1:6379 redis-node-2:6379 redis-node-3:6379 \
+          redis-node-4:6379 redis-node-5:6379 redis-node-6:6379 \
+          --cluster-replicas 1 --cluster-yes \
+          || echo "Cluster already initialized"
+    depends_on:
+      - redis-node-1
+      - redis-node-2
+      - redis-node-3
+      - redis-node-4
+      - redis-node-5
+      - redis-node-6
+    networks:
+      - grainguard-net
+
+  # Keep single-node Redis for local dev simplicity (apps default to this)
   redis:
     image: redis:7
     container_name: grainguard-redis
     restart: unless-stopped
-    # Persistence: AOF (every second) + RDB snapshot
     command: >
       redis-server
       --appendonly yes
@@ -197,6 +390,110 @@ services:
       - redis-data:/data
     networks:
       - grainguard-net
+
+  # ── Redis Cluster (3 masters + 3 replicas) ────────────────────────────────
+  # Use for staging/prod. Local dev can still use single-node redis above.
+  redis-node-1:
+    image: redis:7-alpine
+    container_name: grainguard-redis-1
+    restart: unless-stopped
+    command: >
+      redis-server --port 6379 --cluster-enabled yes
+      --cluster-config-file nodes.conf --cluster-node-timeout 5000
+      --cluster-announce-hostname redis-node-1
+      --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes: [redis-node-1:/data]
+    networks: [grainguard-net]
+
+  redis-node-2:
+    image: redis:7-alpine
+    container_name: grainguard-redis-2
+    restart: unless-stopped
+    command: >
+      redis-server --port 6379 --cluster-enabled yes
+      --cluster-config-file nodes.conf --cluster-node-timeout 5000
+      --cluster-announce-hostname redis-node-2
+      --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes: [redis-node-2:/data]
+    networks: [grainguard-net]
+
+  redis-node-3:
+    image: redis:7-alpine
+    container_name: grainguard-redis-3
+    restart: unless-stopped
+    command: >
+      redis-server --port 6379 --cluster-enabled yes
+      --cluster-config-file nodes.conf --cluster-node-timeout 5000
+      --cluster-announce-hostname redis-node-3
+      --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes: [redis-node-3:/data]
+    networks: [grainguard-net]
+
+  redis-node-4:
+    image: redis:7-alpine
+    container_name: grainguard-redis-4
+    restart: unless-stopped
+    command: >
+      redis-server --port 6379 --cluster-enabled yes
+      --cluster-config-file nodes.conf --cluster-node-timeout 5000
+      --cluster-announce-hostname redis-node-4
+      --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes: [redis-node-4:/data]
+    networks: [grainguard-net]
+
+  redis-node-5:
+    image: redis:7-alpine
+    container_name: grainguard-redis-5
+    restart: unless-stopped
+    command: >
+      redis-server --port 6379 --cluster-enabled yes
+      --cluster-config-file nodes.conf --cluster-node-timeout 5000
+      --cluster-announce-hostname redis-node-5
+      --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes: [redis-node-5:/data]
+    networks: [grainguard-net]
+
+  redis-node-6:
+    image: redis:7-alpine
+    container_name: grainguard-redis-6
+    restart: unless-stopped
+    command: >
+      redis-server --port 6379 --cluster-enabled yes
+      --cluster-config-file nodes.conf --cluster-node-timeout 5000
+      --cluster-announce-hostname redis-node-6
+      --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes: [redis-node-6:/data]
+    networks: [grainguard-net]
+
+  redis-cluster-init:
+    image: redis:7-alpine
+    container_name: grainguard-redis-cluster-init
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting for all Redis nodes..."
+        for node in redis-node-1 redis-node-2 redis-node-3 redis-node-4 redis-node-5 redis-node-6; do
+          until redis-cli -h $$node ping 2>/dev/null | grep -q PONG; do
+            echo "Waiting for $$node..."; sleep 2
+          done
+          echo "$$node is ready"
+        done
+        echo "Creating Redis cluster..."
+        redis-cli --cluster create \
+          redis-node-1:6379 redis-node-2:6379 redis-node-3:6379 \
+          redis-node-4:6379 redis-node-5:6379 redis-node-6:6379 \
+          --cluster-replicas 1 --cluster-yes \
+          && echo "Redis cluster created" \
+          || echo "Redis cluster already initialized"
+    depends_on:
+      - redis-node-1
+      - redis-node-2
+      - redis-node-3
+      - redis-node-4
+      - redis-node-5
+      - redis-node-6
+    networks: [grainguard-net]
 
   schema-registry:
     image: confluentinc/cp-schema-registry:7.6.1
@@ -225,7 +522,7 @@ services:
     volumes:
       - ../certs:/certs
     environment:
-      WRITE_DB_URL: postgres://postgres:postgres@postgres:5432/grainguard?sslmode=disable
+      WRITE_DB_URL: postgres://postgres:postgres@pgbouncer-write:6432/grainguard?sslmode=disable
       KAFKA_BROKERS: kafka:9092
       JWKS_URL: https://dev-dz6bl3nngdeib7ro.us.auth0.com/.well-known/jwks.json
       JWT_ISSUER: https://dev-dz6bl3nngdeib7ro.us.auth0.com/
@@ -233,7 +530,7 @@ services:
       AUTH_ENABLED: "false"
       OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
     depends_on:
-      postgres:
+      pgbouncer-write:
         condition: service_healthy
       kafka:
         condition: service_healthy
@@ -274,7 +571,7 @@ services:
       KAFKA_BROKERS: kafka:9092
       KAFKA_TOPIC: telemetry.events
       KAFKA_GROUP_ID: read-model-builder-v2
-      READ_DB_URL: postgres://postgres:postgres@postgres-read:5432/grainguard_read?sslmode=disable
+      READ_DB_URL: postgres://postgres:postgres@pgbouncer-read:6432/grainguard_read?sslmode=disable
       REDIS_ADDR: redis:6379
       WORKER_COUNT: 12
       METRICS_PORT: "2112"
@@ -315,7 +612,7 @@ services:
     restart: unless-stopped
     environment:
       KAFKA_BROKERS: kafka:9092
-      SAGA_DB_URL: postgres://postgres:postgres@postgres:5432/grainguard?sslmode=disable
+      SAGA_DB_URL: postgres://postgres:postgres@pgbouncer-write:6432/grainguard?sslmode=disable
       SAGA_EVENTS_TOPIC: device.events
       SAGA_COMMANDS_TOPIC: device.commands
       SAGA_CONSUMER_GROUP: saga-orchestrator
@@ -336,7 +633,7 @@ services:
     ports:
       - "4000:4000"
     environment:
-      - READ_DATABASE_URL=postgres://postgres:postgres@postgres-read:5432/grainguard_read
+      - READ_DATABASE_URL=postgres://postgres:postgres@pgbouncer-read:6432/grainguard_read
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - PORT=4000
@@ -366,7 +663,7 @@ services:
     environment:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
-      READ_DATABASE_URL: postgres://postgres:postgres@postgres-read:5432/grainguard_read?sslmode=disable
+      READ_DATABASE_URL: postgres://postgres:postgres@pgbouncer-read:6432/grainguard_read?sslmode=disable
       GRPC_TARGET: dns:///telemetry-service:50051
       JWKS_URL: https://dev-dz6bl3nngdeib7ro.us.auth0.com/.well-known/jwks.json
       JWT_ISSUER: https://dev-dz6bl3nngdeib7ro.us.auth0.com/
@@ -377,8 +674,8 @@ services:
       ALLOWED_ORIGINS: "http://localhost:5173,http://localhost:5174"
       DASHBOARD_URL: "http://localhost:5173"
       # Write DB (Postgres primary)
-      WRITE_DB_HOST: postgres
-      WRITE_DB_PORT: "5432"
+      WRITE_DB_HOST: pgbouncer-write
+      WRITE_DB_PORT: "6432"
       WRITE_DB_NAME: grainguard
       WRITE_DB_USER: postgres
       WRITE_DB_PASSWORD: postgres
@@ -396,7 +693,9 @@ services:
     depends_on:
       redis:
         condition: service_started
-      postgres-read:
+      pgbouncer-read:
+        condition: service_healthy
+      pgbouncer-write:
         condition: service_healthy
       kafka:
         condition: service_healthy
@@ -565,7 +864,7 @@ services:
     restart: unless-stopped
     environment:
       RABBITMQ_URL: amqp://grainguard:grainguard@rabbitmq:5672/grainguard
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/grainguard?sslmode=disable
+      DATABASE_URL: postgres://postgres:postgres@pgbouncer-write:6432/grainguard?sslmode=disable
       # Set RESEND_API_KEY and EMAIL_FROM via root .env to enable real email delivery
       RESEND_API_KEY: "${RESEND_API_KEY:-}"
       EMAIL_FROM: "${EMAIL_FROM:-GrainGuard <noreply@grainguard.com>}"
@@ -653,7 +952,7 @@ services:
       KAFKA_TOPIC: telemetry.events
       KAFKA_BATCH_SIZE: "200"
       KAFKA_BATCH_TIMEOUT_MS: "5"
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/grainguard?sslmode=disable
+      DATABASE_URL: postgres://postgres:postgres@pgbouncer-write:6432/grainguard?sslmode=disable
       REDIS_ADDR: redis:6379
       DB_MAX_CONNS: "10"
       REDIS_POOL_SIZE: "20"
@@ -662,7 +961,7 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
-      postgres:
+      pgbouncer-write:
         condition: service_healthy
       redis:
         condition: service_started
@@ -714,7 +1013,13 @@ volumes:
   esdata:
   rabbitmq-data:
   cassandra-data:
-  redis-data:       # Redis AOF + RDB persistence
+  redis-data:      # Single-node Redis (local dev default)
+  redis-node-1:   # Redis cluster nodes (staging/prod)
+  redis-node-2:
+  redis-node-3:
+  redis-node-4:
+  redis-node-5:
+  redis-node-6:
 
 
 networks:

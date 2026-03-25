@@ -112,7 +112,7 @@ type IngestPayload struct {
 var (
 	writer     *kafka.Writer
 	db         *pgxpool.Pool
-	rdb        *redis.Client
+	rdb        redis.UniversalClient // supports both single-node and cluster
 	cache      *apiKeyCache
 	ingested   atomic.Int64
 	rejected   atomic.Int64
@@ -163,14 +163,28 @@ func main() {
 	}
 	log.Printf("Postgres connected (max_conns=%d)", poolCfg.MaxConns)
 
-	// ── Redis (optional — used for API key caching) ─────────────────────────
-	redisAddr := getenv("REDIS_ADDR", "redis:6379")
-	rdb = redis.NewClient(&redis.Options{
-		Addr:         redisAddr,
-		PoolSize:     getenvInt("REDIS_POOL_SIZE", 20),
-		MinIdleConns: 5,
-		ReadTimeout:  2 * time.Second,
-		WriteTimeout: 2 * time.Second,
+	// ── Redis (single-node or cluster) ──────────────────────────────────────
+	// Set REDIS_CLUSTER_NODES="host1:6379,host2:6379,..." for cluster mode.
+	// Falls back to REDIS_ADDR single-node if not set.
+	clusterNodes := getenv("REDIS_CLUSTER_NODES", "")
+	var addrs []string
+	if clusterNodes != "" {
+		for _, a := range strings.Split(clusterNodes, ",") {
+			addrs = append(addrs, strings.TrimSpace(a))
+		}
+		log.Printf("Redis cluster mode: %d nodes", len(addrs))
+	} else {
+		addrs = []string{getenv("REDIS_ADDR", "redis:6379")}
+		log.Printf("Redis single-node mode: %s", addrs[0])
+	}
+
+	rdb = redis.NewUniversalClient(&redis.UniversalOptions{
+		Addrs:          addrs,
+		PoolSize:       getenvInt("REDIS_POOL_SIZE", 20),
+		MinIdleConns:   5,
+		ReadTimeout:    2 * time.Second,
+		WriteTimeout:   2 * time.Second,
+		RouteByLatency: len(addrs) > 1, // only relevant for cluster
 	})
 	defer rdb.Close()
 
@@ -178,7 +192,7 @@ func main() {
 		log.Printf("Redis not available (continuing without cache): %v", err)
 		rdb = nil
 	} else {
-		log.Printf("Redis connected at %s", redisAddr)
+		log.Printf("Redis connected (%d addrs)", len(addrs))
 	}
 
 	// ── In-memory API key cache ─────────────────────────────────────────────
