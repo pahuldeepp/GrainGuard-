@@ -44,8 +44,13 @@ export function createRateLimiter(options: RateLimitOptions) {
 
       return next();
     } catch (err) {
-      console.error("[rate-limit] Redis error, failing open:", err);
-      return next();
+      // Fail closed: return 503 on Redis error to prevent unlimited requests
+      console.error("[rate-limit] Redis error, failing closed:", err);
+      res.setHeader("Retry-After", 60);
+      return res.status(503).json({
+        error: "service_unavailable",
+        message: "Rate limiting service temporarily unavailable",
+      });
     }
   };
 }
