@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { authMiddleware } from "../middleware/auth";
 import { pool } from "../database/db";
+import { requireActiveSubscription, requireFeature } from "../middleware/planEnforcement";
 import {
   createOrganization,
   createSamlConnection,
@@ -52,6 +53,8 @@ ssoRouter.get(
 ssoRouter.post(
   "/tenants/me/sso/org",
   authMiddleware,
+  requireActiveSubscription(),
+  requireFeature("sso"),
   async (req: Request, res: Response) => {
     if (!requireAdmin(req, res)) return;
     const tenantId = req.user!.tenantId;
@@ -87,6 +90,8 @@ ssoRouter.post(
 ssoRouter.post(
   "/tenants/me/sso/saml",
   authMiddleware,
+  requireActiveSubscription(),
+  requireFeature("sso"),
   async (req: Request, res: Response) => {
     if (!requireAdmin(req, res)) return;
     const tenantId = req.user!.tenantId;
@@ -145,6 +150,8 @@ ssoRouter.post(
 ssoRouter.post(
   "/tenants/me/sso/oidc",
   authMiddleware,
+  requireActiveSubscription(),
+  requireFeature("sso"),
   async (req: Request, res: Response) => {
     if (!requireAdmin(req, res)) return;
     const tenantId = req.user!.tenantId;

@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { authMiddleware } from "../middleware/auth";
 import { pool } from "../database/db";
+import { requireActiveSubscription, enforceAlertRuleQuota } from "../middleware/planEnforcement";
 
 export const alertRulesRouter = Router();
 
@@ -40,6 +41,8 @@ alertRulesRouter.get(
 alertRulesRouter.post(
   "/alert-rules",
   authMiddleware,
+  requireActiveSubscription(),
+  enforceAlertRuleQuota(),
   async (req: Request, res: Response) => {
     const { name, metric, operator, threshold, device_type } = req.body as {
       name:        string;

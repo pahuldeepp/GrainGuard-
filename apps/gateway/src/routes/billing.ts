@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { stripe, PLANS, PlanKey } from "../services/stripe";
 import { authMiddleware } from "../middleware/auth";
 import { pool } from "../database/db";
+import { invalidatePlanCache } from "../middleware/planEnforcement";
 
 export const billingRouter = Router();
 
@@ -119,6 +120,7 @@ billingRouter.post(
            WHERE id = $4`,
           [plan, session.subscription, session.expires_at, tenantId]
         );
+        await invalidatePlanCache(tenantId);
         break;
       }
 
@@ -136,18 +138,26 @@ billingRouter.post(
              WHERE id = $3`,
             [sub.status, sub.current_period_end, tenantRow.rows[0].id]
           );
+          await invalidatePlanCache(tenantRow.rows[0].id);
         }
         break;
       }
 
       case "customer.subscription.deleted": {
         const sub = event.data.object as any;
+        const delTenant = await pool.query(
+          "SELECT id FROM tenants WHERE stripe_subscription_id = $1",
+          [sub.id]
+        );
         await pool.query(
           `UPDATE tenants
            SET plan = 'free', subscription_status = 'canceled'
            WHERE stripe_subscription_id = $1`,
           [sub.id]
         );
+        if (delTenant.rows.length > 0) {
+          await invalidatePlanCache(delTenant.rows[0].id);
+        }
         break;
       }
     }

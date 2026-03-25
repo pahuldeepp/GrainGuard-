@@ -24,6 +24,10 @@ import { ssoRouter } from "./routes/sso";
 import { devicesImportRouter } from "./routes/devicesImport";
 import { alertRulesRouter } from "./routes/alertRules";
 import { auditLogRouter } from "./routes/auditLog";
+import {
+  requireActiveSubscription,
+  enforceDeviceQuota,
+} from "./middleware/planEnforcement";
 
 const app = express();
 
@@ -168,6 +172,7 @@ app.post(
   "/ingest",
   apiRateLimiter,
   apiKeyMiddleware,               // resolves tenantId from X-Api-Key header
+  requireActiveSubscription(),
   async (req: Request, res: Response) => {
     // At this point req.user is populated with { sub, tenantId, roles: ["device"] }
     // Route telemetry payload to the telemetry-service via gRPC (same path as /devices)
@@ -196,6 +201,8 @@ app.post(
   "/devices",
   apiRateLimiter,
   authMiddleware,
+  requireActiveSubscription(),
+  enforceDeviceQuota(),
   validate(createDeviceSchema, "body"),
   async (req: Request, res: Response) => {
     try {

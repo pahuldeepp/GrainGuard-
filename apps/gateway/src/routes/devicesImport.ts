@@ -3,6 +3,7 @@ import { authMiddleware } from "../middleware/auth";
 import { pool } from "../database/db";
 import { createDevice } from "../services/device";
 import Busboy from "busboy";
+import { requireActiveSubscription, enforceBulkDeviceQuota } from "../middleware/planEnforcement";
 
 export const devicesImportRouter = Router();
 
@@ -24,6 +25,8 @@ export const devicesImportRouter = Router();
 devicesImportRouter.post(
   "/devices/bulk",
   authMiddleware,
+  requireActiveSubscription(),
+  enforceBulkDeviceQuota(),
   async (req: Request, res: Response) => {
     // Verify admin or member role — viewers cannot register devices
     const roles = req.user!.roles ?? [];
