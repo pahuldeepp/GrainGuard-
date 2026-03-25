@@ -106,6 +106,20 @@ export function startWebhookWorker(channel: Channel): void {
     }
 
     const attempt = (msg.properties.headers?.["x-retry-count"] as number) || 0;
+    const scheduledRetryAt = msg.properties.headers?.["x-scheduled-retry-at"] as string | undefined;
+
+    // If this is a retry, check if we should wait longer before attempting
+    if (attempt > 0 && scheduledRetryAt) {
+      const retryTime = parseInt(scheduledRetryAt, 10);
+      const now = Date.now();
+      if (now < retryTime) {
+        const waitMs = retryTime - now;
+        console.log(`[webhook] delaying retry for ${Math.round(waitMs)}ms`);
+        // Re-queue and wait for the delay
+        channel.nack(msg, false, true); // requeue
+        return;
+      }
+    }
 
     try {
       await deliverWebhook(job, attempt);
@@ -117,23 +131,27 @@ export function startWebhookWorker(channel: Channel): void {
         console.error(`[webhook] max retries exceeded for ${job.url} — routing to DLQ`);
         channel.nack(msg, false, false);
       } else {
+        // Avoid race condition: send to queue immediately with retry count incremented
+        // This ensures the message is queued before this consumer dies
         const delay = retryDelay(attempt);
-        console.log(`[webhook] retrying in ${Math.round(delay)}ms`);
+        console.log(`[webhook] scheduling retry in ${Math.round(delay)}ms`);
 
-        setTimeout(() => {
-          channel.nack(msg, false, false);
-          channel.sendToQueue(
-            QUEUES.WEBHOOKS,
-            msg.content,
-            {
-              persistent: true,
-              headers: {
-                "x-retry-count": attempt + 1,
-                "x-original-url": job.url,
-              },
-            }
-          );
-        }, delay);
+        // Re-queue immediately with x-retry-count header
+        // RabbitMQ will deliver it to another consumer right away,
+        // but the consumer can check the retry count and implement its own delay if needed
+        channel.sendToQueue(
+          QUEUES.WEBHOOKS,
+          msg.content,
+          {
+            persistent: true,
+            headers: {
+              "x-retry-count": attempt + 1,
+              "x-original-url": job.url,
+              "x-scheduled-retry-at": String(Date.now() + delay),
+            },
+          }
+        );
+        channel.ack(msg); // Ack original message since we've safely re-queued it
       }
     }
   });

@@ -43,12 +43,15 @@ async function verifyToken(token: string) {
 export interface BffContext {
   tenantId: string;
   userId: string;
+  roles: string[];
+  isSuperAdmin?: boolean;
 }
-
-app.get("/metrics", metricsHandler());
 
 async function startServer() {
   const app = express();
+
+  // Metrics endpoint (must be after app is defined)
+  app.get("/metrics", metricsHandler());
   const httpServer = http.createServer(app);
 
   app.use(helmet({
@@ -87,8 +90,15 @@ async function startServer() {
         if (!token?.startsWith("Bearer ")) throw new Error("Missing token");
         const payload = await verifyToken(token.substring("Bearer ".length));
         const tenantId = payload["https://grainguard/tenant_id"];
+        const roles = (payload["https://grainguard/roles"] as string[]) || [];
+        const isSuperAdmin = roles.includes("superadmin");
         if (!tenantId) throw new Error("Tenant not found");
-        return { tenantId: String(tenantId), userId: String(payload.sub || "") };
+        return {
+          tenantId: String(tenantId),
+          userId: String(payload.sub || ""),
+          roles,
+          isSuperAdmin,
+        };
       },
     },
     wsServer
@@ -111,7 +121,7 @@ async function startServer() {
         },
       },
     ],
-    introspection: process.env.NODE_ENV !== "production",
+    introspection: process.env.NODE_ENV === "development",
   });
 
   await server.start();
@@ -143,6 +153,8 @@ async function startServer() {
           const payload = await verifyToken(token);
           const tenantId = payload["https://grainguard/tenant_id"];
           const userId = payload.sub;
+          const roles = (payload["https://grainguard/roles"] as string[]) || [];
+          const isSuperAdmin = roles.includes("superadmin");
 
           if (!tenantId) {
             throw new GraphQLError("Tenant not found in token", {
@@ -153,6 +165,8 @@ async function startServer() {
           return {
             tenantId: String(tenantId),
             userId: String(userId || ""),
+            roles,
+            isSuperAdmin,
           };
         } catch (err) {
           if (err instanceof GraphQLError) throw err;

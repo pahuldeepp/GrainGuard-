@@ -89,6 +89,10 @@ export function createDevice(
         if (err) {
           return reject(err);
         }
+        // Validate response structure
+        if (!response || !response.device_id) {
+          return reject(new Error("Invalid gRPC response: missing device_id"));
+        }
         resolve(response);
       }
     );

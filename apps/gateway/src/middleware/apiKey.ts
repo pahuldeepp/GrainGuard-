@@ -51,8 +51,20 @@ export async function apiKeyMiddleware(
     return;
   }
 
+  // Add constant-time delay to prevent timing attacks on key enumeration
+  const startTime = Date.now();
+  const constantDelay = 50 + Math.random() * 50; // 50-100ms random delay
+
   try {
     const resolved = await resolveTenant(key);
+
+    // Ensure constant-time response regardless of hit/miss
+    const elapsed = Date.now() - startTime;
+    const remainingDelay = Math.max(0, constantDelay - elapsed);
+    if (remainingDelay > 0) {
+      await new Promise(resolve => setTimeout(resolve, remainingDelay));
+    }
+
     if (!resolved) {
       res.status(401).json({ error: "invalid_api_key" });
       return;
@@ -67,6 +79,13 @@ export async function apiKeyMiddleware(
 
     next();
   } catch (err) {
+    // Even on error, maintain constant-time response
+    const elapsed = Date.now() - startTime;
+    const remainingDelay = Math.max(0, constantDelay - elapsed);
+    if (remainingDelay > 0) {
+      await new Promise(resolve => setTimeout(resolve, remainingDelay));
+    }
+
     console.error("[api-key] lookup error:", err);
     res.status(500).json({ error: "internal_error" });
   }

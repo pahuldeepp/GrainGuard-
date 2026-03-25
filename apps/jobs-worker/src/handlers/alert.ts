@@ -58,6 +58,15 @@ async function getWebhookEndpoints(tenantId: string): Promise<WebhookEndpoint[]>
 }
 
 async function processAlert(job: AlertJob, channel: Channel): Promise<void> {
+  // Validate required fields
+  if (!job.tenantId || !job.serialNumber || !job.alertType || job.value === undefined || job.threshold === undefined) {
+    throw new Error(`[alert] Invalid job: missing required fields`);
+  }
+
+  if (!Array.isArray(job.recipients) || job.recipients.length === 0) {
+    console.log(`[alert] no recipients specified, skipping email notifications`);
+  }
+
   console.log(`[alert] ${job.alertType} alert device=${job.serialNumber} value=${job.value} threshold=${job.threshold} tenant=${job.tenantId}`);
 
   const alertLevel = job.level || job.alertType;
