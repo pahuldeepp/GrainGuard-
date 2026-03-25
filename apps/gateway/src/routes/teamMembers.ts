@@ -11,7 +11,7 @@ export const teamRouter = Router();
 teamRouter.use(apiRateLimiter);
 
 function requireAdmin(req: Request, res: Response): boolean {
-  if (req.user?.role !== "admin") {
+  if (req.user?.roles?.includes("admin") !== true) {
     res.status(403).json({ error: "admin_required" });
     return false;
   }
@@ -77,9 +77,19 @@ teamRouter.post(
     );
 
     // Send Auth0 org invite so the user gets an email and lands in the org
-    inviteToOrg(email.trim().toLowerCase(), memberRole, tenantId).catch((e) =>
-      console.error("[team] inviteToOrg failed (non-fatal):", e)
-    );
+    // Auth0 org invite — requires auth0_org_id from tenant table
+    pool.query("SELECT auth0_org_id, name FROM tenants WHERE id = $1", [tenantId])
+      .then(({ rows }) => {
+        if (rows[0]?.auth0_org_id) {
+          return inviteToOrg({
+            orgId:       rows[0].auth0_org_id,
+            email:       email.trim().toLowerCase(),
+            role:        memberRole,
+            inviterName: "GrainGuard",
+          });
+        }
+      })
+      .catch((_e: unknown) => console.error("[team] inviteToOrg failed (non-fatal):", _e));
 
     await writeAuditLog({
       tenantId,
@@ -191,11 +201,11 @@ teamRouter.post(
 
       await pool.query("COMMIT");
 
-      setUserTenantId(req.user!.sub, invite.tenant_id).catch((e) =>
-        console.error("[team] failed to set Auth0 tenant_id:", e)
+      setUserTenantId(req.user!.sub, invite.tenant_id).catch((_e: unknown) =>
+        console.error("[team] failed to set Auth0 tenant_id:", _e)
       );
-      assignRoleByName(req.user!.sub, invite.role).catch((e) =>
-        console.error("[team] failed to assign role:", e)
+      assignRoleByName(req.user!.sub, invite.role).catch((_e: unknown) =>
+        console.error("[team] failed to assign role:", _e)
       );
 
       await writeAuditLog({

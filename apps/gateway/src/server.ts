@@ -8,8 +8,8 @@ import { createDevice } from "./services/device";
 import { getDeviceLatestTelemetry } from "./services/device-query";
 import { redis } from "./cache/redis";
 import { pool } from "./database/db";
-import { logAuditEvent } from "./lib/audit";
-import { writePool } from "./database/db";
+import { writeAuditLog as logAuditEvent } from "./lib/audit";
+
 import { metricsHandler, requestLatency } from "./observability/metrics";
 import { requestIdMiddleware } from "./middleware/requestId";
 import { authMiddleware } from "./middleware/auth";
@@ -279,9 +279,8 @@ app.post(
         tenantId,
         resourceType: "device",
         resourceId: result?.deviceId || serialNumber,
-        payload: { serialNumber, requestId },
+        meta: { serialNumber, requestId },
         ipAddress: req.ip,
-        userAgent: req.headers["user-agent"],
       });
       return res.json(result);
     } catch (err) {
@@ -291,9 +290,8 @@ app.post(
         actorId: req.user?.sub || "unknown",
         tenantId: req.user?.tenantId || "00000000-0000-0000-0000-000000000000",
         resourceType: "device",
-        payload: { serialNumber: req.body?.serialNumber, error: String(err) },
+        meta: { serialNumber: req.body?.serialNumber, error: String(err) },
         ipAddress: req.ip,
-        userAgent: req.headers["user-agent"],
       });
       return res.status(500).json({ error: "Failed to create device" });
     }
@@ -346,7 +344,7 @@ app.get("/metrics", metricsHandler());
 process.on("SIGTERM", async () => {
   await redis.quit();
   await pool.end();
-  await writePool.end();
+  
   process.exit(0);
 });
 

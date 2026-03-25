@@ -117,7 +117,7 @@ devicesImportRouter.post(
       // Check device quota before starting import
       try {
         const { checkDeviceQuota } = await import("../services/planEnforcement");
-        const quotaCheck = await checkDeviceQuota(tenantId, total);
+        const quotaCheck = await checkDeviceQuota(tenantId);
         if (!quotaCheck.allowed) {
           emit({
             error: "device_limit_reached",

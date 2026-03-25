@@ -7,7 +7,7 @@ import { writeAuditLog } from "../lib/audit";
 export const billingRouter = Router();
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2024-11-20.acacia",
+  apiVersion: "2026-02-25.clover",
   timeout: 15_000,       // 15s timeout on all Stripe API calls
   maxNetworkRetries: 2,  // auto-retry on network errors
 });
@@ -48,7 +48,7 @@ billingRouter.get(
         const sub = await stripe.subscriptions.retrieve(
           billing.stripe_subscription_id
         );
-        currentPeriodEnd  = sub.current_period_end;     // Unix timestamp
+        currentPeriodEnd  = (sub as any).current_period_end ?? 0;     // Unix timestamp
         cancelAtPeriodEnd = sub.cancel_at_period_end;
         paymentFailed     = sub.status === "past_due" || sub.status === "unpaid";
       } catch (err) {
