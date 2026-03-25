@@ -1,17 +1,19 @@
 export const EXCHANGE = "grainguard";
 
 export const QUEUES = {
-  EMAILS:   "grainguard.emails",
-  WEBHOOKS: "grainguard.webhooks",
-  EXPORTS:  "grainguard.exports",
-  ALERTS:   "grainguard.alerts",
+  EMAILS:          "grainguard.emails",
+  WEBHOOKS:        "grainguard.webhooks",
+  EXPORTS:         "grainguard.exports",
+  ALERTS:          "grainguard.alerts",
+  STRIPE_BILLING:  "grainguard.stripe.billing",
 } as const;
 
 export const DLQ = {
-  EMAILS:   "grainguard.emails.dlq",
-  WEBHOOKS: "grainguard.webhooks.dlq",
-  EXPORTS:  "grainguard.exports.dlq",
-  ALERTS:   "grainguard.alerts.dlq",
+  EMAILS:          "grainguard.emails.dlq",
+  WEBHOOKS:        "grainguard.webhooks.dlq",
+  EXPORTS:         "grainguard.exports.dlq",
+  ALERTS:          "grainguard.alerts.dlq",
+  STRIPE_BILLING:  "grainguard.stripe.billing.dlq",
 } as const;
 
 // Job payload types
@@ -20,7 +22,7 @@ export interface EmailJob {
   subject: string;
   body: string;
   tenantId: string;
-  type: "welcome" | "alert" | "usage_warning" | "invoice";
+  type: "welcome" | "alert" | "usage_warning" | "invoice" | "invite";
 }
 
 export interface WebhookJob {
@@ -51,5 +53,11 @@ export interface AlertJob {
   recipients: string[];
   level?: string;
   score?: number;
+}
+
+export interface StripeWebhookJob {
+  stripeEventId:   string;
+  stripeEventType: string;
+  payload:         Record<string, unknown>;
 }
 

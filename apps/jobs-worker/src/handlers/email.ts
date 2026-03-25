@@ -1,104 +1,102 @@
 import { Channel } from "amqplib";
-import sgMail from "@sendgrid/mail";
+import { Resend } from "resend";
 import { QUEUES, EmailJob } from "../queues";
 
 const MAX_RETRIES = 3;
-const FROM_EMAIL = process.env.SENDGRID_FROM_EMAIL || "alerts@grainguard.io";
-const FROM_NAME = process.env.SENDGRID_FROM_NAME || "GrainGuard";
+const FROM_EMAIL  = process.env.EMAIL_FROM || "GrainGuard <noreply@grainguard.com>";
+const DASHBOARD   = process.env.DASHBOARD_URL ?? "https://app.grainguard.com";
 
-// Initialize SendGrid
-const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
-if (SENDGRID_API_KEY) {
-  sgMail.setApiKey(SENDGRID_API_KEY);
-  console.log("[email] SendGrid initialized");
+const resend = process.env.RESEND_API_KEY
+  ? new Resend(process.env.RESEND_API_KEY)
+  : null;
+
+if (resend) {
+  console.log("[email] Resend initialized");
 } else {
-  console.warn("[email] SENDGRID_API_KEY not set — emails will be logged only");
+  console.warn("[email] RESEND_API_KEY not set — emails will be logged only");
 }
 
-// HTML templates per email type
+// ── HTML templates ──────────────────────────────────────────────────────────
 const templates: Record<EmailJob["type"], (job: EmailJob) => string> = {
   alert: (job) => `
-    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-      <div style="background: #dc2626; color: white; padding: 16px 24px; border-radius: 8px 8px 0 0;">
-        <h2 style="margin: 0;">⚠️ GrainGuard Alert</h2>
+    <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+      <div style="background:#dc2626;color:white;padding:16px 24px;border-radius:8px 8px 0 0">
+        <h2 style="margin:0">⚠️ GrainGuard Alert</h2>
       </div>
-      <div style="border: 1px solid #e5e7eb; border-top: none; padding: 24px; border-radius: 0 0 8px 8px;">
+      <div style="border:1px solid #e5e7eb;border-top:none;padding:24px;border-radius:0 0 8px 8px">
         ${job.body.replace(/\n/g, "<br>")}
-        <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 16px 0;">
-        <p style="color: #6b7280; font-size: 12px;">
-          Tenant: ${job.tenantId} · 
-          <a href="https://app.grainguard.io/alerts">View in Dashboard</a>
+        <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">
+        <p style="color:#6b7280;font-size:12px">
+          <a href="${DASHBOARD}/alerts">View in Dashboard →</a>
         </p>
       </div>
-    </div>
-  `,
+    </div>`,
 
   welcome: (job) => `
-    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-      <div style="background: #059669; color: white; padding: 16px 24px; border-radius: 8px 8px 0 0;">
-        <h2 style="margin: 0;">Welcome to GrainGuard 🌾</h2>
+    <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+      <div style="background:#059669;color:white;padding:16px 24px;border-radius:8px 8px 0 0">
+        <h2 style="margin:0">Welcome to GrainGuard 🌾</h2>
       </div>
-      <div style="border: 1px solid #e5e7eb; border-top: none; padding: 24px; border-radius: 0 0 8px 8px;">
+      <div style="border:1px solid #e5e7eb;border-top:none;padding:24px;border-radius:0 0 8px 8px">
         ${job.body.replace(/\n/g, "<br>")}
-        <p><a href="https://app.grainguard.io" style="background: #059669; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; display: inline-block;">Get Started</a></p>
+        <p><a href="${DASHBOARD}"
+              style="background:#059669;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block">
+          Get Started →
+        </a></p>
       </div>
-    </div>
-  `,
+    </div>`,
+
+  invite: (job) => `
+    <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+      <div style="background:#2563eb;color:white;padding:16px 24px;border-radius:8px 8px 0 0">
+        <h2 style="margin:0">You've been invited to GrainGuard 🌾</h2>
+      </div>
+      <div style="border:1px solid #e5e7eb;border-top:none;padding:24px;border-radius:0 0 8px 8px">
+        ${job.body.replace(/\n/g, "<br>")}
+      </div>
+    </div>`,
 
   usage_warning: (job) => `
-    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-      <div style="background: #d97706; color: white; padding: 16px 24px; border-radius: 8px 8px 0 0;">
-        <h2 style="margin: 0;">📊 Usage Warning</h2>
+    <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+      <div style="background:#d97706;color:white;padding:16px 24px;border-radius:8px 8px 0 0">
+        <h2 style="margin:0">📊 Usage Warning</h2>
       </div>
-      <div style="border: 1px solid #e5e7eb; border-top: none; padding: 24px; border-radius: 0 0 8px 8px;">
+      <div style="border:1px solid #e5e7eb;border-top:none;padding:24px;border-radius:0 0 8px 8px">
         ${job.body.replace(/\n/g, "<br>")}
-        <p><a href="https://app.grainguard.io/billing">Manage Plan</a></p>
+        <p><a href="${DASHBOARD}/billing">Manage Plan →</a></p>
       </div>
-    </div>
-  `,
+    </div>`,
 
   invoice: (job) => `
-    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-      <div style="background: #2563eb; color: white; padding: 16px 24px; border-radius: 8px 8px 0 0;">
-        <h2 style="margin: 0;">💳 Invoice</h2>
+    <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+      <div style="background:#2563eb;color:white;padding:16px 24px;border-radius:8px 8px 0 0">
+        <h2 style="margin:0">💳 Invoice</h2>
       </div>
-      <div style="border: 1px solid #e5e7eb; border-top: none; padding: 24px; border-radius: 0 0 8px 8px;">
+      <div style="border:1px solid #e5e7eb;border-top:none;padding:24px;border-radius:0 0 8px 8px">
         ${job.body.replace(/\n/g, "<br>")}
-        <p><a href="https://app.grainguard.io/billing">View Billing</a></p>
+        <p><a href="${DASHBOARD}/billing">View Billing →</a></p>
       </div>
-    </div>
-  `,
+    </div>`,
 };
 
 async function sendEmail(job: EmailJob): Promise<void> {
-  const html = templates[job.type]?.(job) ?? job.body;
+  const html = templates[job.type]?.(job) ?? `<p>${job.body}</p>`;
 
-  if (!SENDGRID_API_KEY) {
-    // Dev/test mode — log instead of sending
-    console.log(`[email] DEV MODE — would send ${job.type} email to ${job.to}`);
-    console.log(`[email]   subject: ${job.subject}`);
+  if (!resend) {
+    console.log(`[email] DEV MODE — ${job.type} to ${job.to} | ${job.subject}`);
     return;
   }
 
-  await sgMail.send({
-    to: job.to,
-    from: { email: FROM_EMAIL, name: FROM_NAME },
+  const { error } = await resend.emails.send({
+    from:    FROM_EMAIL,
+    to:      job.to,
     subject: job.subject,
     html,
-    mailSettings: {
-      sandboxMode: { enable: process.env.SENDGRID_SANDBOX === "true" },
-    },
-    trackingSettings: {
-      clickTracking: { enable: true },
-      openTracking: { enable: true },
-    },
-    customArgs: {
-      tenantId: job.tenantId,
-      emailType: job.type,
-    },
   });
 
-  console.log(`[email] sent ${job.type} email to ${job.to} tenant=${job.tenantId}`);
+  if (error) throw Object.assign(new Error(error.message), { code: 400 });
+
+  console.log(`[email] sent ${job.type} to ${job.to} tenant=${job.tenantId}`);
 }
 
 // Jittered backoff for retries

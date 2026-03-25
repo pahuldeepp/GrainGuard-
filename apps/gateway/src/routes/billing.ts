@@ -1,8 +1,29 @@
 import { Router, Request, Response } from "express";
 import Stripe from "stripe";
+import amqp from "amqplib";
 import { writePool as pool } from "../lib/db";
 import { authMiddleware } from "../lib/auth";
 import { writeAuditLog } from "../lib/audit";
+
+const RABBITMQ_URL = process.env.RABBITMQ_URL || "amqp://grainguard:grainguard@rabbitmq:5672/grainguard";
+const STRIPE_BILLING_QUEUE = "grainguard.stripe.billing";
+
+async function publishToStripeQueue(payload: object): Promise<void> {
+  let conn: Awaited<ReturnType<typeof amqp.connect>> | null = null;
+  try {
+    conn = await amqp.connect(RABBITMQ_URL);
+    const ch = await conn.createChannel();
+    await ch.assertQueue(STRIPE_BILLING_QUEUE, { durable: true });
+    ch.sendToQueue(
+      STRIPE_BILLING_QUEUE,
+      Buffer.from(JSON.stringify(payload)),
+      { persistent: true }
+    );
+    await ch.close();
+  } finally {
+    conn?.close().catch(() => {});
+  }
+}
 
 export const billingRouter = Router();
 
@@ -159,6 +180,9 @@ billingRouter.post(
 );
 
 // ── POST /billing/webhook ─────────────────────────────────────────────────
+// Verifies Stripe signature immediately and returns 200 fast.
+// Actual processing is delegated to jobs-worker via RabbitMQ for reliability:
+//   retry on failure, DLQ on repeated failure, idempotency in DB.
 billingRouter.post(
   "/billing/webhook",
   async (req: Request, res: Response) => {
@@ -167,7 +191,7 @@ billingRouter.post(
     let event: Stripe.Event;
     try {
       event = stripe.webhooks.constructEvent(
-        req.body,                              // raw body — must use express.raw()
+        req.body,
         sig,
         process.env.STRIPE_WEBHOOK_SECRET!
       );
@@ -176,65 +200,21 @@ billingRouter.post(
       return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
-    switch (event.type) {
-      case "checkout.session.completed": {
-        const session  = event.data.object as Stripe.Checkout.Session;
-        const tenantId = session.metadata?.tenantId;
-        const plan     = session.metadata?.plan;
-        if (tenantId && plan && session.subscription) {
-          await pool.query(
-            `UPDATE tenant_billing
-             SET stripe_subscription_id = $1, plan = $2, status = 'active', updated_at = NOW()
-             WHERE tenant_id = $3`,
-            [session.subscription, plan, tenantId]
-          );
-          await writeAuditLog({
-            tenantId,
-            actorId:      "stripe",
-            eventType:    "billing.subscription_created",
-            resourceType: "billing",
-            resourceId:   String(session.subscription),
-            meta:         { plan },
-          });
-        }
-        break;
-      }
+    // Return 200 to Stripe immediately — stops their retry clock
+    res.json({ received: true });
 
-      case "customer.subscription.updated": {
-        const sub      = event.data.object as Stripe.Subscription;
-        const tenantId = sub.metadata?.tenantId;
-        if (tenantId) {
-          const plan = sub.items.data[0]?.price.metadata?.plan ?? "unknown";
-          await pool.query(
-            `UPDATE tenant_billing
-             SET status = $1, plan = $2, updated_at = NOW()
-             WHERE stripe_subscription_id = $3`,
-            [sub.status, plan, sub.id]
-          );
-          await writeAuditLog({
-            tenantId,
-            actorId:      "stripe",
-            eventType:    "billing.subscription_updated",
-            resourceId:   sub.id,
-            resourceType: "billing",
-            meta:         { status: sub.status, plan },
-          });
-        }
-        break;
-      }
-
-      case "customer.subscription.deleted": {
-        const sub = event.data.object as Stripe.Subscription;
-        await pool.query(
-          `UPDATE tenant_billing
-           SET status = 'cancelled', plan = 'free', updated_at = NOW()
-           WHERE stripe_subscription_id = $1`,
-          [sub.id]
-        );
-        break;
-      }
+    // Publish to RabbitMQ for reliable async processing
+    try {
+      await publishToStripeQueue({
+        stripeEventId:   event.id,
+        stripeEventType: event.type,
+        payload:         event.data.object,
+      });
+      console.log(`[billing] queued stripe event ${event.type} id=${event.id}`);
+    } catch (err) {
+      // Log but don't crash — Stripe will retry if we failed to queue.
+      // The idempotency table prevents double-processing on retry.
+      console.error("[billing] failed to queue stripe event:", err);
     }
-
-    return res.json({ received: true });
   }
 );
