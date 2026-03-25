@@ -81,7 +81,7 @@ func main() {
 	defer pool.Close()
 
 	// Migrations
-	if err := libmigrate.Up(dbURL, migrations.FS, "grainguard"); err != nil {
+	if err := libmigrate.Up(dbURL, migrations.FS, "telemetry_service"); err != nil {
 		log.Fatal().Err(err).Msg("migration failed")
 	}
 

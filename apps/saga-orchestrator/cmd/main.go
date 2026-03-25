@@ -44,7 +44,7 @@ func main() {
 	}
 	defer pool.Close()
 
-	if err := libmigrate.Up(dbURL, migrations.FS, "grainguard"); err != nil {
+	if err := libmigrate.Up(dbURL, migrations.FS, "saga_orchestrator"); err != nil {
 		log.Fatal().Err(err).Msg("migration failed")
 	}
 

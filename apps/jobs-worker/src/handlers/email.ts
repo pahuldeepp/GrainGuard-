@@ -1,89 +1,111 @@
 import { Channel } from "amqplib";
-import axios from "axios";
+import sgMail from "@sendgrid/mail";
 import { QUEUES, EmailJob } from "../queues";
 
 const MAX_RETRIES = 3;
-const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const EMAIL_FROM     = process.env.EMAIL_FROM || "GrainGuard <noreply@grainguard.com>";
+const FROM_EMAIL = process.env.SENDGRID_FROM_EMAIL || "alerts@grainguard.io";
+const FROM_NAME = process.env.SENDGRID_FROM_NAME || "GrainGuard";
 
-// ── Simple circuit breaker for Resend API ────────────────────────────────
-const circuitBreaker = {
-  failures: 0,
-  lastFailure: 0,
-  threshold: 5,           // Open circuit after 5 consecutive failures
-  resetTimeMs: 60_000,    // Try again after 60s
+// Initialize SendGrid
+const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
+if (SENDGRID_API_KEY) {
+  sgMail.setApiKey(SENDGRID_API_KEY);
+  console.log("[email] SendGrid initialized");
+} else {
+  console.warn("[email] SENDGRID_API_KEY not set — emails will be logged only");
+}
 
-  isOpen(): boolean {
-    if (this.failures < this.threshold) return false;
-    // If enough time has passed, allow a retry (half-open)
-    if (Date.now() - this.lastFailure > this.resetTimeMs) {
-      return false;
-    }
-    return true;
-  },
+// HTML templates per email type
+const templates: Record<EmailJob["type"], (job: EmailJob) => string> = {
+  alert: (job) => `
+    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+      <div style="background: #dc2626; color: white; padding: 16px 24px; border-radius: 8px 8px 0 0;">
+        <h2 style="margin: 0;">⚠️ GrainGuard Alert</h2>
+      </div>
+      <div style="border: 1px solid #e5e7eb; border-top: none; padding: 24px; border-radius: 0 0 8px 8px;">
+        ${job.body.replace(/\n/g, "<br>")}
+        <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 16px 0;">
+        <p style="color: #6b7280; font-size: 12px;">
+          Tenant: ${job.tenantId} · 
+          <a href="https://app.grainguard.io/alerts">View in Dashboard</a>
+        </p>
+      </div>
+    </div>
+  `,
 
-  recordSuccess() {
-    this.failures = 0;
-  },
+  welcome: (job) => `
+    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+      <div style="background: #059669; color: white; padding: 16px 24px; border-radius: 8px 8px 0 0;">
+        <h2 style="margin: 0;">Welcome to GrainGuard 🌾</h2>
+      </div>
+      <div style="border: 1px solid #e5e7eb; border-top: none; padding: 24px; border-radius: 0 0 8px 8px;">
+        ${job.body.replace(/\n/g, "<br>")}
+        <p><a href="https://app.grainguard.io" style="background: #059669; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; display: inline-block;">Get Started</a></p>
+      </div>
+    </div>
+  `,
 
-  recordFailure() {
-    this.failures++;
-    this.lastFailure = Date.now();
-  },
+  usage_warning: (job) => `
+    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+      <div style="background: #d97706; color: white; padding: 16px 24px; border-radius: 8px 8px 0 0;">
+        <h2 style="margin: 0;">📊 Usage Warning</h2>
+      </div>
+      <div style="border: 1px solid #e5e7eb; border-top: none; padding: 24px; border-radius: 0 0 8px 8px;">
+        ${job.body.replace(/\n/g, "<br>")}
+        <p><a href="https://app.grainguard.io/billing">Manage Plan</a></p>
+      </div>
+    </div>
+  `,
+
+  invoice: (job) => `
+    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+      <div style="background: #2563eb; color: white; padding: 16px 24px; border-radius: 8px 8px 0 0;">
+        <h2 style="margin: 0;">💳 Invoice</h2>
+      </div>
+      <div style="border: 1px solid #e5e7eb; border-top: none; padding: 24px; border-radius: 0 0 8px 8px;">
+        ${job.body.replace(/\n/g, "<br>")}
+        <p><a href="https://app.grainguard.io/billing">View Billing</a></p>
+      </div>
+    </div>
+  `,
 };
 
-/**
- * Send an email via the Resend API (https://resend.com).
- * Set RESEND_API_KEY in the environment to enable real sending.
- * Without it the call is skipped and only logged — safe for local dev.
- */
 async function sendEmail(job: EmailJob): Promise<void> {
-  if (!RESEND_API_KEY) {
-    console.warn(
-      `[email] RESEND_API_KEY not set — skipping real send. ` +
-      `type=${job.type} to=${job.to} tenant=${job.tenantId}`
-    );
+  const html = templates[job.type]?.(job) ?? job.body;
+
+  if (!SENDGRID_API_KEY) {
+    // Dev/test mode — log instead of sending
+    console.log(`[email] DEV MODE — would send ${job.type} email to ${job.to}`);
+    console.log(`[email]   subject: ${job.subject}`);
     return;
   }
 
-  if (circuitBreaker.isOpen()) {
-    throw new Error("Circuit breaker open — Resend API has too many failures");
-  }
+  await sgMail.send({
+    to: job.to,
+    from: { email: FROM_EMAIL, name: FROM_NAME },
+    subject: job.subject,
+    html,
+    mailSettings: {
+      sandboxMode: { enable: process.env.SENDGRID_SANDBOX === "true" },
+    },
+    trackingSettings: {
+      clickTracking: { enable: true },
+      openTracking: { enable: true },
+    },
+    customArgs: {
+      tenantId: job.tenantId,
+      emailType: job.type,
+    },
+  });
 
-  try {
-    const response = await axios.post(
-      "https://api.resend.com/emails",
-      {
-        from:    EMAIL_FROM,
-        to:      [job.to],
-        subject: job.subject,
-        html:    job.body,
-      },
-      {
-        headers: {
-          Authorization:  `Bearer ${RESEND_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        timeout: 10_000,
-      }
-    );
-
-    circuitBreaker.recordSuccess();
-
-    console.log(
-      `[email] sent type=${job.type} to=${job.to} id=${response.data?.id} tenant=${job.tenantId}`
-    );
-  } catch (err) {
-    circuitBreaker.recordFailure();
-    throw err;
-  }
+  console.log(`[email] sent ${job.type} email to ${job.to} tenant=${job.tenantId}`);
 }
 
-// Jittered backoff for retries — cap at 5 minutes
+// Jittered backoff for retries
 function retryDelay(attempt: number): number {
-  const base   = 1000 * Math.pow(2, attempt); // exponential
-  const jitter = Math.random() * base;         // full jitter
-  return Math.min(base + jitter, 300_000);     // cap at 5 min
+  const base = 1000 * Math.pow(2, attempt);
+  const jitter = Math.random() * base;
+  return Math.min(base + jitter, 30000);
 }
 
 export function startEmailWorker(channel: Channel): void {
@@ -105,8 +127,16 @@ export function startEmailWorker(channel: Channel): void {
     try {
       await sendEmail(job);
       channel.ack(msg);
-    } catch (err) {
-      console.error(`[email] failed attempt ${attempt + 1}/${MAX_RETRIES}:`, err);
+    } catch (err: unknown) {
+      const status = (err as { code?: number }).code;
+      console.error(`[email] failed attempt ${attempt + 1}/${MAX_RETRIES} (status=${status}):`, err);
+
+      // Don't retry 4xx errors (bad request, invalid email, etc.) — they won't succeed
+      if (status && status >= 400 && status < 500) {
+        console.error(`[email] permanent failure (${status}) for ${job.to} — routing to DLQ`);
+        channel.nack(msg, false, false);
+        return;
+      }
 
       if (attempt >= MAX_RETRIES - 1) {
         console.error(`[email] max retries exceeded for ${job.to} — routing to DLQ`);
@@ -114,18 +144,15 @@ export function startEmailWorker(channel: Channel): void {
       } else {
         const delay = retryDelay(attempt);
         console.log(`[email] retrying in ${Math.round(delay)}ms (attempt ${attempt + 1})`);
-
-        setTimeout(() => {
-          channel.nack(msg, false, false);
-          channel.sendToQueue(
-            QUEUES.EMAILS,
-            msg.content,
-            {
-              persistent: true,
-              headers: { "x-retry-count": attempt + 1 },
-            }
-          );
-        }, delay);
+        // Re-queue immediately with incremented retry count, then ack original
+        channel.sendToQueue(QUEUES.EMAILS, msg.content, {
+          persistent: true,
+          headers: {
+            "x-retry-count": attempt + 1,
+            "x-scheduled-retry-at": Date.now() + delay,
+          },
+        });
+        channel.ack(msg);
       }
     }
   });

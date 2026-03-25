@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getAccessTokenSilently } from "../../lib/auth0";
+import { apiFetch } from "../../lib/apiFetch";
 import toast from "react-hot-toast";
 
 interface ApiKey {
@@ -13,23 +13,6 @@ interface ApiKey {
 }
 
 const GW = import.meta.env.VITE_GATEWAY_URL ?? "";
-
-async function apiFetch(path: string, options: RequestInit = {}) {
-  const token = await getAccessTokenSilently();
-  const res = await fetch(`${GW}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-      ...options.headers,
-    },
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `HTTP ${res.status}`);
-  }
-  return res.json();
-}
 
 export function ApiKeysPage() {
   const [keys, setKeys] = useState<ApiKey[]>([]);

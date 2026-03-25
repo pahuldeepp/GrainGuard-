@@ -124,7 +124,7 @@ func main() {
 	defer pool.Close()
 
 	// Migrations
-	if err := libmigrate.Up(dbURL, migrations.FS, "grainguard_read"); err != nil {
+	if err := libmigrate.Up(dbURL, migrations.FS, "read_model_builder"); err != nil {
 		log.Fatal().Err(err).Msg("migration failed")
 	}
 

@@ -1,19 +1,19 @@
 # GrainGuard
 
-> Staff+/Principal-grade, polyglot microservices SaaS platform for grain and agri operations.
+> Production-grade, polyglot microservices SaaS platform for grain and agri operations.
 
-GrainGuard ingests high-volume device telemetry, computes spoilage risk scores, triggers automated alert workflows, and ships with full security, observability, CI/CD, chaos testing, SLO monitoring, and operational runbooks. Deliberately architected to demonstrate end-to-end DDIA patterns and Staff-level engineering depth.
+GrainGuard ingests high-volume device telemetry, computes spoilage risk scores, triggers automated alert workflows, and ships with full multi-tenant billing, SSO, team management, audit logging, observability, CI/CD, chaos testing, SLO monitoring, and operational runbooks.
 
 ---
 
 ## Architecture
 
 ```
-React Dashboard
+React Dashboard (Vite + Auth0)
       ↓
-API Gateway (Node) ── JWT/RBAC/Rate Limiting
+API Gateway (Node.js) ── JWT/RBAC/CSRF/Rate Limiting
       ↓
-BFF GraphQL (Node) ── Redis Cache ── Elasticsearch
+BFF GraphQL (Node.js) ── Redis Cache ── Elasticsearch
       ↓
 Telemetry Service (Go, gRPC + mTLS)
       ↓
@@ -21,7 +21,7 @@ Postgres (OLTP + Outbox) ── Kafka (CDC via Debezium)
       ↓
 Read Model Builder (Go) ── Cassandra (time-series) ── Postgres Read
       ↓
-Risk Engine (Python) ── Workflow Alerts (Node) ── RabbitMQ ── Jobs Worker
+Risk Engine (Python) ── Workflow Alerts (Node.js) ── RabbitMQ ── Jobs Worker
 ```
 
 ### Key design decisions
@@ -38,6 +38,8 @@ Risk Engine (Python) ── Workflow Alerts (Node) ── RabbitMQ ── Jobs W
 | Inter-service | gRPC + Protobuf + mTLS | Type-safe, zero-trust internal comms |
 | Multi-tenancy | Postgres RLS | Row-level isolation per tenant |
 | Auth | Auth0 + JWT + RBAC | OAuth2/OIDC for humans, API keys for devices |
+| CSRF | Double-submit cookie pattern | Stateless, works with JWT auth |
+| Billing | Stripe Checkout + Customer Portal | Hosted payment, PCI-compliant |
 
 ---
 
@@ -45,7 +47,7 @@ Risk Engine (Python) ── Workflow Alerts (Node) ── RabbitMQ ── Jobs W
 
 | Service | Language | Responsibility |
 |---------|----------|----------------|
-| `gateway` | Node.js | JWT auth, rate limiting, gRPC proxy |
+| `gateway` | Node.js | JWT auth, CSRF, rate limiting, billing, SSO, team, audit |
 | `bff` | Node.js | GraphQL API, Redis cache, subscriptions |
 | `telemetry-service` | Go | gRPC ingest, outbox publishing |
 | `read-model-builder` | Go | Kafka consumer, CQRS projections |
@@ -63,6 +65,8 @@ Risk Engine (Python) ── Workflow Alerts (Node) ── RabbitMQ ── Jobs W
 
 ## Tech Stack
 
+**Frontend:** React · Vite · Tailwind CSS · Auth0 SPA SDK
+
 **Data stores:** Postgres · Cassandra · Redis · Elasticsearch
 
 **Messaging:** Kafka (KRaft) · RabbitMQ · Debezium CDC
@@ -71,7 +75,28 @@ Risk Engine (Python) ── Workflow Alerts (Node) ── RabbitMQ ── Jobs W
 
 **Infrastructure:** Docker Compose · Kubernetes (Helm + ArgoCD) · Terraform (AWS EKS/RDS/MSK/Elasticache)
 
-**Security:** Auth0 · JWT/RBAC · mTLS · Postgres RLS · Audit logging · Helmet/CORS
+**Security:** Auth0 · JWT/RBAC · CSRF · mTLS · Postgres RLS · Audit logging · Helmet/CORS
+
+**SaaS:** Stripe (Checkout + Webhooks + Customer Portal) · Resend (transactional email) · Auth0 Organizations (SSO/SAML/OIDC)
+
+---
+
+## SaaS Features
+
+| Feature | Status |
+|---------|--------|
+| Multi-tenant auth (Auth0) | ✅ |
+| Device registration | ✅ |
+| Billing — Starter ($29/mo), Professional ($99/mo), Enterprise | ✅ |
+| Stripe Checkout + Customer Portal | ✅ |
+| Team management — invite, roles, remove | ✅ |
+| SSO — SAML 2.0 + OIDC via Auth0 Organizations | ✅ |
+| Alert rules (threshold + anomaly) | ✅ |
+| Webhook endpoints | ✅ |
+| API key management | ✅ |
+| Audit log (filterable, CSV export) | ✅ |
+| Notification preferences | ✅ |
+| Transactional email (Resend) | ✅ |
 
 ---
 
@@ -86,16 +111,39 @@ Risk Engine (Python) ── Workflow Alerts (Node) ── RabbitMQ ── Jobs W
 ### Start all services
 ```bash
 cd infra/docker
+cp .env.example .env   # fill in your secrets
 docker compose --env-file .env up -d
 ```
 
-### Environment variables
+### Dashboard (dev)
 ```bash
-cp infra/docker/.env.example infra/docker/.env
+cd apps/dashboard
+npm install
+npm run dev
+# → http://localhost:5173
 ```
+
+### Environment variables
+
+Copy `.env.example` to `.env` (root and `infra/docker/`) and fill in:
 
 | Variable | Description |
 |----------|-------------|
+| `VITE_AUTH0_DOMAIN` | Auth0 tenant domain |
+| `VITE_AUTH0_CLIENT_ID` | Auth0 SPA client ID |
+| `VITE_AUTH0_AUDIENCE` | Auth0 API audience |
+| `AUTH0_DOMAIN` | Auth0 domain (backend) |
+| `AUTH0_CLIENT_ID` | Auth0 M2M client ID |
+| `AUTH0_CLIENT_SECRET` | Auth0 M2M client secret |
+| `AUTH0_AUDIENCE` | Auth0 API audience (backend) |
+| `AUTH0_MANAGEMENT_AUDIENCE` | Auth0 Management API audience |
+| `STRIPE_SECRET_KEY` | Stripe secret key (`sk_test_...` or `sk_live_...`) |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret (`whsec_...`) |
+| `STRIPE_PRICE_STARTER` | Stripe price ID for Starter plan |
+| `STRIPE_PRICE_PROFESSIONAL` | Stripe price ID for Professional plan |
+| `STRIPE_PRICE_ENTERPRISE` | Stripe price ID for Enterprise plan |
+| `RESEND_API_KEY` | Resend API key for transactional email |
+| `EMAIL_FROM` | From address, e.g. `GrainGuard <noreply@grainguard.com>` |
 | `SLACK_WEBHOOK_URL` | Slack webhook for Grafana alerts |
 
 ### Service endpoints
@@ -177,8 +225,6 @@ bash tests/chaos/run-all.sh
 
 ## Operational Runbooks
 
-On-call guides for every critical failure mode:
-
 | Runbook | Trigger |
 |---------|---------|
 | [Postgres Failover](docs/runbooks/postgres-failover.md) | Primary down, replica lag high |
@@ -245,8 +291,10 @@ ArgoCD watches `k8s/argocd/apps/` and auto-syncs on every push to master.
 | R2 — CDC + Search | Debezium, Elasticsearch, RabbitMQ | ✅ Done |
 | R3 — Reliability | Helm, ArgoCD, k6 load tests, chaos tests | ✅ Done |
 | R4 — Observability | SLOs, burn-rate alerts, Grafana dashboard, runbooks | ✅ Done |
-| R5 — Security | CSRF, CSP, Trivy, CodeQL, SBOM, STRIDE | 🔜 Next |
-| R6 — SaaS billing | Stripe, tenant onboarding, usage metering | 🔜 Planned |
+| R5 — Security | CSRF, rate limiting, audit logging, RBAC, API keys | ✅ Done |
+| R6 — SaaS billing | Stripe, tenant onboarding, team management, SSO, webhooks | ✅ Done |
+| R7 — DB migrations | Flyway/Knex migration framework, schema versioning | 🔜 Next |
+| R8 — Secret management | HashiCorp Vault / AWS Secrets Manager integration | 🔜 Planned |
 
 ---
 
@@ -258,4 +306,4 @@ ArgoCD watches `k8s/argocd/apps/` and auto-syncs on every push to master.
 
 ---
 
-*Built as a Staff+/Principal Engineer portfolio reference — demonstrating DDIA patterns, distributed systems, GitOps, SRE practices, and multi-tenant SaaS architecture.*
+*Built to demonstrate end-to-end DDIA patterns, distributed systems, GitOps, SRE practices, and production multi-tenant SaaS architecture.*

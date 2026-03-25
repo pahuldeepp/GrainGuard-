@@ -9,6 +9,7 @@
     "dev": "ts-node src/index.ts"
   },
   "dependencies": {
+    "@sendgrid/mail": "^8.1.6",
     "amqplib": "^0.10.3",
     "axios": "^1.6.0",
     "dotenv": "^16.0.0",

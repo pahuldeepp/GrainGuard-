@@ -8,7 +8,7 @@ import { createDevice } from "./services/device";
 import { getDeviceLatestTelemetry } from "./services/device-query";
 import { redis } from "./cache/redis";
 import { pool } from "./database/db";
-import { logAuditEvent } from "./lib/audit";
+import { writeAuditLog as logAuditEvent } from "./lib/audit";
 import { writePool } from "./database/db";
 import { metricsHandler, requestLatency } from "./observability/metrics";
 import { requestIdMiddleware } from "./middleware/requestId";
@@ -116,6 +116,17 @@ app.post(
  * except the Stripe webhook (webhook caller is Stripe, not a browser).
  * GET/HEAD/OPTIONS are safe by definition and just issue a fresh token.
  */
+// CORS must be before CSRF so headers are set on rejected requests too
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true);
+      if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+      return cb(new Error(`CORS blocked for ${origin}`));
+    },
+    credentials: true,
+  })
+);
 app.use(csrfProtection());
 
 /**
@@ -279,9 +290,8 @@ app.post(
         tenantId,
         resourceType: "device",
         resourceId: result?.deviceId || serialNumber,
-        payload: { serialNumber, requestId },
+        meta: { serialNumber, requestId },
         ipAddress: req.ip,
-        userAgent: req.headers["user-agent"],
       });
       return res.json(result);
     } catch (err) {
@@ -291,9 +301,8 @@ app.post(
         actorId: req.user?.sub || "unknown",
         tenantId: req.user?.tenantId || "00000000-0000-0000-0000-000000000000",
         resourceType: "device",
-        payload: { serialNumber: req.body?.serialNumber, error: String(err) },
+        meta: { serialNumber: req.body?.serialNumber, error: String(err) },
         ipAddress: req.ip,
-        userAgent: req.headers["user-agent"],
       });
       return res.status(500).json({ error: "Failed to create device" });
     }

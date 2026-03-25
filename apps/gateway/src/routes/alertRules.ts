@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { v4 as uuidv4 } from "uuid";
-import { pool } from "../lib/db";
+import { writePool as pool } from "../lib/db";
 import { authMiddleware } from "../lib/auth";
 import { writeAuditLog } from "../lib/audit";
 

@@ -1,4 +1,4 @@
-import { pool } from "./db";
+import { writePool as pool } from "./db";
 
 // ── Audit event types ────────────────────────────────────────────────────────
 export type AuditEventType =
@@ -28,7 +28,11 @@ export type AuditEventType =
   | "api_key.revoked"
   // Devices
   | "device.registered"
-  | "device.deleted";
+  | "device.created"
+  | "device.creation_failed"
+  | "device.deleted"
+  // Webhooks
+  | "webhook_endpoint.created";
 
 export interface AuditEvent {
   tenantId: string;
