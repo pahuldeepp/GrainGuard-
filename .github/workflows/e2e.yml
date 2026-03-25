@@ -14,7 +14,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check for required secrets
+        id: secrets-check
+        run: |
+          if [ -z "${{ secrets.E2E_AUTH0_DOMAIN }}" ] || [ -z "${{ secrets.E2E_TEST_USERNAME }}" ]; then
+            echo "has_secrets=false" >> "$GITHUB_OUTPUT"
+            echo "⚠️  E2E secrets not configured — skipping tests"
+          else
+            echo "has_secrets=true" >> "$GITHUB_OUTPUT"
+            echo "✅ E2E secrets found — running tests"
+          fi
+
       - name: Set up Node.js
+        if: steps.secrets-check.outputs.has_secrets == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -22,48 +34,55 @@ jobs:
           cache-dependency-path: apps/dashboard/package-lock.json
 
       - name: Install dashboard deps
+        if: steps.secrets-check.outputs.has_secrets == 'true'
         run: npm ci
         working-directory: apps/dashboard
 
       - name: Install Playwright + browsers
+        if: steps.secrets-check.outputs.has_secrets == 'true'
         run: npx playwright install --with-deps chromium firefox
         working-directory: tests/e2e
 
       - name: Install E2E deps
+        if: steps.secrets-check.outputs.has_secrets == 'true'
         run: npm init -y && npm install --save-dev @playwright/test
         working-directory: tests/e2e
 
       - name: Build dashboard
+        if: steps.secrets-check.outputs.has_secrets == 'true'
         run: npm run build
         working-directory: apps/dashboard
         env:
-          VITE_AUTH0_DOMAIN:   ${{ secrets.VITE_AUTH0_DOMAIN }}
-          VITE_AUTH0_CLIENT_ID:${{ secrets.VITE_AUTH0_CLIENT_ID }}
-          VITE_AUTH0_AUDIENCE: ${{ secrets.VITE_AUTH0_AUDIENCE }}
-          VITE_BFF_URL:        ${{ secrets.E2E_BFF_URL }}
-          VITE_GATEWAY_URL:    ${{ secrets.E2E_GATEWAY_URL }}
+          VITE_AUTH0_DOMAIN:    ${{ secrets.VITE_AUTH0_DOMAIN }}
+          VITE_AUTH0_CLIENT_ID: ${{ secrets.VITE_AUTH0_CLIENT_ID }}
+          VITE_AUTH0_AUDIENCE:  ${{ secrets.VITE_AUTH0_AUDIENCE }}
+          VITE_BFF_URL:         ${{ secrets.E2E_BFF_URL }}
+          VITE_GATEWAY_URL:     ${{ secrets.E2E_GATEWAY_URL }}
 
       - name: Serve dashboard
+        if: steps.secrets-check.outputs.has_secrets == 'true'
         run: npx serve -s dist -l 5173 &
         working-directory: apps/dashboard
 
       - name: Wait for server
+        if: steps.secrets-check.outputs.has_secrets == 'true'
         run: npx wait-on http://localhost:5173 --timeout 30000
 
       - name: Run Playwright tests
+        if: steps.secrets-check.outputs.has_secrets == 'true'
         run: npx playwright test --config playwright.config.ts
         working-directory: tests/e2e
         env:
-          E2E_BASE_URL:          http://localhost:5173
-          E2E_AUTH0_DOMAIN:      ${{ secrets.E2E_AUTH0_DOMAIN }}
-          E2E_AUTH0_CLIENT_ID:   ${{ secrets.E2E_AUTH0_CLIENT_ID }}
-          E2E_AUTH0_AUDIENCE:    ${{ secrets.E2E_AUTH0_AUDIENCE }}
-          E2E_TEST_USERNAME:     ${{ secrets.E2E_TEST_USERNAME }}
-          E2E_TEST_PASSWORD:     ${{ secrets.E2E_TEST_PASSWORD }}
+          E2E_BASE_URL:        http://localhost:5173
+          E2E_AUTH0_DOMAIN:     ${{ secrets.E2E_AUTH0_DOMAIN }}
+          E2E_AUTH0_CLIENT_ID:  ${{ secrets.E2E_AUTH0_CLIENT_ID }}
+          E2E_AUTH0_AUDIENCE:   ${{ secrets.E2E_AUTH0_AUDIENCE }}
+          E2E_TEST_USERNAME:    ${{ secrets.E2E_TEST_USERNAME }}
+          E2E_TEST_PASSWORD:    ${{ secrets.E2E_TEST_PASSWORD }}
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && steps.secrets-check.outputs.has_secrets == 'true'
         with:
           name: playwright-report-${{ github.run_number }}
           path: tests/e2e/playwright-report/
@@ -71,7 +90,7 @@ jobs:
 
       - name: Upload test results (JUnit)
         uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && steps.secrets-check.outputs.has_secrets == 'true'
         with:
           name: playwright-results-${{ github.run_number }}
           path: tests/e2e/playwright-results.xml
