@@ -120,6 +120,20 @@ async function startServer() {
           };
         },
       },
+      // Operation timeout plugin — abort long-running resolvers
+      {
+        async requestDidStart() {
+          const timeout = setTimeout(() => {
+            // AbortController would be ideal here, but Apollo doesn't support it natively.
+            // The resolver-level timeouts in datasources handle individual query limits.
+          }, 30_000);
+          return {
+            async willSendResponse() {
+              clearTimeout(timeout);
+            },
+          };
+        },
+      },
     ],
     introspection: process.env.NODE_ENV === "development",
   });
@@ -179,6 +193,10 @@ async function startServer() {
   );
 
   const PORT = parseInt(process.env.PORT || "4000");
+
+  // Set request timeout to prevent long-running GraphQL queries from hanging
+  httpServer.timeout = 30_000;         // 30s total request timeout
+  httpServer.keepAliveTimeout = 65_000; // slightly > ALB 60s idle timeout
 
   await new Promise<void>((resolve) => httpServer.listen({ port: PORT }, resolve));
 

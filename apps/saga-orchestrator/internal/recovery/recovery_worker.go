@@ -101,7 +101,14 @@ func (w *RecoveryWorker) recover(ctx context.Context) {
 
 func (w *RecoveryWorker) retryOrCompensate(ctx context.Context, sagaID string, saga *domain.Saga) {
     var payload map[string]any
-    _ = json.Unmarshal(saga.PayloadJSON, &payload)
+    if err := json.Unmarshal(saga.PayloadJSON, &payload); err != nil {
+        log.Printf("[recovery] corrupted payload for saga=%s, marking FAILED: %v", sagaID, err)
+        _, _ = w.pool.Exec(ctx,
+            `UPDATE sagas SET status = 'FAILED', last_error = $1, updated_at = NOW() WHERE saga_id = $2`,
+            "corrupted payload: "+err.Error(), sagaID,
+        )
+        return
+    }
 
     correlationID := saga.CorrelationID
 

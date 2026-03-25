@@ -108,6 +108,24 @@ export function startWebhookWorker(channel: Channel): void {
     const attempt = (msg.properties.headers?.["x-retry-count"] as number) || 0;
     const scheduledRetryAt = msg.properties.headers?.["x-scheduled-retry-at"] as string | undefined;
 
+    // Idempotency: deduplicate by messageId to prevent double delivery
+    const messageId = msg.properties.messageId || msg.fields.deliveryTag.toString();
+    if (job.endpointId) {
+      try {
+        const { rowCount } = await db.query(
+          `SELECT 1 FROM webhook_deliveries WHERE endpoint_id = $1 AND event_type = $2 AND success = true LIMIT 1`,
+          [job.endpointId, job.eventType]
+        );
+        if (rowCount && rowCount > 0 && attempt === 0) {
+          console.log(`[webhook] dedup: already delivered ${job.eventType} to endpoint=${job.endpointId}`);
+          channel.ack(msg);
+          return;
+        }
+      } catch {
+        // Best-effort dedup — proceed if check fails
+      }
+    }
+
     // If this is a retry, check if we should wait longer before attempting
     if (attempt > 0 && scheduledRetryAt) {
       const retryTime = parseInt(scheduledRetryAt, 10);

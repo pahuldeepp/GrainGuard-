@@ -15,9 +15,17 @@ export async function connect(): Promise<any> {
   for (let attempt = 1; attempt <= 10; attempt++) {
     try {
       console.log("[rabbitmq] connecting attempt " + attempt + "/10...");
-      conn = await amqpConnect(RABBITMQ_URL);
+      conn = await amqpConnect(RABBITMQ_URL, { heartbeat: 30 });
       ch = await conn.createChannel();
       await ch.prefetch(1);
+
+      // Detect stale connections early
+      conn.on("error", (err: Error) => {
+        console.error("[rabbitmq] connection error:", err.message);
+      });
+      conn.on("close", () => {
+        console.warn("[rabbitmq] connection closed unexpectedly");
+      });
 
       for (const [key, queue] of Object.entries(QUEUES)) {
         const dlq = DLQ[key as keyof typeof DLQ];

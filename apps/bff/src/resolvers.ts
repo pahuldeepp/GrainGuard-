@@ -74,18 +74,16 @@ export const resolvers = {
       }
 
       try {
-        const row = await db.getDeviceTelemetry(args.deviceId);
-        if (!row) return null;
-
-        const device = await db.getDeviceWithTelemetry(args.deviceId);
-        if (!device || device.tenant_id !== ctx.tenantId) return null;
+        // Single query with JOIN instead of 2 separate queries (avoids extra round trip)
+        const row = await db.getDeviceWithTelemetry(args.deviceId);
+        if (!row || row.tenant_id !== ctx.tenantId) return null;
 
         const result = {
           deviceId:    row.device_id,
           temperature: row.temperature,
           humidity:    row.humidity,
-          recordedAt:  new Date(row.recorded_at).toISOString(),
-          updatedAt:   new Date(row.updated_at).toISOString(),
+          recordedAt:  row.recorded_at ? new Date(row.recorded_at).toISOString() : null,
+          updatedAt:   row.updated_at ? new Date(row.updated_at).toISOString() : null,
           version:     row.version,
         };
 

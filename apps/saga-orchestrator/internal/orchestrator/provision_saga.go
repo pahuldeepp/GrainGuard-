@@ -58,6 +58,9 @@ func (p *ProvisionSaga) HandleEvent(ctx context.Context, raw []byte) error {
 			"created_at": payload.GetCreatedAt(),
 			"event_id":   env.GetEventId(),
 		})
+		if initialErr != nil {
+			return fmt.Errorf("marshal initial payload: %w", initialErr)
+		}
 
 		saga := &domain.Saga{
 			ID:            sagaID,

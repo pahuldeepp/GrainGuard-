@@ -84,6 +84,17 @@ billingRouter.post(
   async (req: Request, res: Response) => {
     const sig = req.headers["stripe-signature"] as string;
 
+    if (!sig) {
+      return res.status(400).json({ error: "missing_stripe_signature" });
+    }
+
+    // req.body MUST be a Buffer (raw) for Stripe HMAC verification.
+    // The express.raw() middleware in server.ts ensures this for /billing/webhook.
+    if (!Buffer.isBuffer(req.body)) {
+      console.error("[billing] webhook body is not a Buffer — express.raw() middleware may be missing");
+      return res.status(500).json({ error: "webhook_configuration_error" });
+    }
+
     let event;
     try {
       event = stripe.webhooks.constructEvent(

@@ -41,13 +41,17 @@ export function csrfProtection() {
     }
 
     // Constant-time comparison to prevent timing attacks
-    const cookieBuf = Buffer.from(cookieToken, "hex");
-    const headerBuf = Buffer.from(headerToken, "hex");
+    // Pad both buffers to fixed length so length differences don't leak info
+    const expectedLen = TOKEN_BYTES; // 32 bytes = 64 hex chars
+    const cookieBuf = Buffer.alloc(expectedLen);
+    const headerBuf = Buffer.alloc(expectedLen);
+    const cookieRaw = Buffer.from(cookieToken, "hex");
+    const headerRaw = Buffer.from(headerToken, "hex");
+    cookieRaw.copy(cookieBuf, 0, 0, Math.min(cookieRaw.length, expectedLen));
+    headerRaw.copy(headerBuf, 0, 0, Math.min(headerRaw.length, expectedLen));
 
-    if (
-      cookieBuf.length !== headerBuf.length ||
-      !crypto.timingSafeEqual(cookieBuf, headerBuf)
-    ) {
+    const lengthMatch = cookieRaw.length === expectedLen && headerRaw.length === expectedLen;
+    if (!lengthMatch || !crypto.timingSafeEqual(cookieBuf, headerBuf)) {
       res.status(403).json({ error: "csrf_invalid", message: "CSRF token mismatch" });
       return;
     }

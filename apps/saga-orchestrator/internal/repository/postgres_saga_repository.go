@@ -3,6 +3,7 @@
 import (
     "context"
     "errors"
+    "time"
 
     "github.com/google/uuid"
     "github.com/jackc/pgx/v5"
@@ -10,6 +11,16 @@ import (
 
     "github.com/pahuldeepp/grainguard/apps/saga-orchestrator/internal/domain"
 )
+
+const dbQueryTimeout = 10 * time.Second
+
+// withTimeout wraps a context with a query timeout if one isn't already set.
+func withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+    if _, ok := ctx.Deadline(); ok {
+        return ctx, func() {} // caller already set a deadline
+    }
+    return context.WithTimeout(ctx, dbQueryTimeout)
+}
 
 type PostgresSagaRepository struct {
     pool *pgxpool.Pool
@@ -20,6 +31,8 @@ func NewPostgresSagaRepository(pool *pgxpool.Pool) *PostgresSagaRepository {
 }
 
 func (r *PostgresSagaRepository) Create(ctx context.Context, saga *domain.Saga) error {
+    ctx, cancel := withTimeout(ctx)
+    defer cancel()
     _, err := r.pool.Exec(ctx, `
         INSERT INTO sagas (saga_id, saga_type, correlation_id, status, current_step, payload, last_error)
         VALUES ($1,$2,$3,$4,$5,$6,$7)
@@ -27,11 +40,19 @@ func (r *PostgresSagaRepository) Create(ctx context.Context, saga *domain.Saga) 
     return err
 }
 
+// FindByCorrelationID looks up a saga by its correlation ID (device UUID).
+// Note: correlation_id is a globally unique UUID, so cross-tenant collision is not possible.
+// The payload JSON contains tenant_id for auditing. If tenant_id column is added to the
+// sagas table in the future, add a WHERE tenant_id = $2 filter here for defense in depth.
 func (r *PostgresSagaRepository) FindByCorrelationID(ctx context.Context, correlationID string) (*domain.Saga, error) {
+    ctx, cancel := withTimeout(ctx)
+    defer cancel()
     row := r.pool.QueryRow(ctx, `
         SELECT saga_id, saga_type, correlation_id, status, current_step, payload, COALESCE(last_error,'')
         FROM sagas
         WHERE correlation_id = $1
+        ORDER BY created_at DESC
+        LIMIT 1
     `, correlationID)
 
     var s domain.Saga
@@ -53,6 +74,8 @@ func (r *PostgresSagaRepository) FindByCorrelationID(ctx context.Context, correl
 }
 
 func (r *PostgresSagaRepository) UpdateStepStatus(ctx context.Context, sagaID string, step string, status string) error {
+    ctx, cancel := withTimeout(ctx)
+    defer cancel()
     _, err := r.pool.Exec(ctx, `
         UPDATE sagas
         SET current_step = $2,
@@ -64,6 +87,8 @@ func (r *PostgresSagaRepository) UpdateStepStatus(ctx context.Context, sagaID st
 }
 
 func (r *PostgresSagaRepository) MarkFailed(ctx context.Context, sagaID string, errMsg string) error {
+    ctx, cancel := withTimeout(ctx)
+    defer cancel()
     _, err := r.pool.Exec(ctx, `
         UPDATE sagas
         SET status = $2,

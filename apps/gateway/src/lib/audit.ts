@@ -28,6 +28,12 @@ export interface AuditEvent {
   userAgent?: string;
 }
 
+// Critical events that MUST be logged — throw on failure so the caller knows
+const CRITICAL_EVENTS: Set<string> = new Set([
+  "auth.unauthorized",
+  "admin.action",
+]);
+
 export async function logAuditEvent(event: AuditEvent): Promise<void> {
   try {
     await writePool.query(
@@ -46,7 +52,11 @@ export async function logAuditEvent(event: AuditEvent): Promise<void> {
       ]
     );
   } catch (err) {
-    console.error("[audit] failed to log event:", event.eventType, err);
+    console.error("[audit] FAILED to log event:", event.eventType, err);
+    // Critical audit events must not be silently lost — re-throw so callers can handle
+    if (CRITICAL_EVENTS.has(event.eventType)) {
+      throw new Error(`Critical audit event lost: ${event.eventType}`);
+    }
   }
 }
 
