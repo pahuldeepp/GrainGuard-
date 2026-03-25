@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -79,9 +80,26 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Redis
-	redisClient := redis.NewClient(&redis.Options{
-		Addr: getenv("REDIS_ADDR", "redis:6379"),
+	// Redis (cluster or single-node)
+	clusterNodes := getenv("REDIS_CLUSTER_NODES", "")
+	var addrs []string
+	if clusterNodes != "" {
+		for _, a := range strings.Split(clusterNodes, ",") {
+			addrs = append(addrs, strings.TrimSpace(a))
+		}
+		log.Info().Int("nodes", len(addrs)).Msg("Redis cluster mode")
+	} else {
+		addrs = []string{getenv("REDIS_ADDR", "redis:6379")}
+		log.Info().Str("addr", addrs[0]).Msg("Redis single-node mode")
+	}
+
+	redisClient := redis.NewUniversalClient(&redis.UniversalOptions{
+		Addrs:          addrs,
+		PoolSize:       getenvInt("REDIS_POOL_SIZE", 20),
+		MinIdleConns:   5,
+		ReadTimeout:    2 * time.Second,
+		WriteTimeout:   2 * time.Second,
+		RouteByLatency: len(addrs) > 1,
 	})
 	defer redisClient.Close()
 

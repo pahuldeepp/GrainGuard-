@@ -13,7 +13,7 @@ import (
 
 func NewEnvelopeHandler(
 	pool *pgxpool.Pool,
-	redisClient *redis.Client,
+	redisClient redis.UniversalClient,
 ) func(context.Context, []byte) error {
 	telemetryHandler := projection.HandleTelemetry(pool, redisClient)
 	deviceHandler := projection.HandleDevice(pool, redisClient)
@@ -40,7 +40,7 @@ func NewEnvelopeHandler(
 
 func NewBatchEnvelopeHandler(
 	pool *pgxpool.Pool,
-	redisClient *redis.Client,
+	redisClient redis.UniversalClient,
 ) func(context.Context, [][]byte) error {
 	return projection.HandleTelemetryBatch(pool, redisClient)
 }

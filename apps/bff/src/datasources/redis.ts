@@ -1,11 +1,28 @@
-import { createClient } from "redis";
+import { createClient, createCluster } from "redis";
 
-const client = createClient({
-  socket: {
-    host: process.env.REDIS_HOST || "localhost",
-    port: parseInt(process.env.REDIS_PORT || "6379"),
+// REDIS_CLUSTER_NODES = "redis-cluster-0:6379,redis-cluster-1:6379,..."
+// When set, uses Redis Cluster. Otherwise falls back to single-node (local dev).
+const REDIS_CLUSTER_NODES = process.env.REDIS_CLUSTER_NODES;
+
+const client = (() => {
+  if (REDIS_CLUSTER_NODES) {
+    const nodes = REDIS_CLUSTER_NODES.split(",").map((n) => {
+      const [host, port] = n.trim().split(":");
+      return { host, port: parseInt(port || "6379") };
+    });
+    console.log(`Redis cluster mode: ${nodes.length} nodes`);
+    return createCluster({ nodes });
   }
-});
+
+  // Single-node (local dev / docker-compose default)
+  console.log("Redis single-node mode");
+  return createClient({
+    socket: {
+      host: process.env.REDIS_HOST || "localhost",
+      port: parseInt(process.env.REDIS_PORT || "6379"),
+    },
+  });
+})();
 
 client.connect().catch(console.error);
 client.on("error", (err) => console.error("Redis error:", err));

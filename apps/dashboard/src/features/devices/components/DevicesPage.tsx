@@ -19,7 +19,7 @@ export function DevicesPage() {
   const { activeTenantId } = useTenantContext();
   const debouncedSearch = useDebounce(search, 300);
   const { devices, loading, error, refetch } = useDevices(limit);
-  const { results: searchResults, loading: searchLoading } = useSearchDevices(debouncedSearch);
+  const { results: searchResults } = useSearchDevices(debouncedSearch);
   
   // Use ES search results when query is active, otherwise use local devices
   const isSearching = debouncedSearch.trim().length >= 2;

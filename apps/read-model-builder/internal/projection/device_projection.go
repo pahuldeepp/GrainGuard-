@@ -17,7 +17,7 @@ import (
 	"github.com/pahuldeepp/grainguard/libs/observability"
 )
 
-func HandleDevice(pool *pgxpool.Pool, redisClient *redis.Client) func([]byte) error {
+func HandleDevice(pool *pgxpool.Pool, redisClient redis.UniversalClient) func([]byte) error {
 	return func(payload []byte) error {
 		start := time.Now()
 

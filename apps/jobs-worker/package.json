@@ -6,7 +6,10 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts"
+    "dev": "ts-node src/index.ts",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "amqplib": "^0.10.3",
@@ -14,8 +17,11 @@
     "dotenv": "^16.0.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.1",
     "@types/amqplib": "^0.10.4",
     "@types/node": "^20.0.0",
+    "eslint": "^9.39.1",
+    "typescript-eslint": "^8.48.0",
     "typescript": "^5.0.0"
   }
 }
