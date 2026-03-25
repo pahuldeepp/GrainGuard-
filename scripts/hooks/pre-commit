@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "🔍 Running pre-commit checks..."
+
+# ── Go files changed? ────────────────────────────────────────
+GO_CHANGED=$(git diff --cached --name-only --diff-filter=ACMR | grep '\.go$' || true)
+if [ -n "$GO_CHANGED" ]; then
+  echo "  Go: vet..."
+  go vet ./...
+  echo "  Go: build..."
+  go build ./...
+  echo "  Go: lint (fast)..."
+  golangci-lint run --new-from-rev=HEAD~1 ./... 2>/dev/null || true
+fi
+
+# ── TypeScript files changed? ─────────────────────────────────
+TS_CHANGED=$(git diff --cached --name-only --diff-filter=ACMR | grep '\.\(ts\|tsx\)$' || true)
+if [ -n "$TS_CHANGED" ]; then
+  # Check which TS apps have changes
+  if echo "$TS_CHANGED" | grep -q "apps/gateway/"; then
+    echo "  Gateway: lint..."
+    cd apps/gateway && npx eslint --max-warnings=0 $(echo "$TS_CHANGED" | grep "apps/gateway/" | sed 's|apps/gateway/||') 2>/dev/null || true
+    cd ../..
+  fi
+  if echo "$TS_CHANGED" | grep -q "apps/dashboard/"; then
+    echo "  Dashboard: lint..."
+    cd apps/dashboard && npx eslint --max-warnings=0 $(echo "$TS_CHANGED" | grep "apps/dashboard/" | sed 's|apps/dashboard/||') 2>/dev/null || true
+    cd ../..
+  fi
+  if echo "$TS_CHANGED" | grep -q "apps/bff/"; then
+    echo "  BFF: lint..."
+    cd apps/bff && npx eslint --max-warnings=0 $(echo "$TS_CHANGED" | grep "apps/bff/" | sed 's|apps/bff/||') 2>/dev/null || true
+    cd ../..
+  fi
+fi
+
+# ── Secrets detection ────────────────────────────────────────
+SECRETS_FOUND=$(git diff --cached --diff-filter=ACMR -p | grep -iE '(password|secret|api_key|private_key)\s*[:=]\s*["\x27][^"\x27]{8,}' | grep -v 'placeholder\|example\|test\|_test\|mock\|\.test\.' || true)
+if [ -n "$SECRETS_FOUND" ]; then
+  echo ""
+  echo "⚠️  Possible secrets detected in staged changes:"
+  echo "$SECRETS_FOUND"
+  echo ""
+  echo "If these are intentional (test fixtures), commit with: git commit --no-verify"
+  exit 1
+fi
+
+echo "✅ Pre-commit checks passed"

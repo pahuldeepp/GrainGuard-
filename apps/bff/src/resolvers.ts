@@ -1,4 +1,4 @@
-﻿import { db } from "./datasources/postgres";
+import { db } from "./datasources/postgres";
 import { search } from "./datasources/elasticsearch";
 import { cache } from "./datasources/redis";
 import { pubsub, TELEMETRY_UPDATED, TENANT_TELEMETRY_UPDATED } from "./pubsub";
@@ -8,6 +8,14 @@ import { getTelemetryHistoryFromCassandra } from "./datasources/cassandra";
 const TELEMETRY_TTL = 30;
 const DEVICE_TTL = 300;
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Tenant filter helper — superadmins can see all tenants.
+ * Returns undefined (no filter) for superadmins, ctx.tenantId otherwise.
+ */
+function tenantFilter(ctx: BffContext): string | undefined {
+  return ctx.isSuperAdmin ? undefined : ctx.tenantId;
+}
 
 export const resolvers = {
   Query: {
@@ -19,7 +27,8 @@ export const resolvers = {
 
       const row = await db.getDeviceWithTelemetry(args.deviceId);
       if (!row) return null;
-      if (row.tenant_id !== ctx.tenantId) return null;
+      // Tenant isolation — superadmins bypass
+      if (!ctx.isSuperAdmin && row.tenant_id !== ctx.tenantId) return null;
 
       const result = {
         deviceId:     row.device_id,
@@ -38,12 +47,13 @@ export const resolvers = {
 
     devices: async (_: any, args: { limit?: number }, ctx: BffContext) => {
       const limit = args.limit || 20;
-      const cacheKey = `devices:all:${ctx.tenantId}:${limit}`;
+      const tid = tenantFilter(ctx);
+      const cacheKey = `devices:all:${tid || "global"}:${limit}`;
 
       const cached = await cache.get<any[]>(cacheKey);
       if (cached) return cached;
 
-      const rows = await db.getAllDevicesWithTelemetry(limit, ctx.tenantId);
+      const rows = await db.getAllDevicesWithTelemetry(limit, tid);
 
       const result = rows.map((row: any) => ({
         deviceId:     row.device_id,
@@ -74,16 +84,21 @@ export const resolvers = {
       }
 
       try {
-        // Single query with JOIN instead of 2 separate queries (avoids extra round trip)
-        const row = await db.getDeviceWithTelemetry(args.deviceId);
-        if (!row || row.tenant_id !== ctx.tenantId) return null;
+        const row = await db.getDeviceTelemetry(args.deviceId);
+        if (!row) return null;
+
+        // Tenant isolation check — superadmins bypass
+        if (!ctx.isSuperAdmin) {
+          const device = await db.getDeviceWithTelemetry(args.deviceId);
+          if (!device || device.tenant_id !== ctx.tenantId) return null;
+        }
 
         const result = {
           deviceId:    row.device_id,
           temperature: row.temperature,
           humidity:    row.humidity,
-          recordedAt:  row.recorded_at ? new Date(row.recorded_at).toISOString() : null,
-          updatedAt:   row.updated_at ? new Date(row.updated_at).toISOString() : null,
+          recordedAt:  new Date(row.recorded_at).toISOString(),
+          updatedAt:   new Date(row.updated_at).toISOString(),
           version:     row.version,
         };
 
@@ -96,7 +111,8 @@ export const resolvers = {
 
     allTelemetry: async (_: any, args: { limit?: number }, ctx: BffContext) => {
       const limit = args.limit || 20;
-      const cacheKey = `telemetry:all:${ctx.tenantId}:${limit}`;
+      const tid = tenantFilter(ctx);
+      const cacheKey = `telemetry:all:${tid || "global"}:${limit}`;
 
       const cached = await cache.get<any[]>(cacheKey);
       if (cached) return cached;
@@ -109,7 +125,7 @@ export const resolvers = {
       }
 
       try {
-        const rows = await db.getAllTelemetry(limit, ctx.tenantId);
+        const rows = await db.getAllTelemetry(limit, tid);
 
         const result = rows.map((row: any) => ({
           deviceId:    row.device_id,
@@ -147,8 +163,11 @@ export const resolvers = {
       for (let i = 0; i < missedIds.length; i++) {
         const row = await db.getDeviceTelemetry(missedIds[i]);
         if (row) {
-          const device = await db.getDeviceWithTelemetry(missedIds[i]);
-          if (!device || device.tenant_id !== ctx.tenantId) continue;
+          // Tenant isolation — superadmins bypass
+          if (!ctx.isSuperAdmin) {
+            const device = await db.getDeviceWithTelemetry(missedIds[i]);
+            if (!device || device.tenant_id !== ctx.tenantId) continue;
+          }
 
           const result = {
             deviceId:    row.device_id,
@@ -167,8 +186,11 @@ export const resolvers = {
     },
 
     deviceTelemetryHistory: async (_: any, args: { deviceId: string; limit?: number }, ctx: BffContext) => {
-      const device = await db.getDeviceWithTelemetry(args.deviceId);
-      if (!device || device.tenant_id !== ctx.tenantId) return [];
+      // Tenant isolation — superadmins bypass
+      if (!ctx.isSuperAdmin) {
+        const device = await db.getDeviceWithTelemetry(args.deviceId);
+        if (!device || device.tenant_id !== ctx.tenantId) return [];
+      }
       const limit = args.limit ?? 50;
 
       try {
@@ -182,7 +204,8 @@ export const resolvers = {
       }
 
       console.log('[history] falling back to Postgres');
-      const rows = await db.getTelemetryHistory(args.deviceId, limit, ctx.tenantId);
+      const tid = tenantFilter(ctx);
+      const rows = await db.getTelemetryHistory(args.deviceId, limit, tid);
       return rows.map((row: any) => ({
         deviceId:    row.deviceId,
         temperature: row.temperature,
@@ -193,12 +216,14 @@ export const resolvers = {
     devicesConnection: async (_: any, args: { first?: number; after?: string }, ctx: BffContext) => {
       const first = Math.min(args.first || 20, 100); // cap at 100
       const after = args.after || null;
-      return db.getDevicesWithCursor(first, after, ctx.tenantId);
+      return db.getDevicesWithCursor(first, after, tenantFilter(ctx));
     },
     searchDevices: async (_: any, args: { query: string; limit?: number }, ctx: BffContext) => {
       const q = (args.query || "").trim();
       if (q.length < 2) return [];
-      return search.searchDevices(q, ctx.tenantId, args.limit || 20);
+      // Search: superadmins search all tenants
+      const tid = tenantFilter(ctx);
+      return search.searchDevices(q, tid || "", args.limit || 20);
     },
   },
   Subscription: {
@@ -213,15 +238,15 @@ export const resolvers = {
 
     tenantTelemetryUpdated: {
       subscribe: (_: any, args: { tenantId: string }, ctx: BffContext) => {
-        if (args.tenantId !== ctx.tenantId) {
+        // Superadmins can subscribe to any tenant's updates
+        if (!ctx.isSuperAdmin && args.tenantId !== ctx.tenantId) {
           throw new Error("Unauthorized: cannot subscribe to another tenant");
         }
         return pubsub.asyncIterableIterator(
-          `${TENANT_TELEMETRY_UPDATED}:${ctx.tenantId}`
+          `${TENANT_TELEMETRY_UPDATED}:${args.tenantId}`
         );
       },
       resolve: (payload: any) => payload,
     },
   },
 };
-

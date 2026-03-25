@@ -10,6 +10,12 @@ export function useAuth() {
     getAccessTokenSilently,
   } = useAuth0();
 
+  // Auth0 Action injects claims under https://grainguard.com/ namespace
+  const roles: string[] =
+    (user?.["https://grainguard.com/roles"] as string[]) ?? [];
+  const isAdmin = roles.includes("admin");
+  const isSuperAdmin = roles.includes("superadmin");
+
   const signOut = () =>
     logout({ logoutParams: { returnTo: window.location.origin } });
 
@@ -24,6 +30,8 @@ export function useAuth() {
     user,
     isAuthenticated,
     isLoading,
+    isAdmin,
+    isSuperAdmin,
     login: loginWithRedirect,
     signOut,
     getToken,

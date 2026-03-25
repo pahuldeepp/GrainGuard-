@@ -52,9 +52,8 @@ export function SSOPage() {
   }
 
   async function ensureOrg() {
-    // Creates Auth0 Organization if it doesn't exist yet
     await apiFetch("/tenants/me/sso/org", { method: "POST" });
-    await load(); // refresh state
+    await load();
   }
 
   async function configureSaml(e: React.FormEvent) {
@@ -133,7 +132,6 @@ export function SSOPage() {
       {error && <div role="alert" className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400 text-sm">{error}</div>}
       {success && <div role="status" className="mb-4 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg text-green-700 dark:text-green-400 text-sm break-all">{success}</div>}
 
-      {/* Current status */}
       <div className="bg-white dark:bg-gray-900 rounded-xl shadow p-5 mb-6">
         <div className="flex items-center justify-between">
           <div>
@@ -150,7 +148,6 @@ export function SSOPage() {
         </div>
       </div>
 
-      {/* Tab switcher */}
       <div className="flex border-b border-gray-200 dark:border-gray-700 mb-6">
         {(["saml", "oidc"] as ConnectionType[]).map((tab) => (
           <button
@@ -167,7 +164,6 @@ export function SSOPage() {
         ))}
       </div>
 
-      {/* SAML form */}
       {activeTab === "saml" && (
         <form onSubmit={configureSaml} className="space-y-4">
           <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
@@ -187,7 +183,6 @@ export function SSOPage() {
         </form>
       )}
 
-      {/* OIDC form */}
       {activeTab === "oidc" && (
         <form onSubmit={configureOidc} className="space-y-4">
           <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">

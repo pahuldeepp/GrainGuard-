@@ -34,7 +34,7 @@ async function apiFetch(path: string, options: RequestInit = {}) {
 }
 
 const EVENT_TYPES = [
-  "", // = all
+  "",
   "device.created",
   "device.creation_failed",
   "user.invited",
@@ -81,7 +81,6 @@ export function AuditLogPage() {
     }
   }, [cursor, filterType]);
 
-  // Reload when filter changes
   useEffect(() => { load(true); }, [filterType]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleExport() {
@@ -96,7 +95,6 @@ export function AuditLogPage() {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-      // Stream the CSV into a browser download
       const blob = await res.blob();
       const url  = URL.createObjectURL(blob);
       const a    = document.createElement("a");
@@ -111,7 +109,6 @@ export function AuditLogPage() {
     }
   }
 
-  // Badge colour by event category
   function badgeColor(eventType: string): string {
     if (eventType.includes("created") || eventType.includes("configured"))
       return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300";
@@ -195,7 +192,6 @@ export function AuditLogPage() {
             </table>
           </div>
 
-          {/* Load more */}
           {hasMore && (
             <div className="text-center mt-4">
               <button

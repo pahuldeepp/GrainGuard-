@@ -55,24 +55,6 @@
     totalCount: Int!
   }
 
-  type PageInfo {
-    hasNextPage:     Boolean!
-    hasPreviousPage: Boolean!
-    startCursor:     String
-    endCursor:       String
-  }
-
-  type DeviceEdge {
-    node:   Device!
-    cursor: String!
-  }
-
-  type DeviceConnection {
-    edges:      [DeviceEdge!]!
-    pageInfo:   PageInfo!
-    totalCount: Int!
-  }
-
   type Query {
     device(deviceId: String!): Device
     devices(limit: Int): [Device!]!

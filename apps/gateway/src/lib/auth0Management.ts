@@ -10,15 +10,12 @@
 //   create:organization_invitations
 //   read:users  update:users
 
-const AUTH0_DOMAIN   = process.env.AUTH0_DOMAIN!;
-const M2M_CLIENT_ID  = process.env.AUTH0_MANAGEMENT_CLIENT_ID!;
-const M2M_CLIENT_SEC = process.env.AUTH0_MANAGEMENT_CLIENT_SECRET!;
+const AUTH0_DOMAIN   = process.env.AUTH0_DOMAIN ?? "";
+const M2M_CLIENT_ID  = process.env.AUTH0_MANAGEMENT_CLIENT_ID ?? "";
+const M2M_CLIENT_SEC = process.env.AUTH0_MANAGEMENT_CLIENT_SECRET ?? "";
 
-if (!AUTH0_DOMAIN || !M2M_CLIENT_ID || !M2M_CLIENT_SEC) {
-  throw new Error(
-    "AUTH0_DOMAIN, AUTH0_MANAGEMENT_CLIENT_ID, AUTH0_MANAGEMENT_CLIENT_SECRET must be set"
-  );
-}
+// Not validated at startup — only SSO routes call these functions.
+// If the env vars are missing, calls to mgmt() will throw at request time.
 
 const MGMT_AUDIENCE = `https://${AUTH0_DOMAIN}/api/v2/`;
 
@@ -29,6 +26,12 @@ let cachedToken: string | null = null;
 let tokenExpiry  = 0;
 
 async function getManagementToken(): Promise<string> {
+  if (!AUTH0_DOMAIN || !M2M_CLIENT_ID || !M2M_CLIENT_SEC) {
+    throw new Error(
+      "SSO not configured: AUTH0_DOMAIN, AUTH0_MANAGEMENT_CLIENT_ID, AUTH0_MANAGEMENT_CLIENT_SECRET must be set"
+    );
+  }
+
   if (cachedToken && Date.now() < tokenExpiry - 60_000) {
     return cachedToken;
   }
@@ -77,6 +80,47 @@ async function mgmt(
   // 204 No Content has no body
   if (res.status === 204) return null;
   return res.json();
+}
+
+// ── User onboarding operations ────────────────────────────────────────────────
+
+/**
+ * Sets app_metadata.tenant_id on a user so the Login Action
+ * injects it into every subsequent JWT automatically.
+ */
+export async function setUserTenantId(
+  authUserId: string,
+  tenantId: string
+): Promise<void> {
+  await mgmt(`users/${encodeURIComponent(authUserId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ app_metadata: { tenant_id: tenantId } }),
+  });
+}
+
+/**
+ * Finds the Auth0 role named `roleName` and assigns it to the user.
+ * Silently no-ops if the role isn't found (don't break onboarding).
+ */
+export async function assignRoleByName(
+  authUserId: string,
+  roleName: string
+): Promise<void> {
+  try {
+    const roles: Array<{ id: string; name: string }> = await mgmt("roles?per_page=50");
+    const role = roles.find((r) => r.name === roleName);
+    if (!role) {
+      console.warn(`[auth0] role "${roleName}" not found — skipping assignment`);
+      return;
+    }
+    await mgmt(`users/${encodeURIComponent(authUserId)}/roles`, {
+      method: "POST",
+      body: JSON.stringify({ roles: [role.id] }),
+    });
+  } catch (err) {
+    // Non-fatal — user can still proceed without the role
+    console.warn(`[auth0] assignRoleByName failed:`, err);
+  }
 }
 
 // ── Organization operations ───────────────────────────────────────────────────

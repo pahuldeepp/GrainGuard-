@@ -1,0 +1,45 @@
+global:
+  imagePullPolicy: IfNotPresent
+  env: prod
+
+# Scale up ingest-heavy services for production
+telemetryIngest:
+  replicaCount: 5
+  hpa:
+    minReplicas: 5
+    maxReplicas: 30
+
+ingestService:
+  replicaCount: 5
+  hpa:
+    minReplicas: 5
+    maxReplicas: 25
+
+riskEngine:
+  replicaCount: 3
+  hpa:
+    minReplicas: 3
+    maxReplicas: 15
+
+gateway:
+  replicaCount: 3
+  hpa:
+    minReplicas: 3
+    maxReplicas: 15
+
+bff:
+  replicaCount: 3
+  hpa:
+    minReplicas: 3
+    maxReplicas: 12
+
+ingress:
+  tls:
+    - secretName: grainguard-tls
+      hosts:
+        - app.grainguard.io
+  hosts:
+    - host: app.grainguard.io
+      paths:
+        - { path: /graphql, pathType: Prefix, service: gateway, port: 3000 }
+        - { path: /,        pathType: Prefix, service: dashboard, port: 80 }

@@ -2,12 +2,14 @@ package grpc
 
 import (
 	"context"
+	"os"
 
 	"github.com/pahuldeepp/grainguard/apps/telemetry-service/internal/application"
 	"github.com/pahuldeepp/grainguard/apps/telemetry-service/internal/grpc/interceptors"
 	devicepb "github.com/pahuldeepp/grainguard/libs/proto"
 
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -28,7 +30,23 @@ func (s *DeviceServer) CreateDevice(
 	// 🔒 Extract verified JWT claims from interceptor
 	auth, ok := interceptors.GetAuthInfo(ctx)
 	if !ok {
-		return nil, status.Error(codes.Unauthenticated, "missing auth context")
+		// When AUTH_ENABLED=false the JWT interceptor is not registered.
+		// Fall back to the x-tenant-id gRPC metadata header (set by gateway).
+		if os.Getenv("AUTH_ENABLED") == "false" {
+			tenantID := req.TenantId
+			if md, hasMD := metadata.FromIncomingContext(ctx); hasMD {
+				if vals := md.Get("x-tenant-id"); len(vals) > 0 {
+					tenantID = vals[0]
+				}
+			}
+			auth = &interceptors.AuthInfo{
+				Sub:      "dev-user",
+				TenantID: tenantID,
+				Roles:    []string{"admin", "member"},
+			}
+		} else {
+			return nil, status.Error(codes.Unauthenticated, "missing auth context")
+		}
 	}
 
 	// 🔒 Enforce tenant isolation

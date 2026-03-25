@@ -108,7 +108,7 @@ func (v *JWTVerifier) UnaryAuthInterceptor() grpc.UnaryServerInterceptor {
 		// tenant_id — check standard claim first, then Auth0 namespaced
 		tenantID, _ := claims["tenant_id"].(string)
 		if tenantID == "" {
-			if ns, ok := claims["https://grainguard/tenant_id"].(string); ok {
+			if ns, ok := claims["https://grainguard.com/tenant_id"].(string); ok {
 				tenantID = ns
 			}
 		}
@@ -133,7 +133,7 @@ func (v *JWTVerifier) UnaryAuthInterceptor() grpc.UnaryServerInterceptor {
 		}
 		// Auth0 namespaced roles fallback
 		if len(roles) == 0 {
-			if rs, ok := claims["https://ledgerflow.api/roles"].([]any); ok {
+			if rs, ok := claims["https://grainguard.com/roles"].([]any); ok {
 				for _, r := range rs {
 					if s, ok := r.(string); ok {
 						roles = append(roles, s)

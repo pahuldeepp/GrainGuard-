@@ -1,0 +1,224 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: grainguard-slos
+  namespace: monitoring
+  labels:
+    prometheus: kube-prometheus
+    role: alert-rules
+spec:
+  groups:
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Recording rules — pre-compute error ratios for fast alert evaluation
+  # ────────────────────────────────────────────────────────────────────────────
+  - name: grainguard.slo.recordings
+    interval: 30s
+    rules:
+
+    # --- Availability (HTTP 5xx ratio) ----------------------------------------
+    - record: job:http_requests_total:rate5m
+      expr: |
+        sum by (job) (
+          rate(http_requests_total[5m])
+        )
+
+    - record: job:http_errors_total:rate5m
+      expr: |
+        sum by (job) (
+          rate(http_requests_total{status=~"5.."}[5m])
+        )
+
+    - record: job:http_error_ratio:rate5m
+      expr: |
+        job:http_errors_total:rate5m
+          /
+        job:http_requests_total:rate5m
+
+    # 1h window
+    - record: job:http_error_ratio:rate1h
+      expr: |
+        sum by (job) (rate(http_requests_total{status=~"5.."}[1h]))
+          /
+        sum by (job) (rate(http_requests_total[1h]))
+
+    # 6h window
+    - record: job:http_error_ratio:rate6h
+      expr: |
+        sum by (job) (rate(http_requests_total{status=~"5.."}[6h]))
+          /
+        sum by (job) (rate(http_requests_total[6h]))
+
+    # 3d window
+    - record: job:http_error_ratio:rate3d
+      expr: |
+        sum by (job) (rate(http_requests_total{status=~"5.."}[3d]))
+          /
+        sum by (job) (rate(http_requests_total[3d]))
+
+    # --- Latency (GraphQL p95 / p99) -----------------------------------------
+    - record: job:graphql_request_duration_seconds:p95rate5m
+      expr: |
+        histogram_quantile(0.95,
+          sum by (job, le) (
+            rate(graphql_request_duration_seconds_bucket{job=~"gateway|bff"}[5m])
+          )
+        )
+
+    - record: job:graphql_request_duration_seconds:p99rate5m
+      expr: |
+        histogram_quantile(0.99,
+          sum by (job, le) (
+            rate(graphql_request_duration_seconds_bucket{job=~"gateway|bff"}[5m])
+          )
+        )
+
+    # --- Ingest pipeline lag --------------------------------------------------
+    - record: job:kafka_consumer_lag_sum:max5m
+      expr: |
+        max by (job, consumergroup) (
+          kafka_consumergroup_lag
+        )
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Burn-rate alerts (multi-window, multi-burn-rate — Google SRE model)
+  # error_budget = 1 - SLO  (0.1% error budget for 99.9% availability SLO)
+  # ────────────────────────────────────────────────────────────────────────────
+  - name: grainguard.slo.alerts
+    rules:
+
+    # ── Availability SLO: 99.9% ──────────────────────────────────────────────
+
+    # Fast burn — consumes 2% of monthly budget in 1h → page now
+    # burn_rate > 14.4  (= 1/0.001 * 0.02 * 720h/1h)
+    - alert: AvailabilitySLOFastBurn
+      expr: |
+        (
+          job:http_error_ratio:rate1h{job=~"gateway|bff"} > (14.4 * 0.001)
+        ) and (
+          job:http_error_ratio:rate5m{job=~"gateway|bff"} > (14.4 * 0.001)
+        )
+      for: 2m
+      labels:
+        severity: critical
+        slo: availability
+        burn_rate: fast
+      annotations:
+        summary: "{{ $labels.job }} burning availability budget at 14.4x"
+        description: >
+          Error ratio {{ $value | humanizePercentage }} (1h window).
+          At this rate the entire monthly error budget is gone in ~2h.
+          SLO target: 99.9% availability.
+        runbook_url: "https://github.com/your-org/grainguard/blob/master/docs/runbooks/availability.md"
+
+    # Medium burn — consumes 5% of monthly budget in 6h → ticket
+    # burn_rate > 6
+    - alert: AvailabilitySLOMediumBurn
+      expr: |
+        (
+          job:http_error_ratio:rate6h{job=~"gateway|bff"} > (6 * 0.001)
+        ) and (
+          job:http_error_ratio:rate1h{job=~"gateway|bff"} > (6 * 0.001)
+        )
+      for: 15m
+      labels:
+        severity: warning
+        slo: availability
+        burn_rate: medium
+      annotations:
+        summary: "{{ $labels.job }} burning availability budget at 6x"
+        description: >
+          Error ratio {{ $value | humanizePercentage }} (6h window).
+          Monthly budget will be exhausted in ~5 days at this rate.
+        runbook_url: "https://github.com/your-org/grainguard/blob/master/docs/runbooks/availability.md"
+
+    # Slow burn — informational, 3-day window
+    # burn_rate > 3
+    - alert: AvailabilitySLOSlowBurn
+      expr: |
+        job:http_error_ratio:rate3d{job=~"gateway|bff"} > (3 * 0.001)
+      for: 1h
+      labels:
+        severity: info
+        slo: availability
+        burn_rate: slow
+      annotations:
+        summary: "{{ $labels.job }} elevated error rate over 3 days"
+        description: >
+          3-day error ratio {{ $value | humanizePercentage }}.
+          No immediate action required but trend should be investigated.
+
+    # ── Latency SLO: p95 < 500ms, p99 < 1000ms ──────────────────────────────
+
+    - alert: LatencySLOP95Breach
+      expr: |
+        job:graphql_request_duration_seconds:p95rate5m{job=~"gateway|bff"} > 0.5
+      for: 5m
+      labels:
+        severity: warning
+        slo: latency
+        quantile: p95
+      annotations:
+        summary: "{{ $labels.job }} p95 latency {{ $value | humanizeDuration }} > 500ms"
+        description: >
+          GraphQL p95 latency is breaching the 500ms SLO target.
+        runbook_url: "https://github.com/your-org/grainguard/blob/master/docs/runbooks/latency.md"
+
+    - alert: LatencySLOP99Breach
+      expr: |
+        job:graphql_request_duration_seconds:p99rate5m{job=~"gateway|bff"} > 1.0
+      for: 5m
+      labels:
+        severity: critical
+        slo: latency
+        quantile: p99
+      annotations:
+        summary: "{{ $labels.job }} p99 latency {{ $value | humanizeDuration }} > 1000ms"
+        description: >
+          GraphQL p99 latency is breaching the 1000ms SLO target.
+        runbook_url: "https://github.com/your-org/grainguard/blob/master/docs/runbooks/latency.md"
+
+    # ── Projection lag SLO: consumer lag < 5000 messages ────────────────────
+
+    - alert: ProjectionLagHigh
+      expr: |
+        kafka_consumergroup_lag{consumergroup=~"read-model-builder|cdc-transformer"} > 5000
+      for: 2m
+      labels:
+        severity: warning
+        slo: projection_freshness
+      annotations:
+        summary: "{{ $labels.consumergroup }} consumer lag {{ $value }} > 5000"
+        description: >
+          Read models are falling behind. Device dashboard data may be stale.
+          Investigate consumer throughput and partition count.
+        runbook_url: "https://github.com/your-org/grainguard/blob/master/docs/runbooks/projection-lag.md"
+
+    - alert: ProjectionLagCritical
+      expr: |
+        kafka_consumergroup_lag{consumergroup=~"read-model-builder|cdc-transformer"} > 50000
+      for: 5m
+      labels:
+        severity: critical
+        slo: projection_freshness
+      annotations:
+        summary: "{{ $labels.consumergroup }} consumer lag {{ $value }} > 50 000 — SLO breach"
+        description: >
+          Projection is severely lagging. Read model data is significantly stale.
+          Consider scaling the consumer deployment immediately.
+
+    # ── Ingest SLO: DLQ messages should be zero ──────────────────────────────
+
+    - alert: DLQMessagesAccumulating
+      expr: |
+        increase(kafka_topic_partition_current_offset{topic=~".*\\.dlq"}[10m]) > 0
+      for: 5m
+      labels:
+        severity: warning
+        slo: ingest_reliability
+      annotations:
+        summary: "DLQ {{ $labels.topic }} is accumulating messages"
+        description: >
+          Messages are being routed to the dead-letter queue.
+          Check dlq-reprocessor logs and upstream schema for errors.
+        runbook_url: "https://github.com/your-org/grainguard/blob/master/docs/runbooks/dlq-spike.md"

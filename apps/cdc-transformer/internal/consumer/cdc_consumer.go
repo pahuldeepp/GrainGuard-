@@ -119,10 +119,10 @@ func (c *CDCConsumer) Start(ctx context.Context) {
 	topic := c.reader.Config().Topic
 
 	workerCount := getenvInt("WORKER_COUNT", runtime.NumCPU()*2)
-	publisherCount := getenvInt("PUBLISHER_COUNT", 4)
-	jobQueueSize := getenvInt("JOB_QUEUE_SIZE", 512)
-	publishQueueSize := getenvInt("PUBLISH_QUEUE_SIZE", 512)
-	commitQueueSize := getenvInt("COMMIT_QUEUE_SIZE", 512)
+	publisherCount := getenvInt("PUBLISHER_COUNT", runtime.NumCPU())
+	jobQueueSize := getenvInt("JOB_QUEUE_SIZE", 4096)
+	publishQueueSize := getenvInt("PUBLISH_QUEUE_SIZE", 4096)
+	commitQueueSize := getenvInt("COMMIT_QUEUE_SIZE", 4096)
 
 	log.Printf(
 		"cdc-transformer starting workers=%d publishers=%d jobQueue=%d publishQueue=%d commitQueue=%d",
@@ -388,26 +388,52 @@ func (c *CDCConsumer) writeToDLQ(ctx context.Context, job publishJob, publishErr
 }
 
 func (c *CDCConsumer) commitCoordinator(ctx context.Context, commitQueue <-chan kafka.Message) {
+	const commitBatchSize = 128
+	const commitFlushInterval = 100 * time.Millisecond
+
+	batch := make([]kafka.Message, 0, commitBatchSize)
+	timer := time.NewTimer(commitFlushInterval)
+	defer timer.Stop()
+
+	flush := func() {
+		if len(batch) == 0 {
+			return
+		}
+		if err := c.reader.CommitMessages(ctx, batch...); err != nil && !errors.Is(err, context.Canceled) {
+			observability.CommitErrors.Inc()
+			log.Printf("batch commit error (%d msgs): %v", len(batch), err)
+		}
+		batch = batch[:0]
+	}
+
 	for {
 		select {
 		case msg, ok := <-commitQueue:
 			if !ok {
+				flush()
 				return
 			}
 
 			observability.CommitQueueDepth.Set(float64(len(commitQueue)))
+			batch = append(batch, msg)
 
-			if err := c.reader.CommitMessages(ctx, msg); err != nil && !errors.Is(err, context.Canceled) {
-				observability.CommitErrors.Inc()
-				log.Printf(
-					"commit error partition=%d offset=%d err=%v",
-					msg.Partition,
-					msg.Offset,
-					err,
-				)
+			if len(batch) >= commitBatchSize {
+				flush()
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				timer.Reset(commitFlushInterval)
 			}
 
+		case <-timer.C:
+			flush()
+			timer.Reset(commitFlushInterval)
+
 		case <-ctx.Done():
+			flush()
 			return
 		}
 	}

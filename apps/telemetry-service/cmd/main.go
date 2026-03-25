@@ -24,6 +24,7 @@ import (
 	grpcserver "github.com/pahuldeepp/grainguard/apps/telemetry-service/internal/grpc"
 	"github.com/pahuldeepp/grainguard/apps/telemetry-service/internal/grpc/interceptors"
 	"github.com/pahuldeepp/grainguard/apps/telemetry-service/internal/repository"
+	"github.com/pahuldeepp/grainguard/apps/telemetry-service/internal/worker"
 	"github.com/pahuldeepp/grainguard/apps/telemetry-service/migrations"
 	"github.com/pahuldeepp/grainguard/libs/health"
 	"github.com/pahuldeepp/grainguard/libs/logger"
@@ -89,8 +90,12 @@ func main() {
 	telemetryRepo := repository.NewPostgresTelemetryRepository(pool)
 	outboxRepo    := repository.NewPostgresOutboxRepository(pool)
 
+	// Outbox relay worker
+	outboxWorker := worker.NewOutboxWorker(pool)
+	go outboxWorker.Start(ctx)
+
 	// Application services
-	createDeviceService    := application.NewCreateDeviceService(deviceRepo)
+	createDeviceService    := application.NewCreateDeviceService(pool, deviceRepo, outboxRepo)
 	recordTelemetryService := application.NewRecordTelemetryService(pool, telemetryRepo, outboxRepo)
 
 	// Auth

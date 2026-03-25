@@ -31,16 +31,21 @@ const proto = grpc.loadPackageDefinition(packageDefinition) as any;
 // volumes:
 //   - ../certs:/certs
 
-const ca = fs.readFileSync("/certs/ca.crt");
-const clientCert = fs.readFileSync("/certs/gateway-client.crt");
-const clientKey = fs.readFileSync("/certs/gateway-client.key");
+
+
+
 
 // Secure TLS credentials
-const credentials = grpc.credentials.createSsl(
-  ca,
-  clientKey,
-  clientCert
-);
+const credentials = !fs.existsSync("/certs/ca.crt")
+  ? grpc.credentials.createInsecure()
+  : grpc.credentials.createSsl(
+      fs.readFileSync("/certs/ca.crt"),
+      fs.readFileSync("/certs/gateway-client.key"),
+      fs.readFileSync("/certs/gateway-client.crt")
+    );
+
+
+
 
 /* =========================================
    🎯 Create Secure gRPC Client
@@ -65,10 +70,10 @@ export function createDevice(
   return new Promise((resolve, reject) => {
     const metadata = new grpc.Metadata();
 
-    // 🔥 Correlation ID
+    // Correlation ID
     if (requestId) metadata.set("x-request-id", requestId);
 
-    // 🔐 Tenant isolation
+    // Tenant isolation
     metadata.set("x-tenant-id", tenantId);
 
     // Optional user propagation
@@ -79,12 +84,16 @@ export function createDevice(
       metadata.set("authorization", jwtToken);
     }
 
+    // 10s deadline — prevents hanging if telemetry-service is down
+    const deadline = new Date(Date.now() + 10_000);
+
     client.CreateDevice(
       {
         tenant_id: tenantId,
         serial_number: serial,
       },
       metadata,
+      { deadline },
       (err: any, response: any) => {
         if (err) {
           return reject(err);

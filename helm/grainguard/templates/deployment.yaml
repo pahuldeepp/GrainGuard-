@@ -1,0 +1,80 @@
+{{- range $svcName, $svc := .Values.services }}
+{{- if $svc.enabled }}
+{{- $cfg := index $.Values $svcName | default dict }}
+{{- if and $cfg $cfg.image $cfg.image.repository }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $svcName }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "grainguard.labels" $ | nindent 4 }}
+    app.kubernetes.io/name: {{ $svcName }}
+spec:
+  replicas: {{ $cfg.replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $svcName }}
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $svcName }}
+        app.kubernetes.io/instance: {{ $.Release.Name }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: {{ $svcName }}
+          image: "{{ $cfg.image.repository }}:{{ $cfg.image.tag | default "latest" }}"
+          imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+          ports:
+            - containerPort: {{ $cfg.port }}
+              protocol: TCP
+          {{- if $cfg.resources }}
+          resources:
+            {{- toYaml $cfg.resources | nindent 12 }}
+          {{- end }}
+          envFrom:
+            - secretRef:
+                name: {{ $.Values.secrets.existingSecret }}
+          env:
+            - name: KAFKA_BROKERS
+              value: {{ $.Values.kafka.brokers }}
+            - name: REDIS_HOST
+              value: {{ $.Values.redis.host }}
+            - name: POSTGRES_HOST
+              value: {{ $.Values.postgresql.host }}
+            {{- if $cfg.env }}
+            {{- range $k, $v := $cfg.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            {{- end }}
+          {{- if and $cfg.probeOverride $cfg.probeOverride.liveness }}
+          livenessProbe:
+            {{- toYaml $cfg.probeOverride.liveness | nindent 12 }}
+          {{- else }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ $cfg.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          {{- end }}
+          {{- if and $cfg.probeOverride $cfg.probeOverride.readiness }}
+          readinessProbe:
+            {{- toYaml $cfg.probeOverride.readiness | nindent 12 }}
+          {{- else }}
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: {{ $cfg.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

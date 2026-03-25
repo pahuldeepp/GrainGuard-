@@ -2,176 +2,183 @@ import { Channel } from "amqplib";
 import { QUEUES, EmailJob } from "../queues";
 import { db } from "../db";
 
-const DEFAULT_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
-
-interface DigestUser {
-  user_id: string;
-  email: string;
-  tenant_id: string;
-}
-
-interface TenantDigestData {
-  alertCount: number;
-  deviceCount: number;
-  criticalDevices: Array<{ serial_number: string; alert_type: string; value: number }>;
-}
+// Default: run weekly (every 7 days). Override with DIGEST_INTERVAL_MS env var.
+const DIGEST_INTERVAL_MS =
+  parseInt(process.env.DIGEST_INTERVAL_MS || "", 10) ||
+  7 * 24 * 60 * 60 * 1000;
 
 /**
- * Fetch all users who have opted in to the weekly email digest.
+ * Gather digest data for a tenant and send a summary email to each
+ * user who has email_weekly_digest = true.
  */
-async function getDigestSubscribers(): Promise<DigestUser[]> {
-  const result = await db.query<DigestUser>(
-    `SELECT np.user_id, tu.email, tu.tenant_id
-     FROM notification_preferences np
-     JOIN tenant_users tu ON tu.id = np.user_id
-     WHERE np.email_weekly_digest = true`
+async function sendDigestForTenant(
+  tenantId: string,
+  tenantName: string,
+  channel: Channel
+): Promise<number> {
+  // 1. Find users who opted in to weekly digest
+  const { rows: users } = await db.query(
+    `SELECT tu.email, np.alert_levels
+     FROM tenant_users tu
+     JOIN notification_preferences np
+       ON np.tenant_id = tu.tenant_id AND np.user_id = tu.auth_user_id
+     WHERE tu.tenant_id = $1 AND np.email_weekly_digest = TRUE`,
+    [tenantId]
   );
-  return result.rows;
-}
 
-/**
- * Gather digest stats for a single tenant over the past 7 days.
- */
-async function getTenantDigestData(tenantId: string): Promise<TenantDigestData> {
-  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  if (users.length === 0) return 0;
 
-  const [alertResult, deviceResult, criticalResult] = await Promise.all([
-    db.query<{ count: string }>(
-      `SELECT COUNT(*) AS count
-       FROM alerts
-       WHERE tenant_id = $1 AND created_at >= $2`,
-      [tenantId, sevenDaysAgo]
-    ),
-    db.query<{ count: string }>(
-      `SELECT COUNT(*) AS count
-       FROM devices
-       WHERE tenant_id = $1`,
-      [tenantId]
-    ),
-    db.query<{ serial_number: string; alert_type: string; value: number }>(
-      `SELECT DISTINCT ON (d.serial_number) d.serial_number, a.alert_type, a.value
-       FROM alerts a
-       JOIN devices d ON d.id = a.device_id
-       WHERE a.tenant_id = $1
-         AND a.created_at >= $2
-         AND a.level = 'critical'
-       ORDER BY d.serial_number, a.created_at DESC`,
-      [tenantId, sevenDaysAgo]
-    ),
-  ]);
+  // 2. Gather stats for the past 7 days
+  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-  return {
-    alertCount: parseInt(alertResult.rows[0]?.count || "0", 10),
-    deviceCount: parseInt(deviceResult.rows[0]?.count || "0", 10),
-    criticalDevices: criticalResult.rows,
-  };
-}
+  const [alertCountResult, deviceCountResult, criticalResult] =
+    await Promise.all([
+      db.query(
+        `SELECT COUNT(*) AS cnt FROM audit_events
+         WHERE tenant_id = $1 AND event_type LIKE 'alert%' AND created_at >= $2`,
+        [tenantId, weekAgo]
+      ),
+      db.query(
+        "SELECT COUNT(*) AS cnt FROM devices WHERE tenant_id = $1",
+        [tenantId]
+      ),
+      db.query(
+        `SELECT COUNT(*) AS cnt FROM audit_events
+         WHERE tenant_id = $1 AND event_type LIKE 'alert%'
+           AND created_at >= $2
+           AND payload->>'level' = 'critical'`,
+        [tenantId, weekAgo]
+      ),
+    ]);
 
-/**
- * Build an HTML digest email body.
- */
-function buildDigestHtml(tenantId: string, data: TenantDigestData): string {
-  const criticalSection =
-    data.criticalDevices.length > 0
-      ? `
-        <h3>Critical Devices</h3>
-        <ul>
-          ${data.criticalDevices
-            .map(
-              (d) =>
-                `<li><strong>${d.serial_number}</strong> &mdash; ${d.alert_type} at ${d.value}</li>`
-            )
-            .join("\n          ")}
-        </ul>`
-      : "<p>No critical device readings this week.</p>";
+  const alertCount = parseInt(alertCountResult.rows[0]?.cnt || "0", 10);
+  const deviceCount = parseInt(deviceCountResult.rows[0]?.cnt || "0", 10);
+  const criticalCount = parseInt(criticalResult.rows[0]?.cnt || "0", 10);
 
-  return `
-    <h2>GrainGuard Weekly Digest</h2>
-    <p>Here is your weekly summary for tenant <strong>${tenantId}</strong>:</p>
-    <table border="1" cellpadding="8" cellspacing="0" style="border-collapse:collapse;">
-      <tr><td><strong>Total Alerts (7 days)</strong></td><td>${data.alertCount}</td></tr>
-      <tr><td><strong>Active Devices</strong></td><td>${data.deviceCount}</td></tr>
-      <tr><td><strong>Critical Devices</strong></td><td>${data.criticalDevices.length}</td></tr>
-    </table>
-    ${criticalSection}
-    <p style="color:#888;font-size:12px;">
-      This digest is sent weekly. Manage your preferences in the GrainGuard dashboard.
-    </p>
+  // 3. Build HTML digest
+  const html = `
+    <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+      <h2 style="color:#16a34a">GrainGuard Weekly Digest</h2>
+      <p>Here's your weekly summary for <strong>${tenantName}</strong>:</p>
+
+      <table style="width:100%;border-collapse:collapse;margin:16px 0">
+        <tr style="background:#f3f4f6">
+          <td style="padding:8px 12px;border:1px solid #e5e7eb"><strong>Total Devices</strong></td>
+          <td style="padding:8px 12px;border:1px solid #e5e7eb">${deviceCount}</td>
+        </tr>
+        <tr>
+          <td style="padding:8px 12px;border:1px solid #e5e7eb"><strong>Alerts (7d)</strong></td>
+          <td style="padding:8px 12px;border:1px solid #e5e7eb">${alertCount}</td>
+        </tr>
+        <tr style="background:#f3f4f6">
+          <td style="padding:8px 12px;border:1px solid #e5e7eb"><strong>Critical Alerts (7d)</strong></td>
+          <td style="padding:8px 12px;border:1px solid #e5e7eb;${criticalCount > 0 ? "color:#dc2626;font-weight:bold" : ""}">${criticalCount}</td>
+        </tr>
+      </table>
+
+      ${criticalCount > 0 ? '<p style="color:#dc2626">⚠️ You had critical alerts this week. Review them in your dashboard.</p>' : '<p style="color:#16a34a">✅ No critical alerts this week.</p>'}
+
+      <p style="margin-top:24px">
+        <a href="${process.env.DASHBOARD_URL || "https://app.grainguard.com"}"
+           style="background:#16a34a;color:#fff;padding:10px 20px;text-decoration:none;border-radius:6px">
+          Open Dashboard
+        </a>
+      </p>
+
+      <hr style="margin-top:32px;border:none;border-top:1px solid #e5e7eb"/>
+      <p style="color:#9ca3af;font-size:12px">
+        You're receiving this because you enabled weekly digests.
+        <a href="${process.env.DASHBOARD_URL || "https://app.grainguard.com"}/settings">Manage preferences</a>
+      </p>
+    </div>
   `.trim();
+
+  // 4. Publish an email job for each opted-in user
+  for (const user of users) {
+    const emailJob: EmailJob = {
+      to: user.email,
+      type: "usage_warning", // closest existing type for digest
+      subject: `GrainGuard Weekly Digest — ${tenantName}`,
+      body: html,
+      tenantId,
+    };
+
+    channel.sendToQueue(
+      QUEUES.EMAILS,
+      Buffer.from(JSON.stringify(emailJob)),
+      { persistent: true }
+    );
+  }
+
+  return users.length;
 }
 
 /**
- * Run one cycle of the digest: fetch subscribers, gather data, publish emails.
+ * Run the digest cycle for all tenants that have users subscribed.
  */
 async function runDigestCycle(channel: Channel): Promise<void> {
   console.log("[digest] starting weekly digest cycle");
 
-  const subscribers = await getDigestSubscribers();
+  try {
+    // Find all tenants that have at least one user with email_weekly_digest
+    const { rows: tenants } = await db.query(
+      `SELECT DISTINCT t.id, t.name
+       FROM tenants t
+       JOIN notification_preferences np ON np.tenant_id = t.id
+       WHERE np.email_weekly_digest = TRUE`
+    );
 
-  if (subscribers.length === 0) {
-    console.log("[digest] no subscribers — skipping");
-    return;
-  }
+    let totalEmails = 0;
 
-  // Group subscribers by tenant to avoid redundant queries
-  const byTenant = new Map<string, DigestUser[]>();
-  for (const sub of subscribers) {
-    const list = byTenant.get(sub.tenant_id) || [];
-    list.push(sub);
-    byTenant.set(sub.tenant_id, list);
-  }
-
-  let emailCount = 0;
-
-  for (const [tenantId, users] of byTenant) {
-    let data: TenantDigestData;
-    try {
-      data = await getTenantDigestData(tenantId);
-    } catch (err) {
-      console.error(`[digest] failed to gather data for tenant=${tenantId}:`, err);
-      continue;
+    for (const tenant of tenants) {
+      try {
+        const count = await sendDigestForTenant(
+          tenant.id,
+          tenant.name,
+          channel
+        );
+        totalEmails += count;
+        console.log(
+          `[digest] tenant=${tenant.name} — ${count} digest emails queued`
+        );
+      } catch (err) {
+        console.error(
+          `[digest] error processing tenant ${tenant.id}:`,
+          err
+        );
+      }
     }
 
-    const html = buildDigestHtml(tenantId, data);
-
-    for (const user of users) {
-      const emailJob: EmailJob = {
-        to: user.email,
-        type: "usage_warning", // closest existing type for digest emails
-        subject: `GrainGuard Weekly Digest — ${data.alertCount} alerts, ${data.deviceCount} devices`,
-        body: html,
-        tenantId,
-      };
-
-      channel.sendToQueue(
-        QUEUES.EMAILS,
-        Buffer.from(JSON.stringify(emailJob)),
-        { persistent: true }
-      );
-
-      emailCount++;
-    }
-
-    console.log(`[digest] queued ${users.length} digest emails for tenant=${tenantId}`);
+    console.log(
+      `[digest] cycle complete — ${tenants.length} tenants, ${totalEmails} emails`
+    );
+  } catch (err) {
+    console.error("[digest] cycle failed:", err);
   }
-
-  console.log(`[digest] cycle complete — ${emailCount} total emails queued`);
 }
 
 /**
- * Start the digest scheduler. Runs the digest cycle on a configurable interval.
+ * Start the digest scheduler. Runs the digest cycle immediately on startup
+ * (if DIGEST_RUN_ON_START=true) then every DIGEST_INTERVAL_MS.
  */
 export function startDigestScheduler(channel: Channel): void {
-  const intervalMs = parseInt(process.env.DIGEST_INTERVAL_MS || "", 10) || DEFAULT_INTERVAL_MS;
+  console.log(
+    `[digest] scheduler started — interval=${Math.round(DIGEST_INTERVAL_MS / 3600000)}h`
+  );
 
-  console.log(`[digest] scheduler started — interval=${intervalMs}ms (${Math.round(intervalMs / 3600000)}h)`);
+  // Run on a regular interval
+  const timer = setInterval(() => {
+    runDigestCycle(channel).catch((err) =>
+      console.error("[digest] unhandled error:", err)
+    );
+  }, DIGEST_INTERVAL_MS);
 
-  // Run on interval
-  setInterval(async () => {
-    try {
-      await runDigestCycle(channel);
-    } catch (err) {
-      console.error("[digest] cycle failed:", err);
-    }
-  }, intervalMs);
+  timer.unref(); // don't block process exit
+
+  // Optionally run immediately on startup (useful for testing)
+  if (process.env.DIGEST_RUN_ON_START === "true") {
+    runDigestCycle(channel).catch((err) =>
+      console.error("[digest] initial run failed:", err)
+    );
+  }
 }

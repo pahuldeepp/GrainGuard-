@@ -1,124 +1,64 @@
 import { Router, Request, Response } from "express";
-import { authMiddleware } from "../middleware/auth";
-import { pool } from "../database/db";
+import { writePool as pool } from "../database/db";
+import { setUserTenantId, assignRoleByName } from "../lib/auth0Management";
+import { publicRateLimiter } from "../middleware/rateLimiting";
+import { v4 as uuidv4 } from "uuid";
 
 export const tenantsRouter = Router();
 
-// ── GET /tenants/me ────────────────────────────────────────────────────────────
-// Returns the current tenant's profile — name, plan, trial status, user count.
-// The dashboard calls this on load to populate the settings page.
-tenantsRouter.get(
-  "/tenants/me",
-  authMiddleware,                           // must carry a valid JWT
-  async (req: Request, res: Response) => {
-    const tenantId = req.user!.tenantId;    // extracted from JWT by authMiddleware
+// Public endpoint — called during signup before JWT exists
+// Rate-limited by IP to prevent abuse (scoped here, not at app.use level)
+tenantsRouter.post("/tenants/register", publicRateLimiter, async (req: Request, res: Response) => {
+  const { orgName, email, authUserId } = req.body as {
+    orgName: string;
+    email: string;
+    authUserId: string;
+  };
 
-    const row = await pool.query(
-      `SELECT id, name, email, plan, subscription_status,
-              trial_ends_at, current_period_end, created_at
-       FROM tenants WHERE id = $1`,
-      [tenantId]
-    );
-
-    if (row.rows.length === 0) {
-      return res.status(404).json({ error: "tenant_not_found" });
-    }
-
-    return res.json(row.rows[0]);
+  if (!orgName?.trim() || !email?.trim() || !authUserId?.trim()) {
+    return res.status(400).json({ error: "orgName, email and authUserId are required" });
   }
-);
 
-// ── GET /tenants/me/users ──────────────────────────────────────────────────────
-// Lists all users that belong to this tenant, with their roles.
-// Used by the admin panel to show who has access to the account.
-tenantsRouter.get(
-  "/tenants/me/users",
-  authMiddleware,
-  async (req: Request, res: Response) => {
-    const tenantId = req.user!.tenantId;
+  const tenantId = uuidv4();
+  const slug = orgName.toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-");
 
-    // Only admins should see the full user list
-    if (!req.user!.roles?.includes("admin")) {
-      return res.status(403).json({ error: "forbidden" });
-    }
-
-    const rows = await pool.query(
-      `SELECT u.id, u.email, tu.role, tu.created_at AS joined_at
-       FROM tenant_users tu
-       JOIN users u ON u.id = tu.user_id
-       WHERE tu.tenant_id = $1
-       ORDER BY tu.created_at ASC`,
-      [tenantId]
-    );
-
-    return res.json(rows.rows);
-  }
-);
-
-// ── POST /tenants/me/users ─────────────────────────────────────────────────────
-// Invites a new user to the tenant (or re-grants access if already registered).
-// Admin only — the invited email will receive an Auth0 invitation email.
-tenantsRouter.post(
-  "/tenants/me/users",
-  authMiddleware,
-  async (req: Request, res: Response) => {
-    const tenantId = req.user!.tenantId;
-
-    if (!req.user!.roles?.includes("admin")) {
-      return res.status(403).json({ error: "forbidden" });
-    }
-
-    const { email, role = "member" } = req.body as { email: string; role?: string };
-
-    if (!email) {
-      return res.status(400).json({ error: "email_required" });
-    }
-
-    // Allowed roles — prevents privilege escalation via API
-    const ALLOWED_ROLES = ["member", "viewer", "admin"];
-    if (!ALLOWED_ROLES.includes(role)) {
-      return res.status(400).json({ error: "invalid_role" });
-    }
-
-    // Upsert: if user already exists in this tenant update their role;
-    // otherwise insert a pending invite row (user_id will be filled on first login)
-    await pool.query(
-      `INSERT INTO tenant_invites (tenant_id, email, role, invited_by, invited_at)
-       VALUES ($1, $2, $3, $4, NOW())
-       ON CONFLICT (tenant_id, email) DO UPDATE
-         SET role = EXCLUDED.role,
-             invited_by = EXCLUDED.invited_by,
-             invited_at = NOW()`,
-      [tenantId, email.toLowerCase(), role, req.user!.sub]
-    );
-
-    return res.status(201).json({ invited: true, email, role });
-  }
-);
-
-// ── DELETE /tenants/me/users/:userId ──────────────────────────────────────────
-// Removes a user from the tenant. Admin can't remove themselves.
-tenantsRouter.delete(
-  "/tenants/me/users/:userId",
-  authMiddleware,
-  async (req: Request, res: Response) => {
-    const tenantId = req.user!.tenantId;
-    const { userId } = req.params;
-
-    if (!req.user!.roles?.includes("admin")) {
-      return res.status(403).json({ error: "forbidden" });
-    }
-
-    // Prevent self-removal — an org with no admin is unrecoverable
-    if (req.user!.sub === userId) {
-      return res.status(400).json({ error: "cannot_remove_self" });
-    }
+  try {
+    await pool.query("BEGIN");
 
     await pool.query(
-      "DELETE FROM tenant_users WHERE tenant_id = $1 AND user_id = $2",
-      [tenantId, userId]
+      `INSERT INTO tenants (id, name, slug, email, plan, subscription_status, created_at)
+       VALUES ($1, $2, $3, $4, 'free', 'trialing', NOW())`,
+      [tenantId, orgName.trim(), slug, email.trim()]
     );
 
-    return res.json({ removed: true });
+    // Create first admin user record
+    await pool.query(
+      `INSERT INTO tenant_users (id, tenant_id, auth_user_id, email, role, created_at)
+       VALUES ($1, $2, $3, $4, 'admin', NOW())`,
+      [uuidv4(), tenantId, authUserId, email.trim()]
+    );
+
+    await pool.query("COMMIT");
+
+    // Set tenant_id in Auth0 app_metadata so it appears in all future JWTs.
+    // Also assign the admin role so the first user gets full access.
+    // Both are non-fatal — DB record is the source of truth.
+    await Promise.all([
+      setUserTenantId(authUserId, tenantId).catch((e) =>
+        console.error("[tenants] failed to set Auth0 app_metadata:", e)
+      ),
+      assignRoleByName(authUserId, "admin").catch((e) =>
+        console.error("[tenants] failed to assign admin role:", e)
+      ),
+    ]);
+
+    return res.status(201).json({ tenantId, slug });
+  } catch (err: any) {
+    await pool.query("ROLLBACK");
+    if (err.code === "23505") {
+      return res.status(409).json({ error: "organisation already exists" });
+    }
+    console.error("[tenants] register error:", err);
+    return res.status(500).json({ error: "internal_error" });
   }
-);
+});

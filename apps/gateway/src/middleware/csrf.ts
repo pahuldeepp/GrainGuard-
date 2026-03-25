@@ -1,64 +1,92 @@
 import { Request, Response, NextFunction } from "express";
 import crypto from "crypto";
 
+const CSRF_SECRET = process.env.CSRF_SECRET || crypto.randomBytes(32).toString("hex");
 const CSRF_HEADER = "x-csrf-token";
-const CSRF_COOKIE = "__Host-csrf";
-const TOKEN_BYTES = 32;
+const CSRF_COOKIE = "_csrf";
+const TOKEN_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
+
+// Safe methods that don't require CSRF validation
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
-// Cookie flags: __Host- prefix forces Secure + no Domain + Path=/
-// which is the strongest CSRF protection available in browsers
+// Paths exempt from CSRF (webhooks from external services, not browsers)
+const EXEMPT_PATHS = new Set(["/billing/webhook", "/ingest"]);
+
 function generateToken(): string {
-  return crypto.randomBytes(TOKEN_BYTES).toString("hex");
+  const timestamp = Date.now().toString(36);
+  const random = crypto.randomBytes(18).toString("hex");
+  const payload = `${timestamp}.${random}`;
+  const sig = crypto
+    .createHmac("sha256", CSRF_SECRET)
+    .update(payload)
+    .digest("hex")
+    .slice(0, 16);
+  return `${payload}.${sig}`;
 }
 
-function setCsrfCookie(res: Response, token: string): void {
-  res.cookie(CSRF_COOKIE, token, {
-    httpOnly: false,   // JS must read it to send in header
-    secure: true,
-    sameSite: "strict",
-    path: "/",
-  });
+function validateToken(token: string): boolean {
+  if (!token || typeof token !== "string") return false;
+  const parts = token.split(".");
+  if (parts.length !== 3) return false;
+
+  const [timestamp, random, sig] = parts;
+  const payload = `${timestamp}.${random}`;
+  const expectedSig = crypto
+    .createHmac("sha256", CSRF_SECRET)
+    .update(payload)
+    .digest("hex")
+    .slice(0, 16);
+
+  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig))) {
+    return false;
+  }
+
+  // Check token age
+  const created = parseInt(timestamp, 36);
+  if (isNaN(created) || Date.now() - created > TOKEN_TTL_MS) {
+    return false;
+  }
+
+  return true;
 }
 
 export function csrfProtection() {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    // Issue a token on GET if not present
+  return (req: Request, res: Response, next: NextFunction) => {
+    // Always issue a fresh token on safe methods so the SPA can read it
     if (SAFE_METHODS.has(req.method)) {
-      if (!req.cookies?.[CSRF_COOKIE]) {
-        setCsrfCookie(res, generateToken());
-      }
+      const token = generateToken();
+      res.cookie(CSRF_COOKIE, token, {
+        httpOnly: false, // JS must read this to set the header
+        sameSite: "strict",
+        secure: process.env.NODE_ENV === "production",
+        maxAge: TOKEN_TTL_MS,
+        path: "/",
+      });
       return next();
     }
 
-    // Enforce on state-mutating methods
-    const cookieToken = req.cookies?.[CSRF_COOKIE];
+    // Skip CSRF for exempt paths (Stripe webhooks, device ingest)
+    if (EXEMPT_PATHS.has(req.path)) {
+      return next();
+    }
+
+    // Mutating request — validate token
     const headerToken = req.headers[CSRF_HEADER] as string | undefined;
+    const cookieToken = req.cookies?.[CSRF_COOKIE] as string | undefined;
 
-    if (!cookieToken || !headerToken) {
-      res.status(403).json({ error: "csrf_missing", message: "CSRF token required" });
-      return;
+    // Double-submit: header must match cookie, and both must be valid
+    if (!headerToken || !cookieToken) {
+      return res.status(403).json({ error: "csrf_token_missing" });
     }
 
-    // Constant-time comparison to prevent timing attacks
-    // Pad both buffers to fixed length so length differences don't leak info
-    const expectedLen = TOKEN_BYTES; // 32 bytes = 64 hex chars
-    const cookieBuf = Buffer.alloc(expectedLen);
-    const headerBuf = Buffer.alloc(expectedLen);
-    const cookieRaw = Buffer.from(cookieToken, "hex");
-    const headerRaw = Buffer.from(headerToken, "hex");
-    cookieRaw.copy(cookieBuf, 0, 0, Math.min(cookieRaw.length, expectedLen));
-    headerRaw.copy(headerBuf, 0, 0, Math.min(headerRaw.length, expectedLen));
-
-    const lengthMatch = cookieRaw.length === expectedLen && headerRaw.length === expectedLen;
-    if (!lengthMatch || !crypto.timingSafeEqual(cookieBuf, headerBuf)) {
-      res.status(403).json({ error: "csrf_invalid", message: "CSRF token mismatch" });
-      return;
+    if (headerToken !== cookieToken) {
+      return res.status(403).json({ error: "csrf_token_mismatch" });
     }
 
-    // Rotate token after each mutating request
-    const newToken = generateToken();
-    setCsrfCookie(res, newToken);
-    next();
+    if (!validateToken(headerToken)) {
+      return res.status(403).json({ error: "csrf_token_invalid" });
+    }
+
+    return next();
   };
 }

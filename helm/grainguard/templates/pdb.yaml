@@ -1,0 +1,19 @@
+{{- range $svcName, $svc := .Values.services }}
+{{- if $svc.enabled }}
+{{- $cfg := index $.Values $svcName | default dict }}
+{{- if and $cfg $cfg.pdb $cfg.pdb.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $svcName }}-pdb
+  namespace: {{ $.Release.Namespace }}
+spec:
+  minAvailable: {{ $cfg.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $svcName }}
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+{{- end }}
+{{- end }}
+{{- end }}

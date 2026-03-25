@@ -9,92 +9,138 @@ function retryDelay(attempt: number): number {
   return Math.min(Math.random() * base + base, 30000);
 }
 
-interface NotificationPref {
-  email: string;
-  email_alerts: boolean;
-  alert_levels: string[];
-}
+/**
+ * Check if a recipient should receive email alerts based on their
+ * notification preferences. Returns true if no preferences are set
+ * (default: send alerts).
+ */
+async function shouldSendEmail(
+  tenantId: string,
+  recipientEmail: string,
+  alertLevel: string
+): Promise<boolean> {
+  try {
+    // Look up user_id from tenant_users
+    const { rows: userRows } = await db.query(
+      `SELECT tu.auth_user_id
+       FROM tenant_users tu
+       WHERE tu.tenant_id = $1 AND LOWER(tu.email) = LOWER($2)`,
+      [tenantId, recipientEmail]
+    );
 
-interface WebhookEndpoint {
-  id: string;
-  url: string;
-  secret: string;
-  event_types: string[];
+    if (userRows.length === 0) {
+      // User not found in DB — send email anyway (could be an external recipient)
+      return true;
+    }
+
+    const userId = userRows[0].auth_user_id;
+
+    // Check notification preferences
+    const { rows: prefRows } = await db.query(
+      `SELECT email_alerts, alert_levels
+       FROM notification_preferences
+       WHERE tenant_id = $1 AND user_id = $2`,
+      [tenantId, userId]
+    );
+
+    if (prefRows.length === 0) {
+      // No preferences set — use defaults (send all alerts)
+      return true;
+    }
+
+    const prefs = prefRows[0];
+
+    // Check if email alerts are enabled
+    if (!prefs.email_alerts) return false;
+
+    // Check if the alert level is in the user's preferred levels
+    const levels: string[] = prefs.alert_levels || ["warn", "critical"];
+    if (alertLevel && !levels.includes(alertLevel)) return false;
+
+    return true;
+  } catch (err) {
+    // On DB error, default to sending (fail open for alerts)
+    console.error("[alert] pref check failed, defaulting to send:", err);
+    return true;
+  }
 }
 
 /**
- * Look up notification preferences for the given recipient emails within a tenant.
- * Joins tenant_users -> notification_preferences to get per-user prefs.
+ * Fetch enabled webhook endpoints for a tenant that subscribe to telemetry.alert
+ * events, and publish a WebhookJob for each.
  */
-async function getRecipientPrefs(tenantId: string, emails: string[]): Promise<NotificationPref[]> {
-  if (emails.length === 0) return [];
+async function fanOutToWebhooks(
+  job: AlertJob,
+  channel: Channel
+): Promise<number> {
+  try {
+    const { rows: endpoints } = await db.query(
+      `SELECT id, url, secret, event_types
+       FROM webhook_endpoints
+       WHERE tenant_id = $1
+         AND enabled = TRUE
+         AND 'telemetry.alert' = ANY(event_types)`,
+      [job.tenantId]
+    );
 
-  const result = await db.query<NotificationPref>(
-    `SELECT tu.email, np.email_alerts, np.alert_levels
-     FROM tenant_users tu
-     JOIN notification_preferences np ON np.user_id = tu.id
-     WHERE tu.tenant_id = $1
-       AND tu.email = ANY($2)`,
-    [tenantId, emails]
-  );
+    for (const ep of endpoints) {
+      const webhookJob: WebhookJob = {
+        url: ep.url,
+        secret: ep.secret,
+        tenantId: job.tenantId,
+        eventType: "telemetry.alert",
+        endpointId: ep.id,
+        attempt: 0,
+        payload: {
+          event: "telemetry.alert",
+          timestamp: new Date().toISOString(),
+          data: {
+            deviceId: job.deviceId,
+            serialNumber: job.serialNumber,
+            alertType: job.alertType,
+            value: job.value,
+            threshold: job.threshold,
+            level: job.level || "warn",
+            score: job.score,
+          },
+        },
+      };
 
-  return result.rows;
-}
+      channel.sendToQueue(
+        QUEUES.WEBHOOKS,
+        Buffer.from(JSON.stringify(webhookJob)),
+        { persistent: true }
+      );
 
-/**
- * Fetch enabled webhook endpoints for a tenant that listen to telemetry.alert events.
- */
-async function getWebhookEndpoints(tenantId: string): Promise<WebhookEndpoint[]> {
-  const result = await db.query<WebhookEndpoint>(
-    `SELECT id, url, secret, event_types
-     FROM webhook_endpoints
-     WHERE tenant_id = $1
-       AND enabled = true
-       AND event_types @> ARRAY['telemetry.alert']::text[]`,
-    [tenantId]
-  );
+      console.log(
+        `[alert] queued webhook delivery to ${ep.url} endpoint=${ep.id}`
+      );
+    }
 
-  return result.rows;
+    return endpoints.length;
+  } catch (err) {
+    console.error("[alert] webhook fan-out failed:", err);
+    return 0;
+  }
 }
 
 async function processAlert(job: AlertJob, channel: Channel): Promise<void> {
-  // Validate required fields
-  if (!job.tenantId || !job.serialNumber || !job.alertType || job.value === undefined || job.threshold === undefined) {
-    throw new Error(`[alert] Invalid job: missing required fields`);
-  }
+  const alertLevel = job.level || "warn";
 
-  if (!Array.isArray(job.recipients) || job.recipients.length === 0) {
-    console.log(`[alert] no recipients specified, skipping email notifications`);
-  }
+  console.log(
+    `[alert] ${job.alertType} alert device=${job.serialNumber} ` +
+      `value=${job.value} threshold=${job.threshold} level=${alertLevel} ` +
+      `tenant=${job.tenantId}`
+  );
 
-  console.log(`[alert] ${job.alertType} alert device=${job.serialNumber} value=${job.value} threshold=${job.threshold} tenant=${job.tenantId}`);
-
-  const alertLevel = job.level || job.alertType;
-
-  // --- Email notifications with preference checks ---
-  const prefs = await getRecipientPrefs(job.tenantId, job.recipients);
-  const prefsByEmail = new Map(prefs.map((p) => [p.email, p]));
-
-  let emailCount = 0;
-
+  // ── Fan out to email recipients (respecting notification preferences) ──
+  let emailsSent = 0;
   for (const recipient of job.recipients) {
-    const pref = prefsByEmail.get(recipient);
-
-    // If no prefs found for user, skip (default deny)
-    if (!pref) {
-      console.log(`[alert] skipping ${recipient} — no notification preferences found`);
-      continue;
-    }
-
-    // Check email_alerts is enabled
-    if (!pref.email_alerts) {
-      console.log(`[alert] skipping ${recipient} — email_alerts disabled`);
-      continue;
-    }
-
-    // Check alert level is in the user's subscribed levels
-    if (pref.alert_levels && !pref.alert_levels.includes(alertLevel)) {
-      console.log(`[alert] skipping ${recipient} — level "${alertLevel}" not in user's alert_levels`);
+    const allowed = await shouldSendEmail(job.tenantId, recipient, alertLevel);
+    if (!allowed) {
+      console.log(
+        `[alert] skipping email to ${recipient} — preferences opted out`
+      );
       continue;
     }
 
@@ -103,10 +149,17 @@ async function processAlert(job: AlertJob, channel: Channel): Promise<void> {
       type: "alert",
       subject: `GrainGuard Alert: ${job.alertType} threshold exceeded on ${job.serialNumber}`,
       body: `
-        Device ${job.serialNumber} has exceeded the ${job.alertType} threshold.
-        Current value: ${job.value}
-        Threshold: ${job.threshold}
-        Time: ${new Date().toISOString()}
+        <h2>Alert: ${job.alertType} threshold exceeded</h2>
+        <p><strong>Device:</strong> ${job.serialNumber}</p>
+        <p><strong>Current value:</strong> ${job.value}</p>
+        <p><strong>Threshold:</strong> ${job.threshold}</p>
+        <p><strong>Severity:</strong> ${alertLevel}</p>
+        <p><strong>Time:</strong> ${new Date().toISOString()}</p>
+        <hr/>
+        <p style="color:#888;font-size:12px">
+          You can manage alert preferences in your
+          <a href="${process.env.DASHBOARD_URL || "https://app.grainguard.com"}/settings">Settings</a>.
+        </p>
       `.trim(),
       tenantId: job.tenantId,
     };
@@ -117,44 +170,17 @@ async function processAlert(job: AlertJob, channel: Channel): Promise<void> {
       { persistent: true }
     );
 
+    emailsSent++;
     console.log(`[alert] queued email notification to ${recipient}`);
-    emailCount++;
   }
 
-  // --- Webhook notifications ---
-  const endpoints = await getWebhookEndpoints(job.tenantId);
-  let webhookCount = 0;
+  // ── Fan out to webhook endpoints ──
+  const webhookCount = await fanOutToWebhooks(job, channel);
 
-  for (const endpoint of endpoints) {
-    const webhookJob: WebhookJob = {
-      url: endpoint.url,
-      secret: endpoint.secret,
-      eventType: "telemetry.alert",
-      tenantId: job.tenantId,
-      endpointId: endpoint.id,
-      attempt: 0,
-      payload: {
-        alertType: job.alertType,
-        level: alertLevel,
-        deviceId: job.deviceId,
-        serialNumber: job.serialNumber,
-        value: job.value,
-        threshold: job.threshold,
-        timestamp: new Date().toISOString(),
-      },
-    };
-
-    channel.sendToQueue(
-      QUEUES.WEBHOOKS,
-      Buffer.from(JSON.stringify(webhookJob)),
-      { persistent: true }
-    );
-
-    console.log(`[alert] queued webhook to ${endpoint.url} (endpoint=${endpoint.id})`);
-    webhookCount++;
-  }
-
-  console.log(`[alert] processed — ${emailCount} emails, ${webhookCount} webhooks queued`);
+  console.log(
+    `[alert] processed — ${emailsSent}/${job.recipients.length} emails, ` +
+      `${webhookCount} webhooks`
+  );
 }
 
 export function startAlertWorker(channel: Channel): void {
@@ -171,13 +197,17 @@ export function startAlertWorker(channel: Channel): void {
       return;
     }
 
-    const attempt = (msg.properties.headers?.["x-retry-count"] as number) || 0;
+    const attempt =
+      (msg.properties.headers?.["x-retry-count"] as number) || 0;
 
     try {
       await processAlert(job, channel);
       channel.ack(msg);
     } catch (err) {
-      console.error(`[alert] failed attempt ${attempt + 1}/${MAX_RETRIES}:`, err);
+      console.error(
+        `[alert] failed attempt ${attempt + 1}/${MAX_RETRIES}:`,
+        err
+      );
 
       if (attempt >= MAX_RETRIES - 1) {
         console.error(`[alert] max retries exceeded — routing to DLQ`);
@@ -187,14 +217,10 @@ export function startAlertWorker(channel: Channel): void {
         console.log(`[alert] retrying in ${Math.round(delay)}ms`);
         setTimeout(() => {
           channel.nack(msg, false, false);
-          channel.sendToQueue(
-            QUEUES.ALERTS,
-            msg.content,
-            {
-              persistent: true,
-              headers: { "x-retry-count": attempt + 1 },
-            }
-          );
+          channel.sendToQueue(QUEUES.ALERTS, msg.content, {
+            persistent: true,
+            headers: { "x-retry-count": attempt + 1 },
+          });
         }, delay);
       }
     }

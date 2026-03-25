@@ -46,9 +46,8 @@ export function BulkImportModal({ open, onClose, onSuccess }: Props) {
       const token = await getAccessTokenSilently();
 
       const formData = new FormData();
-      formData.append("file", file); // field name must be "file"
+      formData.append("file", file);
 
-      // fetch with ReadableStream to process SSE events
       const res = await fetch(`${GW}/devices/bulk`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
@@ -67,9 +66,8 @@ export function BulkImportModal({ open, onClose, onSuccess }: Props) {
 
         buffer += decoder.decode(value, { stream: true });
 
-        // SSE events are delimited by "\n\n"
         const parts = buffer.split("\n\n");
-        buffer = parts.pop() ?? ""; // last incomplete event stays in buffer
+        buffer = parts.pop() ?? "";
 
         for (const part of parts) {
           const line = part.replace(/^data: /, "").trim();
@@ -94,7 +92,7 @@ export function BulkImportModal({ open, onClose, onSuccess }: Props) {
               setImporting(false);
             }
           } catch {
-            // malformed JSON in buffer — skip
+            // malformed JSON — skip
           }
         }
       }
@@ -124,7 +122,6 @@ export function BulkImportModal({ open, onClose, onSuccess }: Props) {
           Upload a CSV file with one serial number per row. Max 1,000 rows per upload.
         </p>
 
-        {/* Template download */}
         <a
           href={`data:text/csv;charset=utf-8,serialNumber%0ASN00100001%0ASN00100002`}
           download="device-import-template.csv"
@@ -142,7 +139,7 @@ export function BulkImportModal({ open, onClose, onSuccess }: Props) {
                 accept=".csv,text/csv"
                 className="hidden"
                 id="csv-file"
-                onChange={() => {}} // controlled by form submit
+                onChange={() => {}}
               />
               <label
                 htmlFor="csv-file"
@@ -163,10 +160,8 @@ export function BulkImportModal({ open, onClose, onSuccess }: Props) {
           </form>
         )}
 
-        {/* Progress section */}
         {progress && (
           <div>
-            {/* Progress bar */}
             <div className="mb-3">
               <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400 mb-1">
                 <span>{progress.done} / {progress.total} processed</span>
@@ -185,7 +180,6 @@ export function BulkImportModal({ open, onClose, onSuccess }: Props) {
               )}
             </div>
 
-            {/* Event log */}
             <div className="h-40 overflow-y-auto font-mono text-xs bg-gray-50 dark:bg-gray-800 rounded-lg p-3 space-y-0.5">
               {log.map((line, i) => (
                 <div key={i} className={line.startsWith("✗") ? "text-red-600 dark:text-red-400" : "text-gray-700 dark:text-gray-300"}>
@@ -194,7 +188,6 @@ export function BulkImportModal({ open, onClose, onSuccess }: Props) {
               ))}
             </div>
 
-            {/* Done state */}
             {progress.finished && (
               <div className="mt-4 flex justify-end gap-3">
                 <button
@@ -208,7 +201,6 @@ export function BulkImportModal({ open, onClose, onSuccess }: Props) {
           </div>
         )}
 
-        {/* Spinner while importing */}
         {importing && !progress?.finished && (
           <div className="flex items-center gap-2 mt-3 text-sm text-gray-500 dark:text-gray-400">
             <span className="w-4 h-4 border-2 border-gray-300 border-t-green-600 rounded-full animate-spin" />

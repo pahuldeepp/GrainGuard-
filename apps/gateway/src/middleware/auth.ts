@@ -47,6 +47,16 @@ export async function authMiddleware(
   res: Response,
   next: NextFunction
 ) {
+  // Dev bypass: AUTH_ENABLED=false lets curl tests pass without a JWT.
+  // Only allowed in non-production environments.
+  if (process.env.AUTH_ENABLED === "false" && process.env.NODE_ENV !== "production") {
+    const tenantId =
+      (req.headers["x-tenant-id"] as string) ||
+      "11111111-1111-1111-1111-111111111111";
+    req.user = { sub: "dev-user", tenantId, roles: ["admin", "member"] };
+    return next();
+  }
+
   const authHeader = req.headers.authorization;
 
   if (!authHeader?.startsWith("Bearer ")) {
@@ -70,18 +80,20 @@ export async function authMiddleware(
 
     const tenantId =
       claims.tenant_id ||
-      (claims as any)["https://grainguard/tenant_id"];
+      (claims as any)["https://grainguard.com/tenant_id"];
 
     if (!tenantId) {
       return res.status(403).json({ error: "tenant_missing" });
     }
 
+    const rawRoles =
+      claims.roles ??
+      (claims as any)["https://grainguard.com/roles"];
+
     req.user = {
       sub: String(claims.sub || ""),
       tenantId: String(tenantId),
-      roles: Array.isArray(claims.roles)
-        ? claims.roles.map(String)
-        : undefined,
+      roles: Array.isArray(rawRoles) ? rawRoles.map(String) : undefined,
       scopes:
         typeof claims.scope === "string"
           ? claims.scope.split(" ")

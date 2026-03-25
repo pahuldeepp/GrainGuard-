@@ -1,9 +1,11 @@
 import { Router, Request, Response } from "express";
 import { authMiddleware } from "../middleware/auth";
-import { pool } from "../database/db";
-import { requireActiveSubscription, requireFeature } from "../middleware/planEnforcement";
+import { apiRateLimiter } from "../middleware/rateLimiting";
+import { writePool as pool } from "../database/db";
 
 export const auditLogRouter = Router();
+
+auditLogRouter.use(apiRateLimiter);
 
 // ── GET /audit-logs ────────────────────────────────────────────────────────────
 // Returns paginated audit events for the current tenant.
@@ -74,8 +76,6 @@ auditLogRouter.get(
 auditLogRouter.get(
   "/audit-logs/export",
   authMiddleware,
-  requireActiveSubscription(),
-  requireFeature("auditLogExport"),
   async (req: Request, res: Response) => {
     if (!req.user!.roles?.includes("admin")) {
       return res.status(403).json({ error: "forbidden" });

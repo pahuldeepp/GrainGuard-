@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -68,19 +69,40 @@ func (h *Handler) Live(w http.ResponseWriter, r *http.Request) {
 // Ready → /healthz/ready
 // Readiness probe: can this pod accept traffic right now?
 // K8s stops routing to this pod (no restart) until it passes again.
+// All checkers run in parallel for minimum latency.
 func (h *Handler) Ready(w http.ResponseWriter, r *http.Request) {
 	// 3s timeout — never let a hung dep block the probe forever
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 
-	resp := response{Status: "ok", Checks: make(map[string]string)}
+	type checkResult struct {
+		name string
+		err  error
+	}
 
-	for _, c := range h.checkers {
-		if err := c.Check(ctx); err != nil {
+	results := make([]checkResult, len(h.checkers))
+	var wg sync.WaitGroup
+
+	for i, c := range h.checkers {
+		wg.Add(1)
+		go func(idx int, checker Checker) {
+			defer wg.Done()
+			results[idx] = checkResult{
+				name: checker.Name(),
+				err:  checker.Check(ctx),
+			}
+		}(i, c)
+	}
+
+	wg.Wait()
+
+	resp := response{Status: "ok", Checks: make(map[string]string)}
+	for _, r := range results {
+		if r.err != nil {
 			resp.Status = "degraded"
-			resp.Checks[c.Name()] = err.Error()
+			resp.Checks[r.name] = r.err.Error()
 		} else {
-			resp.Checks[c.Name()] = "ok"
+			resp.Checks[r.name] = "ok"
 		}
 	}
 

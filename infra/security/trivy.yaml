@@ -1,0 +1,27 @@
+# Trivy configuration — vulnerability + secret + misconfiguration scanning
+version: "0.1"
+
+scan:
+  security-checks:
+    - vuln
+    - secret
+    - misconfig
+  severity:
+    - CRITICAL
+    - HIGH
+  exit-code: 1
+
+vulnerability:
+  ignore-unfixed: true
+  type:
+    - os
+    - library
+
+secret:
+  config: infra/security/trivy-secret.yaml
+
+misconfiguration:
+  include-non-failures: false
+
+cache:
+  dir: /tmp/trivy-cache

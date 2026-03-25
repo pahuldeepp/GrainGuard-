@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { authMiddleware } from "../middleware/auth";
-import { pool } from "../database/db";
-import { requireActiveSubscription, requireFeature } from "../middleware/planEnforcement";
+import { apiRateLimiter } from "../middleware/rateLimiting";
+import { writePool as pool } from "../database/db";
 import {
   createOrganization,
   createSamlConnection,
@@ -12,6 +12,8 @@ import {
 } from "../lib/auth0Management";
 
 export const ssoRouter = Router();
+
+ssoRouter.use(apiRateLimiter);
 
 // All SSO routes require the caller to be an admin of the tenant
 function requireAdmin(req: Request, res: Response): boolean {
@@ -53,8 +55,6 @@ ssoRouter.get(
 ssoRouter.post(
   "/tenants/me/sso/org",
   authMiddleware,
-  requireActiveSubscription(),
-  requireFeature("sso"),
   async (req: Request, res: Response) => {
     if (!requireAdmin(req, res)) return;
     const tenantId = req.user!.tenantId;
@@ -90,8 +90,6 @@ ssoRouter.post(
 ssoRouter.post(
   "/tenants/me/sso/saml",
   authMiddleware,
-  requireActiveSubscription(),
-  requireFeature("sso"),
   async (req: Request, res: Response) => {
     if (!requireAdmin(req, res)) return;
     const tenantId = req.user!.tenantId;
@@ -150,8 +148,6 @@ ssoRouter.post(
 ssoRouter.post(
   "/tenants/me/sso/oidc",
   authMiddleware,
-  requireActiveSubscription(),
-  requireFeature("sso"),
   async (req: Request, res: Response) => {
     if (!requireAdmin(req, res)) return;
     const tenantId = req.user!.tenantId;

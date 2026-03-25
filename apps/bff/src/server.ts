@@ -37,6 +37,7 @@ async function verifyToken(token: string) {
   return payload as JWTPayload & {
     "https://grainguard/tenant_id"?: string;
     sub?: string;
+    roles?: string[];
   };
 }
 
@@ -44,14 +45,11 @@ export interface BffContext {
   tenantId: string;
   userId: string;
   roles: string[];
-  isSuperAdmin?: boolean;
+  isSuperAdmin: boolean;
 }
 
 async function startServer() {
   const app = express();
-
-  // Metrics endpoint (must be after app is defined)
-  app.get("/metrics", metricsHandler());
   const httpServer = http.createServer(app);
 
   app.use(helmet({
@@ -90,14 +88,13 @@ async function startServer() {
         if (!token?.startsWith("Bearer ")) throw new Error("Missing token");
         const payload = await verifyToken(token.substring("Bearer ".length));
         const tenantId = payload["https://grainguard/tenant_id"];
-        const roles = (payload["https://grainguard/roles"] as string[]) || [];
-        const isSuperAdmin = roles.includes("superadmin");
         if (!tenantId) throw new Error("Tenant not found");
+        const roles = Array.isArray(payload.roles) ? payload.roles : [];
         return {
           tenantId: String(tenantId),
           userId: String(payload.sub || ""),
           roles,
-          isSuperAdmin,
+          isSuperAdmin: roles.includes("superadmin"),
         };
       },
     },
@@ -120,25 +117,13 @@ async function startServer() {
           };
         },
       },
-      // Operation timeout plugin — abort long-running resolvers
-      {
-        async requestDidStart() {
-          const timeout = setTimeout(() => {
-            // AbortController would be ideal here, but Apollo doesn't support it natively.
-            // The resolver-level timeouts in datasources handle individual query limits.
-          }, 30_000);
-          return {
-            async willSendResponse() {
-              clearTimeout(timeout);
-            },
-          };
-        },
-      },
     ],
-    introspection: process.env.NODE_ENV === "development",
+    introspection: process.env.NODE_ENV !== "production",
   });
 
   await server.start();
+
+  app.get("/metrics", metricsHandler());
 
   app.use(
     "/graphql",
@@ -153,6 +138,14 @@ async function startServer() {
     express.json({ limit: "10kb" }),
     expressMiddleware(server, {
       context: async ({ req }): Promise<BffContext> => {
+        // Dev bypass — AUTH_ENABLED=false skips JWT validation (non-production only)
+        if (process.env.AUTH_ENABLED === "false" && process.env.NODE_ENV !== "production") {
+          const tenantId =
+            (req.headers["x-tenant-id"] as string) ||
+            "11111111-1111-1111-1111-111111111111";
+          return { tenantId, userId: "dev-user", roles: ["admin", "member", "superadmin"], isSuperAdmin: true };
+        }
+
         const authHeader = req.headers.authorization;
 
         if (!authHeader?.startsWith("Bearer ")) {
@@ -165,10 +158,16 @@ async function startServer() {
 
         try {
           const payload = await verifyToken(token);
-          const tenantId = payload["https://grainguard/tenant_id"];
+          // Auth0 Action injects claims under https://grainguard.com/ namespace
+          const NS = "https://grainguard.com";
+          const tenantId =
+            (payload as any)[`${NS}/tenant_id`] ??
+            (payload as any)["https://grainguard/tenant_id"];
+          const rawRoles =
+            (payload as any)[`${NS}/roles`] ??
+            (payload as any)["https://grainguard/roles"] ??
+            (payload as any).roles;
           const userId = payload.sub;
-          const roles = (payload["https://grainguard/roles"] as string[]) || [];
-          const isSuperAdmin = roles.includes("superadmin");
 
           if (!tenantId) {
             throw new GraphQLError("Tenant not found in token", {
@@ -176,11 +175,22 @@ async function startServer() {
             });
           }
 
+          // Guard against non-UUID tenant_id values (e.g. legacy "tenant_001")
+          // to prevent Postgres syntax errors that trip the circuit breaker.
+          const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+          if (!UUID_RE.test(String(tenantId))) {
+            throw new GraphQLError(
+              "Invalid tenant ID format in token — please sign out and sign back in.",
+              { extensions: { code: "FORBIDDEN", http: { status: 403 } } }
+            );
+          }
+
+          const roles = Array.isArray(rawRoles) ? rawRoles.map(String) : [];
           return {
             tenantId: String(tenantId),
             userId: String(userId || ""),
             roles,
-            isSuperAdmin,
+            isSuperAdmin: roles.includes("superadmin"),
           };
         } catch (err) {
           if (err instanceof GraphQLError) throw err;
@@ -194,9 +204,17 @@ async function startServer() {
 
   const PORT = parseInt(process.env.PORT || "4000");
 
-  // Set request timeout to prevent long-running GraphQL queries from hanging
-  httpServer.timeout = 30_000;         // 30s total request timeout
-  httpServer.keepAliveTimeout = 65_000; // slightly > ALB 60s idle timeout
+  // Centralized error handler — must be registered after all routes
+  app.use((err: Error, req: import("express").Request, res: import("express").Response, next: import("express").NextFunction) => {
+    const requestId = (req.headers["x-request-id"] as string) ?? "unknown";
+    console.error({ requestId, error: err.message, stack: err.stack });
+    if (res.headersSent) return next(err);
+    res.status(500).json({
+      error: "internal_server_error",
+      message: err.message,
+      requestId,
+    });
+  });
 
   await new Promise<void>((resolve) => httpServer.listen({ port: PORT }, resolve));
 
@@ -214,16 +232,4 @@ async function startServer() {
 startServer().catch((err) => {
   console.error("Failed to start BFF:", err);
   process.exit(1);
-});
-
-// Centralized error handler
-app.use((err: Error, req: import("express").Request, res: import("express").Response, next: import("express").NextFunction) => {
-  const requestId = (req.headers["x-request-id"] as string) ?? "unknown";
-  console.error({ requestId, error: err.message, stack: err.stack });
-  if (res.headersSent) return next(err);
-  res.status(500).json({
-    error: "internal_server_error",
-    message: err.message,
-    requestId,
-  });
 });

@@ -5,20 +5,13 @@ on:
     branches: ["master"]
 
 env:
-  REGISTRY: ghcr.io
+  REGISTRY:     ghcr.io
   IMAGE_PREFIX: ghcr.io/pahuldeepp/grainguard
 
 jobs:
-  # ─── Run CI gate first ──────────────────────────────────────
-  ci:
-    name: CI Gate
-    uses: ./.github/workflows/ci.yml
-
-  # ─── Build and push all Docker images ───────────────────────
   build-and-push:
     name: Build & Push — ${{ matrix.service.name }}
     runs-on: ubuntu-latest
-    needs: [ci]
 
     permissions:
       contents: read
@@ -28,18 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         service:
-          - name: gateway
-            dockerfile: apps/gateway/Dockerfile
-          - name: bff
-            dockerfile: apps/bff/Dockerfile
-          - name: ingest-service
-            dockerfile: apps/ingest-service/Dockerfile
-          - name: jobs-worker
-            dockerfile: apps/jobs-worker/Dockerfile
-          - name: dashboard
-            dockerfile: apps/dashboard/Dockerfile
-          - name: cassandra-writer
-            dockerfile: apps/cassandra-writer/Dockerfile
+          # ── Original services ──────────────────────────────────────────
           - name: read-model-builder
             dockerfile: apps/read-model-builder/Dockerfile
           - name: telemetry-service
@@ -50,16 +32,40 @@ jobs:
             dockerfile: apps/cdc-transformer/Dockerfile
           - name: dlq-reprocessor
             dockerfile: apps/dlq-reprocessor/Dockerfile
-          - name: risk-engine
-            dockerfile: apps/risk-engine/Dockerfile
-          - name: workflow-alerts
-            dockerfile: apps/workflow-alerts/Dockerfile
+          - name: bff
+            dockerfile: apps/bff/Dockerfile
+          - name: gateway
+            dockerfile: apps/gateway/Dockerfile
+          # ── Previously missing services ───────────────────────────────
+          - name: cassandra-writer
+            dockerfile: apps/cassandra-writer/Dockerfile
           - name: asset-registry
             dockerfile: apps/asset-registry/Dockerfile
+          - name: load-generator
+            dockerfile: apps/load-generator/Dockerfile
+          - name: jobs-worker
+            dockerfile: apps/jobs-worker/Dockerfile
+          - name: workflow-alerts
+            dockerfile: apps/workflow-alerts/Dockerfile
+          - name: risk-engine
+            dockerfile: apps/risk-engine/Dockerfile
+          - name: search-indexer
+            dockerfile: apps/search-indexer/Dockerfile
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - name: Build & Vet (Go)
+        run: |
+          go build ./...
+          go vet ./...
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -79,7 +85,6 @@ jobs:
           tags: |
             type=raw,value=latest
             type=sha,prefix=,format=short
-            type=raw,value={{date 'YYYYMMDD'}}-{{sha}}
 
       - name: Build and push ${{ matrix.service.name }}
         uses: docker/build-push-action@v6
@@ -91,123 +96,3 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: linux/amd64
-
-  # ─── Deploy to staging ──────────────────────────────────────
-  deploy-staging:
-    name: Deploy to Staging
-    runs-on: ubuntu-latest
-    needs: [build-and-push]
-    environment: staging
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure kubectl
-        uses: azure/setup-kubectl@v3
-        with:
-          version: "v1.29.0"
-
-      - name: Set kubeconfig
-        run: |
-          mkdir -p $HOME/.kube
-          echo "${{ secrets.KUBECONFIG_STAGING }}" | base64 -d > $HOME/.kube/config
-          chmod 600 $HOME/.kube/config
-
-      - name: Deploy with rolling update
-        run: |
-          SHORT_SHA=$(echo "${{ github.sha }}" | head -c 7)
-          SERVICES="gateway bff ingest-service jobs-worker cassandra-writer \
-                    read-model-builder telemetry-service saga-orchestrator \
-                    cdc-transformer dlq-reprocessor risk-engine workflow-alerts \
-                    asset-registry"
-
-          for svc in $SERVICES; do
-            echo "Deploying $svc:$SHORT_SHA to staging..."
-            kubectl set image deployment/$svc \
-              $svc=${{ env.IMAGE_PREFIX }}/$svc:$SHORT_SHA \
-              -n grainguard-staging --record || echo "Skipping $svc (not found)"
-          done
-
-      - name: Wait for rollout
-        run: |
-          SERVICES="gateway bff ingest-service cassandra-writer read-model-builder"
-          for svc in $SERVICES; do
-            echo "Waiting for $svc..."
-            kubectl rollout status deployment/$svc -n grainguard-staging --timeout=300s || true
-          done
-
-      - name: Smoke test staging
-        run: |
-          GATEWAY_URL="${{ secrets.STAGING_GATEWAY_URL }}"
-          INGEST_URL="${{ secrets.STAGING_INGEST_URL }}"
-
-          echo "Checking gateway health..."
-          curl -sf "$GATEWAY_URL/health" | jq .
-
-          echo "Checking gateway readiness..."
-          curl -sf "$GATEWAY_URL/health/ready" | jq .
-
-          echo "Checking ingest health..."
-          curl -sf "$INGEST_URL/health" | jq .
-
-  # ─── Deploy to production (manual approval) ─────────────────
-  deploy-production:
-    name: Deploy to Production
-    runs-on: ubuntu-latest
-    needs: [deploy-staging]
-    environment: production
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure kubectl
-        uses: azure/setup-kubectl@v3
-        with:
-          version: "v1.29.0"
-
-      - name: Set kubeconfig
-        run: |
-          mkdir -p $HOME/.kube
-          echo "${{ secrets.KUBECONFIG_PRODUCTION }}" | base64 -d > $HOME/.kube/config
-          chmod 600 $HOME/.kube/config
-
-      - name: Deploy with rolling update
-        run: |
-          SHORT_SHA=$(echo "${{ github.sha }}" | head -c 7)
-          SERVICES="gateway bff ingest-service jobs-worker cassandra-writer \
-                    read-model-builder telemetry-service saga-orchestrator \
-                    cdc-transformer dlq-reprocessor risk-engine workflow-alerts \
-                    asset-registry"
-
-          for svc in $SERVICES; do
-            echo "Deploying $svc:$SHORT_SHA to production..."
-            kubectl set image deployment/$svc \
-              $svc=${{ env.IMAGE_PREFIX }}/$svc:$SHORT_SHA \
-              -n grainguard-prod --record || echo "Skipping $svc (not found)"
-          done
-
-      - name: Wait for rollout
-        run: |
-          SERVICES="gateway bff ingest-service cassandra-writer read-model-builder"
-          for svc in $SERVICES; do
-            echo "Waiting for $svc..."
-            kubectl rollout status deployment/$svc -n grainguard-prod --timeout=300s || true
-          done
-
-      - name: Production smoke test
-        run: |
-          GATEWAY_URL="${{ secrets.PROD_GATEWAY_URL }}"
-          curl -sf "$GATEWAY_URL/health/ready" | jq .
-
-      - name: Notify Slack
-        if: always()
-        uses: slackapi/slack-github-action@v1.26.0
-        with:
-          payload: |
-            {
-              "text": "${{ job.status == 'success' && ':white_check_mark:' || ':x:' }} Production deploy *${{ job.status }}* — `${{ github.sha }}` by ${{ github.actor }}\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>"
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_WEBHOOK }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

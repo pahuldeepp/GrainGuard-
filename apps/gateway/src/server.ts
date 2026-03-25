@@ -8,11 +8,12 @@ import { createDevice } from "./services/device";
 import { getDeviceLatestTelemetry } from "./services/device-query";
 import { redis } from "./cache/redis";
 import { pool } from "./database/db";
-import { logAuditEvent, writePool } from "./lib/audit";
+import { logAuditEvent } from "./lib/audit";
+import { writePool } from "./database/db";
 import { metricsHandler, requestLatency } from "./observability/metrics";
 import { requestIdMiddleware } from "./middleware/requestId";
 import { authMiddleware } from "./middleware/auth";
-import { apiKeyMiddleware } from "./middleware/apiKey";
+// apiKeyMiddleware removed — device ingest moved to Go ingest-service
 import { apiRateLimiter } from "./middleware/rateLimiting";
 import { validate, createDeviceSchema, deviceIdParamSchema } from "./middleware/validation";
 import { apiVersionMiddleware } from "./middleware/apiVersion";
@@ -24,10 +25,55 @@ import { ssoRouter } from "./routes/sso";
 import { devicesImportRouter } from "./routes/devicesImport";
 import { alertRulesRouter } from "./routes/alertRules";
 import { auditLogRouter } from "./routes/auditLog";
-import {
-  requireActiveSubscription,
-  enforceDeviceQuota,
-} from "./middleware/planEnforcement";
+import { teamRouter } from "./routes/teamMembers";
+import { apiKeysRouter } from "./routes/apiKeys";
+import { devicesRouter } from "./routes/devices";
+import { accountRouter } from "./routes/account";
+import { webhooksRouter } from "./routes/webhooks";
+import { notificationPrefsRouter } from "./routes/notificationPreferences";
+import { adminRouter } from "./routes/admin";
+
+// ── Startup environment validation ────────────────────────────────────────
+(function validateEnv() {
+  if (
+    !process.env.STRIPE_SECRET_KEY ||
+    process.env.STRIPE_SECRET_KEY === "sk_test_placeholder"
+  ) {
+    console.warn(
+      "[startup] ⚠  STRIPE_SECRET_KEY is missing or placeholder — " +
+      "billing routes will not work. Set STRIPE_SECRET_KEY in your .env."
+    );
+  }
+
+  if (
+    !process.env.AUTH0_MANAGEMENT_CLIENT_ID ||
+    process.env.AUTH0_MANAGEMENT_CLIENT_ID === ""
+  ) {
+    console.warn(
+      "[startup] ⚠  AUTH0_MANAGEMENT_CLIENT_ID not set — " +
+      "SSO configuration and team invite emails via Auth0 will fail."
+    );
+  }
+
+  if (
+    !process.env.AUTH0_MANAGEMENT_CLIENT_SECRET ||
+    process.env.AUTH0_MANAGEMENT_CLIENT_SECRET === ""
+  ) {
+    console.warn(
+      "[startup] ⚠  AUTH0_MANAGEMENT_CLIENT_SECRET not set — " +
+      "SSO configuration and team invite emails via Auth0 will fail."
+    );
+  }
+
+  if (!process.env.JWKS_URL) {
+    if (process.env.NODE_ENV === "production") {
+      console.error("[startup] ✗  JWKS_URL is required in production. Exiting.");
+      process.exit(1);
+    } else {
+      console.warn("[startup] ⚠  JWKS_URL not set — JWT verification will fail unless AUTH_ENABLED=false.");
+    }
+  }
+})();
 
 const app = express();
 
@@ -156,53 +202,42 @@ app.use("/graphql", (req: Request, res: Response) => {
  * express.json() is scoped to these routers only — the webhook uses raw body above
  */
 app.use(express.json({ limit: "64kb" }));
-app.use(billingRouter);
+
+// Public routes — rate-limited by IP (no JWT required)
 app.use(tenantsRouter);
-app.use(ssoRouter);
+
+// Authenticated routers — each router applies its own rate limiter internally
+// so that billing/bulk/api limiters don't bleed across route boundaries.
+app.use(billingRouter);
 app.use(devicesImportRouter);
 app.use(alertRulesRouter);
 app.use(auditLogRouter);
+app.use(ssoRouter);
+app.use(teamRouter);
+app.use(apiKeysRouter);
+app.use(devicesRouter);
+app.use(accountRouter);
+app.use(webhooksRouter);
+app.use(notificationPrefsRouter);
+app.use(adminRouter);
 
 /**
- * Telemetry ingest — device auth via API key (not JWT)
- * POST /ingest is called by physical devices in the field.
- * Devices don't have browsers so they use X-Api-Key instead of OAuth Bearer.
+ * Telemetry ingest — DEPRECATED on Gateway.
+ * Devices should POST to the dedicated Go ingest-service (:3001/ingest) directly.
+ * This stub returns a 308 redirect hint for any device still pointing here.
  */
-app.post(
-  "/ingest",
-  apiRateLimiter,
-  apiKeyMiddleware,               // resolves tenantId from X-Api-Key header
-  requireActiveSubscription(),
-  async (req: Request, res: Response) => {
-    // At this point req.user is populated with { sub, tenantId, roles: ["device"] }
-    // Route telemetry payload to the telemetry-service via gRPC (same path as /devices)
-    const tenantId = req.user!.tenantId;
-    try {
-      // Forward the raw payload — telemetry-service validates the schema
-      const result = await createDevice(
-        tenantId,
-        req.body.serialNumber,
-        String(req.requestId),
-        req.user!.sub,
-        undefined            // no auth header — device used API key
-      );
-      return res.json(result);
-    } catch (err) {
-      console.error("[ingest]", err);
-      return res.status(500).json({ error: "ingest_failed" });
-    }
-  }
-);
+app.post("/ingest", (_req: Request, res: Response) => {
+  res.status(308).json({
+    error: "moved_permanently",
+    message: "Device ingest has moved to the dedicated ingest service on port 3001",
+    location: "/ingest on ingest-service:3001",
+  });
+});
 
-/**
- * REST routes — express.json() applied only here
- */
 app.post(
   "/devices",
+  authMiddleware,    // auth first → req.user.tenantId is set for the rate limiter
   apiRateLimiter,
-  authMiddleware,
-  requireActiveSubscription(),
-  enforceDeviceQuota(),
   validate(createDeviceSchema, "body"),
   async (req: Request, res: Response) => {
     try {
@@ -213,6 +248,19 @@ app.post(
       const tenantId = req.user!.tenantId;
       const userId = req.user!.sub;
       const requestId = String(req.requestId);
+
+      // ── Plan enforcement: check device quota ──────────────────────────
+      const { checkDeviceQuota } = await import("./services/planEnforcement");
+      const quotaCheck = await checkDeviceQuota(tenantId);
+      if (!quotaCheck.allowed) {
+        return res.status(403).json({
+          error: "device_limit_reached",
+          message: quotaCheck.message,
+          currentCount: quotaCheck.currentCount,
+          maxDevices: quotaCheck.maxDevices,
+          plan: quotaCheck.plan,
+        });
+      }
 
       const authHeader = Array.isArray(req.headers.authorization)
         ? req.headers.authorization[0]
@@ -254,8 +302,8 @@ app.post(
 
 app.get(
   "/devices/:deviceId/latest",
+  authMiddleware,    // auth first → tenant-scoped rate limit
   apiRateLimiter,
-  authMiddleware,
   validate(deviceIdParamSchema, "params"),
   async (req: Request, res: Response) => {
     try {
@@ -269,8 +317,28 @@ app.get(
   }
 );
 
+// Liveness probe — always 200 if the process is running
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok" });
+  res.json({ status: "ok", uptime: process.uptime() });
+});
+
+// Readiness probe — checks DB + Redis connectivity
+app.get("/health/ready", async (_req, res) => {
+  const checks: Record<string, string> = {};
+  try {
+    await pool.query("SELECT 1");
+    checks.postgres = "ok";
+  } catch {
+    checks.postgres = "error";
+  }
+  try {
+    await redis.ping();
+    checks.redis = "ok";
+  } catch {
+    checks.redis = "error";
+  }
+  const allOk = Object.values(checks).every((v) => v === "ok");
+  return res.status(allOk ? 200 : 503).json({ status: allOk ? "ok" : "degraded", checks });
 });
 
 app.get("/metrics", metricsHandler());

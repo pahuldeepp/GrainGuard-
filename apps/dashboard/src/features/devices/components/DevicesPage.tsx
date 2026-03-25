@@ -1,12 +1,13 @@
 ﻿import { useState, useMemo, useCallback } from "react";
+import { Navigate } from "react-router-dom";
 import { useDevices, useSearchDevices } from "../hooks/useDevices";
 import { useDebounce } from "../../../hooks/useDebounce";
 import { DeviceTable } from "./DeviceTable";
 import { EmptyState } from "../../../shared/components/EmptyState";
 import { useTenantContext } from "../../tenancy/TenantContext";
+import { RegisterDeviceModal } from "./RegisterDeviceModal";
 import toast from "react-hot-toast";
 import { exportDevicesToCsv, buildCsvFilename } from "../../../utils/exportCsv";
-import { RegisterDeviceModal } from "./RegisterDeviceModal";
 
 type StatusFilter = "all" | "with-telemetry" | "no-data";
 
@@ -14,14 +15,13 @@ export function DevicesPage() {
   const [limit, setLimit] = useState(200);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [registerOpen, setRegisterOpen] = useState(false); // controls modal visibility
+  const [showRegister, setShowRegister] = useState(false);
 
   const { activeTenantId } = useTenantContext();
   const debouncedSearch = useDebounce(search, 300);
   const { devices, loading, error, refetch } = useDevices(limit);
   const { results: searchResults } = useSearchDevices(debouncedSearch);
-  
-  // Use ES search results when query is active, otherwise use local devices
+
   const isSearching = debouncedSearch.trim().length >= 2;
 
   const handleRefetch = useCallback(async () => {
@@ -47,10 +47,7 @@ export function DevicesPage() {
   }), [devices]);
 
   const filteredDevices = useMemo(() => {
-    // Use Elasticsearch results when query is long enough
     let result = isSearching ? searchResults : devices;
-    
-    // Status filter still applied on top of ES results
     if (statusFilter === "with-telemetry") {
       result = result.filter((d) => d.temperature !== null);
     } else if (statusFilter === "no-data") {
@@ -74,15 +71,7 @@ export function DevicesPage() {
   }, [filteredDevices, isFiltering]);
 
   if (!activeTenantId) {
-    return (
-      <div className="p-8">
-        <EmptyState
-          icon="🏢"
-          title="No tenant assigned"
-          description="Your account is not associated with any tenant. Contact your administrator."
-        />
-      </div>
-    );
+    return <Navigate to="/onboarding" replace />;
   }
 
   if (error) {
@@ -116,13 +105,7 @@ export function DevicesPage() {
               : `${stats.total} devices`}
           </p>
         </div>
-        <div className="flex gap-3">
-          <button
-            onClick={() => setRegisterOpen(true)}
-            className="px-4 py-2 bg-green-600 text-white rounded text-sm hover:bg-green-700"
-          >
-            + Register Device
-          </button>
+        <div className="flex gap-3 flex-wrap">
           <select
             value={limit}
             onChange={(e) => setLimit(Number(e.target.value))}
@@ -135,16 +118,21 @@ export function DevicesPage() {
           <button
             onClick={handleExport}
             disabled={loading || filteredDevices.length === 0}
-            aria-label={`Export ${filteredDevices.length} devices to CSV`}
             className="px-4 py-2 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-700 rounded text-sm hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             ↓ Export CSV
           </button>
           <button
             onClick={handleRefetch}
-            className="px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
+            className="px-4 py-2 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-700 rounded text-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
           >
             Refresh
+          </button>
+          <button
+            onClick={() => setShowRegister(true)}
+            className="px-4 py-2 bg-green-600 text-white rounded text-sm hover:bg-green-700 transition-colors font-medium"
+          >
+            + Register Device
           </button>
         </div>
       </div>
@@ -215,14 +203,11 @@ export function DevicesPage() {
         <DeviceTable devices={filteredDevices} loading={loading} />
       </div>
 
-      {/* Register Device modal — portal rendered, outside the table scroll context */}
+      {/* Register modal */}
       <RegisterDeviceModal
-        open={registerOpen}
-        onClose={() => setRegisterOpen(false)}
-        onSuccess={() => {
-          toast.success("Device registered successfully");
-          handleRefetch(); // reload the device list to show the new row
-        }}
+        open={showRegister}
+        onClose={() => setShowRegister(false)}
+        onRegistered={handleRefetch}
       />
     </div>
   );

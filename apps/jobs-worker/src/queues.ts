@@ -50,5 +50,6 @@ export interface AlertJob {
   threshold: number;
   recipients: string[];
   level?: string;
+  score?: number;
 }
 
