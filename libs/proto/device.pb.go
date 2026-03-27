@@ -180,3 +180,4 @@ func file_device_proto_init() {
 	file_device_proto_goTypes = nil
 	file_device_proto_depIdxs = nil
 }
+

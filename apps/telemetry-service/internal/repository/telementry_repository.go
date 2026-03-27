@@ -10,3 +10,4 @@ import (
 type TelemetryRepository interface {
 	Save(ctx context.Context, tx pgx.Tx, telemetry *domain.Telemetry) error
 }
+

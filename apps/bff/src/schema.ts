@@ -40,3 +40,4 @@
     tenantTelemetryUpdated(tenantId: String!): Telemetry!
   }
 `;
+

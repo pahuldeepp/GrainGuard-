@@ -39,3 +39,4 @@ export function useDevice(deviceId: string) {
         error,
     };
 }
+

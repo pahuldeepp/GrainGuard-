@@ -131,3 +131,4 @@ func (w *RecoveryWorker) publishCommand(ctx context.Context, sagaID, correlation
     }
     log.Printf("[recovery] retried command saga_id=%s command=%s", sagaID, cmd["command_type"])
 }
+

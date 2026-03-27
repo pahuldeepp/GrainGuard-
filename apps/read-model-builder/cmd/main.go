@@ -239,3 +239,4 @@ func main() {
 
 	// Step 3: defers above handle pool.Close(), redisClient.Close(), OTel shutdown
 }
+
