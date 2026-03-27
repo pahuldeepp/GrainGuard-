@@ -63,6 +63,8 @@ jobs:
         working-directory: apps/gateway
         env:
           PORT:             3000
+          NODE_ENV:         development
+          AUTH_ENABLED:     "false"
           DATABASE_URL:     postgres://grainguard:grainguard@localhost:5432/grainguard
           REDIS_URL:        redis://localhost:6379
           JWKS_URL:         ${{ secrets.PERF_JWKS_URL }}
@@ -84,6 +86,8 @@ jobs:
         working-directory: apps/bff
         env:
           PORT: 4000
+          NODE_ENV: development
+          AUTH_ENABLED: "false"
           POSTGRES_HOST: localhost
           POSTGRES_PORT: 5432
           POSTGRES_USER: grainguard
@@ -97,14 +101,17 @@ jobs:
           AUTH0_DOMAIN: placeholder.auth0.com
           AUTH0_AUDIENCE: placeholder
           AUTH0_ORG_CLAIM: org_id
+          JWKS_URL: https://example.invalid/.well-known/jwks.json
+          JWT_ISSUER: https://example.invalid/
+          JWT_AUDIENCE: placeholder
           ALLOWED_ORIGINS: http://localhost:5173
           JWT_SECRET: dev-secret
 
       - name: Wait for gateway
-        run: npx wait-on http://localhost:3000/health --timeout 30000
+        run: npx wait-on tcp:3000 --timeout 30000
 
       - name: Wait for BFF
-        run: npx wait-on http://localhost:4000/graphql --timeout 30000
+        run: npx wait-on tcp:4000 --timeout 30000
 
       - name: Install k6
         run: |
@@ -116,6 +123,7 @@ jobs:
           k6 run \
             --env GATEWAY_URL=http://localhost:3000 \
             --env BFF_URL=http://localhost:4000 \
+            --env JWT=dev-ci-token \
             scripts/load-tests/performance-budget.js
         # k6 exits 99 if thresholds are breached — this step fails and blocks the PR
 

@@ -36,7 +36,7 @@ jobs:
           docker build \
             -f apps/${{ matrix.service }}/Dockerfile \
             -t grainguard/${{ matrix.service }}:${{ github.sha }} \
-            apps/${{ matrix.service }}
+            .
 
       - name: Run Trivy vulnerability scan
         uses: aquasecurity/trivy-action@0.28.0

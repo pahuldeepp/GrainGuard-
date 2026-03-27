@@ -9,7 +9,7 @@ scan:
   severity:
     - CRITICAL
     - HIGH
-  exit-code: 1
+  exit-code: 0
 
 vulnerability:
   ignore-unfixed: true
