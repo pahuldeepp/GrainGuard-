@@ -12,9 +12,14 @@ on:
 jobs:
   # ── Trivy — container image vulnerability scan ───────────────────────────
   trivy-scan:
-    name: Trivy Image Scan
+    name: Trivy Image Scan (${{ matrix.service }})
     runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
     strategy:
+      fail-fast: false
       matrix:
         service:
           - gateway
@@ -45,8 +50,9 @@ jobs:
           trivy-config: infra/security/trivy.yaml
 
       - name: Upload Trivy results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        if: always() && github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
         with:
           sarif_file: trivy-${{ matrix.service }}.sarif
           category: trivy-${{ matrix.service }}
@@ -55,6 +61,10 @@ jobs:
   trivy-fs-scan:
     name: Trivy Filesystem Scan
     runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
 
@@ -69,8 +79,9 @@ jobs:
           trivy-config: infra/security/trivy.yaml
 
       - name: Upload results
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        if: always() && github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
         with:
           sarif_file: trivy-fs.sarif
           category: trivy-filesystem
@@ -84,13 +95,14 @@ jobs:
       actions: read
       contents: read
     strategy:
+      fail-fast: false
       matrix:
         language: [javascript, go, python]
     steps:
       - uses: actions/checkout@v4
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
           queries: security-extended
@@ -99,13 +111,14 @@ jobs:
         if: matrix.language == 'go'
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.25'
+          cache: false
 
       - name: Setup Node
         if: matrix.language == 'javascript'
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Setup Python
         if: matrix.language == 'python'
@@ -114,10 +127,10 @@ jobs:
           python-version: '3.12'
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
+        uses: github/codeql-action/autobuild@v4
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           category: codeql-${{ matrix.language }}
 
@@ -153,7 +166,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Audit Node dependencies
         run: |
@@ -167,7 +180,8 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.25'
+          cache: false
 
       - name: Audit Go dependencies (govulncheck)
         run: |
