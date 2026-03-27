@@ -14,12 +14,14 @@ const PAYLOAD = b64({
   sub:    "auth0|e2e-test-user",
   email:  "e2e@grainguard.com",
   name:   "E2E Test User",
-  iss:    "https://dev-dz6bl3nngdeib7ro.us.auth0.com/",
-  aud:    "https://api.grainguard.com",
+  iss:    "https://e2e.auth0.local/",
+  aud:    "https://api.grainguard.test",
   iat:    Math.floor(Date.now() / 1000),
   exp:    Math.floor(Date.now() / 1000) + 86400, // 24h
+  "https://grainguard.com/tenant_id": "00000000-0000-0000-0000-000000000001",
+  "https://grainguard.com/roles":     ["admin", "superadmin"],
   "https://grainguard/tenant_id": "00000000-0000-0000-0000-000000000001",
-  "https://grainguard/roles":     ["admin"],
+  "https://grainguard/roles":     ["admin", "superadmin"],
 });
 
 export const FAKE_TOKEN = `${HEADER}.${PAYLOAD}.fake_signature`;
@@ -27,8 +29,8 @@ export const FAKE_TOKEN = `${HEADER}.${PAYLOAD}.fake_signature`;
 // ─── Auth0 localStorage cache key ────────────────────────────────────────────
 // auth0-spa-js reads from this key to decide if the user is authenticated.
 
-const CLIENT_ID = process.env.VITE_AUTH0_CLIENT_ID || "6DwwDrUpsC4LckBieVQdlGYtguTPnYys";
-const AUDIENCE  = process.env.VITE_AUTH0_AUDIENCE  || "https://api.grainguard.com";
+const CLIENT_ID = process.env.VITE_AUTH0_CLIENT_ID || "e2e-client-id";
+const AUDIENCE  = process.env.VITE_AUTH0_AUDIENCE  || "https://api.grainguard.test";
 const AUTH0_CACHE_KEY = `@@auth0spajs@@::${CLIENT_ID}::${AUDIENCE}::openid profile email`;
 
 const AUTH0_CACHE_VALUE = JSON.stringify({
@@ -45,6 +47,10 @@ const AUTH0_CACHE_VALUE = JSON.stringify({
         sub:   "auth0|e2e-test-user",
         email: "e2e@grainguard.com",
         name:  "E2E Test User",
+        "https://grainguard.com/tenant_id": "00000000-0000-0000-0000-000000000001",
+        "https://grainguard.com/roles": ["admin", "superadmin"],
+        "https://grainguard/tenant_id": "00000000-0000-0000-0000-000000000001",
+        "https://grainguard/roles": ["admin", "superadmin"],
       },
     },
     audience:  AUDIENCE,
@@ -56,8 +62,22 @@ const AUTH0_CACHE_VALUE = JSON.stringify({
 // ─── Mock API responses ───────────────────────────────────────────────────────
 
 const MOCK_DEVICES = [
-  { id: "dev-1", serialNumber: "SN00100001", status: "online",  lastSeen: new Date().toISOString() },
-  { id: "dev-2", serialNumber: "SN00100002", status: "offline", lastSeen: new Date().toISOString() },
+  {
+    deviceId: "dev-1",
+    serialNumber: "SN00100001",
+    tenantId: "00000000-0000-0000-0000-000000000001",
+    temperature: 24.5,
+    humidity: 61,
+    recordedAt: new Date().toISOString(),
+  },
+  {
+    deviceId: "dev-2",
+    serialNumber: "SN00100002",
+    tenantId: "00000000-0000-0000-0000-000000000001",
+    temperature: null,
+    humidity: null,
+    recordedAt: new Date().toISOString(),
+  },
 ];
 
 const MOCK_SUBSCRIPTION = {
@@ -71,6 +91,11 @@ const MOCK_SUBSCRIPTION = {
 // Call this in beforeEach to set up a fully authenticated test environment.
 
 export async function injectMockAuth(page: Page): Promise<void> {
+  // Keep health requests happy for CSRF/bootstrap checks.
+  await page.route("**/health", (route) =>
+    route.fulfill({ status: 200, json: { ok: true } })
+  );
+
   // 1. Intercept Auth0 JWKS — return empty keyset (we never validate sig in tests)
   await page.route("**/.well-known/jwks.json", (route) =>
     route.fulfill({ json: { keys: [] } })
@@ -134,7 +159,16 @@ export async function injectMockAuth(page: Page): Promise<void> {
     if (route.request().method() === "GET") {
       return route.fulfill({ json: MOCK_DEVICES });
     }
-    return route.fulfill({ json: { deviceId: "dev-new", serialNumber: "SNNEW001" } });
+    return route.fulfill({
+      json: {
+        deviceId: "dev-new",
+        serialNumber: "SNNEW001",
+        tenantId: "00000000-0000-0000-0000-000000000001",
+        temperature: null,
+        humidity: null,
+        recordedAt: new Date().toISOString(),
+      },
+    });
   });
 
   // 6. Inject Auth0 cache into localStorage before app loads

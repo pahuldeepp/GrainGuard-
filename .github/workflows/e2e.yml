@@ -37,11 +37,12 @@ jobs:
         run: npm run build
         working-directory: apps/dashboard
         env:
-          VITE_AUTH0_DOMAIN:    ${{ secrets.VITE_AUTH0_DOMAIN }}
-          VITE_AUTH0_CLIENT_ID: ${{ secrets.VITE_AUTH0_CLIENT_ID }}
-          VITE_AUTH0_AUDIENCE:  ${{ secrets.VITE_AUTH0_AUDIENCE }}
-          VITE_BFF_URL:         ${{ secrets.E2E_BFF_URL }}
-          VITE_GATEWAY_URL:     ${{ secrets.E2E_GATEWAY_URL }}
+          VITE_E2E_MOCK_AUTH:   "true"
+          VITE_AUTH0_DOMAIN:    e2e.auth0.local
+          VITE_AUTH0_CLIENT_ID: e2e-client-id
+          VITE_AUTH0_AUDIENCE:  https://api.grainguard.test
+          VITE_BFF_URL:         http://localhost:5173/graphql
+          VITE_GATEWAY_URL:     http://localhost:5173
 
       - name: Serve dashboard
         run: npx serve -s dist -l 5173 &
@@ -55,8 +56,8 @@ jobs:
         working-directory: tests/e2e
         env:
           E2E_BASE_URL:         http://localhost:5173
-          VITE_AUTH0_CLIENT_ID: ${{ secrets.VITE_AUTH0_CLIENT_ID }}
-          VITE_AUTH0_AUDIENCE:  ${{ secrets.VITE_AUTH0_AUDIENCE }}
+          VITE_AUTH0_CLIENT_ID: e2e-client-id
+          VITE_AUTH0_AUDIENCE:  https://api.grainguard.test
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useEffectEvent } from "react";
 import { useRegisterDevice } from "../hooks/useRegisterDevice";
 import toast from "react-hot-toast";
 
@@ -15,15 +15,29 @@ export function RegisterDeviceModal({ open, onClose, onRegistered }: Props) {
   const [validationError, setValidationError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { register, loading, error, reset } = useRegisterDevice();
+  const initializeOnOpen = useEffectEvent(() => {
+    setSerial("");
+    setValidationError(null);
+    reset();
+    setTimeout(() => inputRef.current?.focus(), 50);
+  });
 
   useEffect(() => {
     if (open) {
-      setSerial("");
-      setValidationError(null);
-      reset();
-      setTimeout(() => inputRef.current?.focus(), 50);
+      initializeOnOpen();
     }
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [open, onClose]);
 
   if (!open) return null;
 
@@ -33,6 +47,13 @@ export function RegisterDeviceModal({ open, onClose, onRegistered }: Props) {
       return "Only letters, numbers, hyphens and underscores allowed (3–64 chars)";
     return null;
   };
+
+  const currentValidationError = validate(serial);
+  const submitDisabled = loading || !serial.trim() || currentValidationError !== null;
+  const displayError =
+    validationError ??
+    (serial.trim() ? currentValidationError : null) ??
+    error;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,14 +70,12 @@ export function RegisterDeviceModal({ open, onClose, onRegistered }: Props) {
     }
   };
 
-  const handleKey = (e: React.KeyboardEvent) => {
-    if (e.key === "Escape") onClose();
-  };
-
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onKeyDown={handleKey}
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
       role="dialog"
       aria-modal="true"
       aria-labelledby="register-modal-title"
@@ -91,7 +110,7 @@ export function RegisterDeviceModal({ open, onClose, onRegistered }: Props) {
             type="text"
             value={serial}
             onChange={(e) => {
-              setSerial(e.target.value);
+              setSerial(e.target.value.toUpperCase());
               setValidationError(null);
             }}
             placeholder="e.g. GG-SILO-001"
@@ -100,9 +119,9 @@ export function RegisterDeviceModal({ open, onClose, onRegistered }: Props) {
             autoComplete="off"
           />
 
-          {(validationError || error) && (
-            <p className="mt-2 text-sm text-red-600 dark:text-red-400">
-              {validationError || error}
+          {displayError && (
+            <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
+              {displayError}
             </p>
           )}
 
@@ -121,7 +140,7 @@ export function RegisterDeviceModal({ open, onClose, onRegistered }: Props) {
             </button>
             <button
               type="submit"
-              disabled={loading || !serial.trim()}
+              disabled={submitDisabled}
               className="flex-1 px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {loading ? (

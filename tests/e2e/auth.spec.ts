@@ -43,7 +43,7 @@ test.describe("Authenticated user", () => {
 
   test("billing page shows plan cards", async ({ page }) => {
     await page.goto("/billing");
-    await expect(page.getByText("Starter")).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText("Professional")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Starter" })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole("heading", { name: "Professional" })).toBeVisible();
   });
 });
