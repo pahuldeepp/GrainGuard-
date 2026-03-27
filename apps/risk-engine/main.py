@@ -4,9 +4,7 @@ import time
 import logging
 import psycopg2
 import psycopg2.extras
-import pika
 from kafka import KafkaConsumer, KafkaProducer
-from functools import lru_cache
 
 logging.basicConfig(
     level=logging.INFO,
@@ -19,9 +17,7 @@ KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "kafka:9092").split(",")
 IN_TOPIC      = os.getenv("TELEMETRY_TOPIC", "telemetry.events")
 OUT_TOPIC     = os.getenv("RISK_SCORES_TOPIC", "risk.scores")
 GROUP_ID      = os.getenv("KAFKA_GROUP_ID", "risk-engine")
-RABBITMQ_URL  = os.getenv("RABBITMQ_URL", "amqp://grainguard:grainguard@rabbitmq:5672/grainguard")
 DATABASE_URL  = os.getenv("DATABASE_URL")
-ALERT_QUEUE   = "alerts"
 
 # Rule cache: tenant_id → (rules, fetched_at)
 _rules_cache: dict[str, tuple[list, float]] = {}
@@ -36,8 +32,7 @@ def get_db():
 def fetch_alert_rules(tenant_id: str) -> list[dict]:
     """
     Fetch enabled alert rules for the tenant from Postgres.
-    Returns list of dicts: {metric, operator, threshold, level}
-    Falls back to safe built-in defaults if DB is unavailable.
+    Cached for RULES_TTL seconds. Falls back to built-in defaults.
     """
     now = time.monotonic()
     cached = _rules_cache.get(tenant_id)
@@ -56,7 +51,6 @@ def fetch_alert_rules(tenant_id: str) -> list[dict]:
             rules = [dict(r) for r in cur.fetchall()]
         conn.close()
 
-        # If tenant has no rules configured, fall back to sensible defaults
         if not rules:
             rules = _default_rules()
 
@@ -78,8 +72,8 @@ def _default_rules() -> list[dict]:
 
 def fetch_alert_recipients(tenant_id: str) -> list[str]:
     """
-    Fetch real email addresses of tenant admins/members who should receive alerts.
-    Falls back to empty list (alert still queued, jobs-worker can handle fallback).
+    Fetch emails of tenant users who should receive alerts.
+    Included in the Kafka event so workflow-alerts doesn't need a DB call.
     """
     try:
         conn = get_db()
@@ -117,15 +111,16 @@ def compute_risk_score(
     """
     Evaluate tenant alert rules to produce a risk score 0.0–1.0.
     Temperature weight: 60%, humidity weight: 40%.
-    Level is the highest severity triggered across all rules.
+    Returns score, level, t_score, h_score, and triggered thresholds per metric.
     """
     level_rank = {"safe": 0, "warn": 1, "critical": 2}
     triggered_level = "safe"
 
     t_score = 0.0
     h_score = 0.0
+    t_threshold: float | None = None
+    h_threshold: float | None = None
 
-    # Collect per-metric thresholds to normalise partial scores
     t_rules = [r for r in rules if r["metric"] == "temperature" and temperature is not None]
     h_rules = [r for r in rules if r["metric"] == "humidity"    and humidity    is not None]
 
@@ -133,41 +128,36 @@ def compute_risk_score(
         if _apply_operator(temperature, rule["operator"], rule["threshold"]):
             if level_rank.get(rule["level"], 0) > level_rank.get(triggered_level, 0):
                 triggered_level = rule["level"]
-            # Normalise: critical = 1.0, warn = 0.5
-            t_score = max(t_score, 1.0 if rule["level"] == "critical" else 0.5)
+            new_score = 1.0 if rule["level"] == "critical" else 0.5
+            if new_score > t_score:
+                t_score = new_score
+                t_threshold = rule["threshold"]
 
     for rule in h_rules:
         if _apply_operator(humidity, rule["operator"], rule["threshold"]):
             if level_rank.get(rule["level"], 0) > level_rank.get(triggered_level, 0):
                 triggered_level = rule["level"]
-            h_score = max(h_score, 1.0 if rule["level"] == "critical" else 0.5)
+            new_score = 1.0 if rule["level"] == "critical" else 0.5
+            if new_score > h_score:
+                h_score = new_score
+                h_threshold = rule["threshold"]
 
     score = round((t_score * 0.6) + (h_score * 0.4), 4)
 
-    # Re-derive level from score if no rule triggered (belt-and-suspenders)
     if triggered_level == "safe":
         if score >= 0.8:
             triggered_level = "critical"
         elif score >= 0.4:
             triggered_level = "warn"
 
-    return {"score": score, "level": triggered_level, "t_score": t_score, "h_score": h_score}
-
-
-# ── RabbitMQ ──────────────────────────────────────────────────────────────────
-def connect_rabbitmq(retries=10, delay=3):
-    for attempt in range(1, retries + 1):
-        try:
-            params = pika.URLParameters(RABBITMQ_URL)
-            conn   = pika.BlockingConnection(params)
-            ch     = conn.channel()
-            ch.queue_declare(queue=ALERT_QUEUE, durable=True)
-            log.info("RabbitMQ connected")
-            return conn, ch
-        except Exception as e:
-            log.warning(f"RabbitMQ attempt {attempt}/{retries} failed: {e}")
-            time.sleep(delay)
-    raise RuntimeError("Could not connect to RabbitMQ")
+    return {
+        "score":       score,
+        "level":       triggered_level,
+        "t_score":     t_score,
+        "h_score":     h_score,
+        "t_threshold": t_threshold,
+        "h_threshold": h_threshold,
+    }
 
 
 # ── Kafka ─────────────────────────────────────────────────────────────────────
@@ -205,46 +195,12 @@ def connect_kafka_producer(retries=10, delay=3):
     raise RuntimeError("Could not connect to Kafka producer")
 
 
-def publish_alert(
-    ch,
-    device_id: str,
-    tenant_id: str,
-    score: float,
-    level: str,
-    temperature: float | None,
-    humidity: float | None,
-    recipients: list[str],
-):
-    job = {
-        "deviceId":    device_id,
-        "tenantId":    tenant_id,
-        "score":       score,
-        "level":       level,
-        "temperature": temperature,
-        "humidity":    humidity,
-        "message":     f"Spoilage risk {level.upper()} — score {score:.2f} for device {device_id}",
-        "recipients":  recipients,   # real emails from DB
-        "retryCount":  0,
-    }
-    ch.basic_publish(
-        exchange="",
-        routing_key=ALERT_QUEUE,
-        body=json.dumps(job),
-        properties=pika.BasicProperties(
-            delivery_mode=2,
-            content_type="application/json",
-        ),
-    )
-    log.info(f"Alert queued device={device_id} level={level} score={score} recipients={len(recipients)}")
-
-
 # ── Main loop ─────────────────────────────────────────────────────────────────
 def main():
     log.info("Risk engine starting")
 
     consumer = connect_kafka_consumer()
     producer = connect_kafka_producer()
-    rmq_conn, rmq_ch = connect_rabbitmq()
 
     log.info("Risk engine running — consuming telemetry events")
 
@@ -267,34 +223,31 @@ def main():
             except (ValueError, TypeError):
                 continue
 
-            # Load per-tenant rules from DB (cached 60 s)
             rules = fetch_alert_rules(tenant_id) if tenant_id else _default_rules()
+            risk  = compute_risk_score(temperature, humidity, rules)
 
-            risk = compute_risk_score(temperature, humidity, rules)
+            # Fetch recipients only when alert will fire — avoids DB hit on every event
+            recipients: list[str] = []
+            if risk["level"] in ("warn", "critical") and tenant_id:
+                recipients = fetch_alert_recipients(tenant_id)
 
+            # Publish full risk event to Kafka — workflow-alerts consumes this
             risk_event = {
                 "device_id":   device_id,
                 "tenant_id":   tenant_id,
                 "score":       risk["score"],
                 "level":       risk["level"],
+                "t_score":     risk["t_score"],
+                "h_score":     risk["h_score"],
+                "t_threshold": risk["t_threshold"],
+                "h_threshold": risk["h_threshold"],
                 "temperature": temperature,
                 "humidity":    humidity,
+                "recipients":  recipients,
             }
             producer.send(OUT_TOPIC, value=risk_event, key=device_id.encode() if device_id else None)
 
-            if risk["level"] in ("warn", "critical"):
-                recipients = fetch_alert_recipients(tenant_id) if tenant_id else []
-                try:
-                    publish_alert(rmq_ch, device_id, tenant_id or "", risk["score"], risk["level"], temperature, humidity, recipients)
-                except Exception as e:
-                    log.error(f"RabbitMQ publish failed, reconnecting: {e}")
-                    try:
-                        rmq_conn, rmq_ch = connect_rabbitmq(retries=3, delay=1)
-                        publish_alert(rmq_ch, device_id, tenant_id or "", risk["score"], risk["level"], temperature, humidity, recipients)
-                    except Exception as e2:
-                        log.error(f"RabbitMQ reconnect failed, alert dropped: {e2}")
-
-            log.info(f"Scored device={device_id} score={risk['score']} level={risk['level']}")
+            log.info(f"Scored device={device_id} score={risk['score']} level={risk['level']} recipients={len(recipients)}")
 
         except Exception as e:
             log.error(f"Error processing message: {e}")

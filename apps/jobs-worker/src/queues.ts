@@ -44,15 +44,15 @@ export interface ExportJob {
 }
 
 export interface AlertJob {
-  tenantId: string;
-  deviceId: string;
+  tenantId:     string;
+  deviceId:     string;
   serialNumber: string;
-  alertType: "temperature" | "humidity" | "offline";
-  value: number;
-  threshold: number;
-  recipients: string[];
-  level?: string;
-  score?: number;
+  alertType:    "temperature" | "humidity" | "offline";
+  value:        number | null;
+  threshold:    number | null;
+  recipients:   string[];
+  level?:       string;
+  score?:       number;
 }
 
 export interface StripeWebhookJob {

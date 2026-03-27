@@ -1,14 +1,32 @@
 import { Kafka } from "kafkajs";
 import amqp, { Channel, ChannelModel } from "amqplib";
+import { Pool } from "pg";
 
 const KAFKA_BROKERS = (process.env.KAFKA_BROKERS || "kafka:9092").split(",");
 const RISK_TOPIC    = process.env.RISK_SCORES_TOPIC || "risk.scores";
 const GROUP_ID      = process.env.KAFKA_GROUP_ID   || "workflow-alerts";
 const RABBITMQ_URL  = process.env.RABBITMQ_URL     || "amqp://grainguard:grainguard@rabbitmq:5672/grainguard";
+const DATABASE_URL  = process.env.DATABASE_URL     || process.env.WRITE_DB_URL || "";
 const ALERT_QUEUE   = "grainguard.alerts";
 const ALERT_DLQ     = "grainguard.alerts.dlq";
 
-// Dedupe cooldown — don't re-alert same device within 5 minutes
+// ── Postgres ──────────────────────────────────────────────────────────────────
+const db = new Pool({ connectionString: DATABASE_URL });
+
+async function resolveSerialNumber(deviceId: string): Promise<string> {
+  try {
+    const { rows } = await db.query(
+      `SELECT serial_number FROM devices WHERE id = $1 LIMIT 1`,
+      [deviceId]
+    );
+    return rows[0]?.serial_number ?? deviceId;
+  } catch {
+    return deviceId; // fallback to ID on DB error
+  }
+}
+
+// ── Dedupe cooldown ───────────────────────────────────────────────────────────
+// Don't re-alert same device within 5 minutes
 const COOLDOWN_MS = 5 * 60 * 1000;
 const cooldowns   = new Map<string, number>();
 
@@ -29,6 +47,7 @@ function setCooldown(deviceId: string, tenantId: string): void {
   cooldowns.set(`${tenantId}:${deviceId}`, Date.now());
 }
 
+// ── RabbitMQ ──────────────────────────────────────────────────────────────────
 async function connectRabbitMQ(retries = 10, delay = 3000): Promise<{ conn: ChannelModel; ch: Channel }> {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
@@ -51,7 +70,7 @@ async function connectRabbitMQ(retries = 10, delay = 3000): Promise<{ conn: Chan
   throw new Error("Could not connect to RabbitMQ");
 }
 
-async function publishAlert(ch: Channel, job: object): Promise<void> {
+function publishAlert(ch: Channel, job: object): void {
   ch.sendToQueue(
     ALERT_QUEUE,
     Buffer.from(JSON.stringify(job)),
@@ -59,10 +78,11 @@ async function publishAlert(ch: Channel, job: object): Promise<void> {
   );
 }
 
+// ── Main ──────────────────────────────────────────────────────────────────────
 async function main() {
   console.log("[workflow-alerts] starting");
 
-  const { ch } = await connectRabbitMQ();
+  let { ch } = await connectRabbitMQ();
 
   const kafka    = new Kafka({ brokers: KAFKA_BROKERS, clientId: "workflow-alerts" });
   const consumer = kafka.consumer({ groupId: GROUP_ID });
@@ -78,13 +98,16 @@ async function main() {
         if (!message.value) return;
         const event = JSON.parse(message.value.toString());
 
-        const deviceId    = event.device_id   as string | undefined;
-        const tenantId    = (event.tenant_id  as string | undefined) ?? "unknown";
-        const score       = event.score       as number;
-        const level       = event.level       as string;
-        const temperature = event.temperature as number | null | undefined;
-        const humidity    = event.humidity    as number | null | undefined;
-        // Recipients are resolved by risk-engine from DB — use them directly
+        const deviceId    = event.device_id                               as string | undefined;
+        const tenantId    = (event.tenant_id as string | undefined)       ?? "unknown";
+        const score       = event.score                                   as number;
+        const level       = event.level                                   as string;
+        const temperature = event.temperature                             as number | null | undefined;
+        const humidity    = event.humidity                                as number | null | undefined;
+        const tScore      = (event.t_score   as number | undefined)       ?? 0;
+        const hScore      = (event.h_score   as number | undefined)       ?? 0;
+        const tThreshold  = event.t_threshold                             as number | null | undefined;
+        const hThreshold  = event.h_threshold                             as number | null | undefined;
         const recipients  = Array.isArray(event.recipients) ? event.recipients as string[] : [];
 
         if (!deviceId || level === "safe") return;
@@ -94,31 +117,42 @@ async function main() {
           return;
         }
 
-        // Determine dominant alert type from whichever reading is higher relative to normal
-        const alertType =
-          temperature != null
-            ? "temperature"
-            : "humidity";
+        // Determine which metric triggered based on per-metric scores
+        const alertType: "temperature" | "humidity" =
+          tScore >= hScore && temperature != null ? "temperature" : "humidity";
 
         const value     = alertType === "temperature" ? temperature : humidity;
+        const threshold = alertType === "temperature" ? tThreshold  : hThreshold;
+
+        // Resolve human-readable serial number from DB
+        const serialNumber = await resolveSerialNumber(deviceId);
 
         const alertJob = {
           tenantId,
           deviceId,
-          serialNumber: deviceId, // enriched by asset-registry downstream
+          serialNumber,
           alertType,
-          value,
+          value:      value   ?? null,
+          threshold:  threshold ?? null,
           score,
           level,
-          recipients,            // real emails, not fabricated addresses
+          recipients,
           retryCount: 0,
         };
 
-        await publishAlert(ch, alertJob);
+        try {
+          publishAlert(ch, alertJob);
+        } catch (err) {
+          console.error("[workflow-alerts] RabbitMQ publish failed, reconnecting:", err);
+          ({ ch } = await connectRabbitMQ(3, 1000));
+          publishAlert(ch, alertJob);
+        }
+
         setCooldown(deviceId, tenantId);
 
         console.log(
-          `[workflow-alerts] alert queued device=${deviceId} level=${level} score=${score} recipients=${recipients.length}`
+          `[workflow-alerts] alert queued device=${deviceId} serial=${serialNumber} ` +
+          `level=${level} score=${score} recipients=${recipients.length}`
         );
       } catch (err) {
         console.error("[workflow-alerts] error processing message:", err);

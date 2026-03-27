@@ -9,11 +9,13 @@
   },
   "dependencies": {
     "amqplib": "^0.10.3",
-    "kafkajs": "^2.2.4"
+    "kafkajs": "^2.2.4",
+    "pg": "^8.11.3"
   },
   "devDependencies": {
     "@types/amqplib": "^0.10.4",
     "@types/node": "^20.0.0",
+    "@types/pg": "^8.11.0",
     "typescript": "^5.0.0"
   }
 }
