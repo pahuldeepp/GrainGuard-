@@ -1,4 +1,4 @@
--- Migration 004: SSO columns + alert_rules table + bulk_import_jobs table
+-- Migration 009: SSO columns + alert_rules table + bulk_import_jobs table
 
 -- ── SSO columns on tenants ────────────────────────────────────────────────────
 ALTER TABLE tenants

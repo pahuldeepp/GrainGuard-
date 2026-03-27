@@ -1,9 +1,17 @@
 -- 000007_saas_columns.up.sql
 -- Adds SaaS operational columns missing from the initial schema.
 
+-- Tenant contact email used during signup and account export
+ALTER TABLE tenants
+  ADD COLUMN IF NOT EXISTS email TEXT;
+
 -- subscription_status on tenants (mirrors tenant_billing.status for fast joins)
 ALTER TABLE tenants
   ADD COLUMN IF NOT EXISTS subscription_status TEXT NOT NULL DEFAULT 'none';
+
+-- Grace-period enforcement reads the active billing period end from tenants
+ALTER TABLE tenants
+  ADD COLUMN IF NOT EXISTS current_period_end TIMESTAMPTZ;
 
 -- auth0_org_id for SSO / Auth0 Organizations
 ALTER TABLE tenants

@@ -37,7 +37,11 @@ async function connectRabbitMQ(retries = 10, delay = 3000): Promise<{ conn: Chan
 
       await ch.assertQueue(ALERT_QUEUE, {
         durable:   true,
-        arguments: { "x-dead-letter-exchange": "", "x-dead-letter-routing-key": ALERT_DLQ },
+        arguments: {
+          "x-dead-letter-exchange": "",
+          "x-dead-letter-routing-key": ALERT_DLQ,
+          "x-message-ttl": 86400000,
+        },
       });
       await ch.assertQueue(ALERT_DLQ, { durable: true });
 
