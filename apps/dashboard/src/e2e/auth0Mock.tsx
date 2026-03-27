@@ -30,6 +30,10 @@ type MockUser = Record<string, unknown> & {
   name?: string;
 };
 
+type RedirectAppState = {
+  returnTo?: string;
+};
+
 type Auth0ContextValue = {
   user?: MockUser;
   isAuthenticated: boolean;
@@ -56,15 +60,34 @@ function parseTokenPayload(token: string): MockUser | undefined {
   }
 }
 
+function toSameOriginPath(value?: string): string {
+  if (!value) return "/";
+
+  try {
+    const url = new URL(value, window.location.origin);
+    if (url.origin !== window.location.origin) return "/";
+    return `${url.pathname}${url.search}${url.hash}` || "/";
+  } catch {
+    return value.startsWith("/") ? value : "/";
+  }
+}
+
+function navigateTo(path: string, mode: "push" | "replace" = "push"): void {
+  const method = mode === "replace" ? "replaceState" : "pushState";
+  window.history[method](null, "", path);
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
 export function Auth0Provider({
   children,
+  onRedirectCallback,
 }: {
   children: ReactNode;
   domain?: string;
   clientId?: string;
   authorizationParams?: AuthorizationParams;
   cacheLocation?: string;
-  onRedirectCallback?: (appState?: { returnTo?: string }) => void;
+  onRedirectCallback?: (appState?: RedirectAppState) => void;
 }) {
   const [token, setToken] = useState<string | null>(() =>
     window.localStorage.getItem(TOKEN_KEY)
@@ -85,17 +108,20 @@ export function Auth0Provider({
       isLoading: false,
       error: undefined,
       async loginWithRedirect(options) {
-        const nextPath =
+        const returnTo = toSameOriginPath(
           options?.returnTo ??
           options?.authorizationParams?.redirect_uri ??
-          "/";
-        window.location.assign(nextPath);
+          "/"
+        );
+        navigateTo(returnTo);
+        onRedirectCallback?.({ returnTo });
       },
       logout(options) {
         window.localStorage.removeItem(TOKEN_KEY);
         setToken(null);
-        const returnTo = options?.logoutParams?.returnTo ?? "/";
-        window.location.assign(returnTo);
+        const returnTo = toSameOriginPath(options?.logoutParams?.returnTo ?? "/");
+        navigateTo(returnTo, "replace");
+        onRedirectCallback?.({ returnTo });
       },
       async getAccessTokenSilently() {
         const nextToken = token ?? window.localStorage.getItem(TOKEN_KEY);
@@ -103,7 +129,7 @@ export function Auth0Provider({
         return nextToken;
       },
     };
-  }, [token]);
+  }, [onRedirectCallback, token]);
 
   return <Auth0Context.Provider value={value}>{children}</Auth0Context.Provider>;
 }
