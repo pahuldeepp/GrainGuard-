@@ -14,13 +14,21 @@ jest.mock("../../middleware/auth", () => ({
 }));
 
 import { accountRouter } from "../account";
-import { writePool as pool } from "../../database/db";
+import { writePool } from "../../database/db";
 
 const app = express();
 app.use(express.json());
 app.use(accountRouter);
 
-const mockPool = pool as jest.Mocked<typeof pool>;
+const mockPool = writePool as unknown as { query: jest.Mock; connect: jest.Mock };
+
+beforeEach(() => {
+  mockPool.query.mockReset();
+  mockPool.connect = jest.fn().mockResolvedValue({
+    query: mockPool.query,
+    release: jest.fn(),
+  });
+});
 
 describe("GET /account/me", () => {
   it("returns user, tenant, and device count", async () => {

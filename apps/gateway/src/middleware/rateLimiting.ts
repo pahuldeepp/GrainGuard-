@@ -60,3 +60,12 @@ export const strictRateLimiter = createRateLimiter({
   maxRequests: 100,
 });
 
+export const publicRateLimiter = createRateLimiter({
+  windowSeconds: 60,
+  maxRequests: 20,
+});
+
+export const bulkRateLimiter = createRateLimiter({
+  windowSeconds: 60,
+  maxRequests: 10,
+});

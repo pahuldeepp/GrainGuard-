@@ -11,6 +11,19 @@ import { metricsHandler, requestLatency } from "./observability/metrics";
 import { requestIdMiddleware } from "./middleware/requestId";
 import { authMiddleware } from "./middleware/auth";
 import { apiRateLimiter } from "./middleware/rateLimiting";
+import { tenantsRouter } from "./routes/tenants";
+import { billingRouter, stripeWebhookHandler } from "./routes/billing";
+import { webhooksRouter } from "./routes/webhooks";
+import { apiKeysRouter } from "./routes/apiKeys";
+import { notificationPrefsRouter } from "./routes/notificationPreferences";
+import { teamRouter } from "./routes/teamMembers";
+import { ssoRouter } from "./routes/sso";
+import { alertRulesRouter } from "./routes/alertRules";
+import { devicesRouter } from "./routes/devices";
+import { devicesImportRouter } from "./routes/devicesImport";
+import { accountRouter } from "./routes/account";
+import { auditLogRouter } from "./routes/auditLog";
+import { adminRouter } from "./routes/admin";
 
 const app = express();
 
@@ -123,12 +136,33 @@ app.use("/graphql", (req: Request, res: Response) => {
   req.pipe(proxyReq, { end: true });
 });
 
+app.post(
+  "/billing/webhook",
+  express.raw({ type: "application/json" }),
+  stripeWebhookHandler
+);
+
+app.use(express.json({ limit: "1mb" }));
+
+app.use(tenantsRouter);
+app.use(billingRouter);
+app.use(webhooksRouter);
+app.use(apiKeysRouter);
+app.use(notificationPrefsRouter);
+app.use(teamRouter);
+app.use(ssoRouter);
+app.use(alertRulesRouter);
+app.use(devicesRouter);
+app.use(devicesImportRouter);
+app.use(accountRouter);
+app.use(auditLogRouter);
+app.use(adminRouter);
+
 /**
  * REST routes — express.json() applied only here
  */
 app.post(
   "/devices",
-  express.json({ limit: "10kb" }),
   apiRateLimiter,
   authMiddleware,
   async (req: Request, res: Response) => {

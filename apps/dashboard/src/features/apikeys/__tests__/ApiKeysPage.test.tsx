@@ -44,6 +44,7 @@ const API_KEYS = [
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  document.cookie = "_csrf=test-token";
 });
 
 describe("ApiKeysPage", () => {
@@ -85,9 +86,13 @@ describe("ApiKeysPage", () => {
     await userEvent.click(screen.getByText("Create Key"));
 
     await waitFor(() => {
-      expect(screen.getByText("gg_secret_abc123")).toBeInTheDocument();
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        expect.stringContaining("/api-keys"),
+        expect.objectContaining({ method: "POST" }),
+      );
     });
-    expect(screen.getByText(/copy your api key now/i)).toBeInTheDocument();
+    expect(screen.getByText(/copy your api key now/i, { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("gg_secret_abc123")).toBeInTheDocument();
   });
 
   it("deletes/revokes a key", async () => {

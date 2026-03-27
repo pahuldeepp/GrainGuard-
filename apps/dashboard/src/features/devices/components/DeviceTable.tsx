@@ -5,8 +5,6 @@ import { DeviceRowSkeleton } from "../../../shared/components/Skeleton";
 import { TelemetryBadge } from "../../telemetry/components/TelemetryBadge";
 import { useNavigate } from "react-router-dom";
 
-const VIRTUALIZATION_THRESHOLD = 100;
-
 interface Props {
   devices: Device[];
   loading: boolean;

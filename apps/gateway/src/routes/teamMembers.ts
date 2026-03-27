@@ -78,7 +78,8 @@ teamRouter.post(
 
     // Send Auth0 org invite so the user gets an email and lands in the org
     pool.query("SELECT auth0_org_id FROM tenants WHERE id = $1", [tenantId])
-      .then(({ rows }) => {
+      .then((result: { rows: Array<{ auth0_org_id?: string }> }) => {
+        const rows = result.rows;
         if (!rows[0]?.auth0_org_id) return;
         return inviteToOrg({
           orgId:       rows[0].auth0_org_id,
@@ -184,22 +185,23 @@ teamRouter.post(
     }
 
     const invite = rows[0];
+    const client = await pool.connect();
 
     try {
-      await pool.query("BEGIN");
+      await client.query("BEGIN");
 
-      await pool.query(
+      await client.query(
         `INSERT INTO tenant_users (id, tenant_id, auth_user_id, email, role, created_at)
          VALUES ($1, $2, $3, $4, $5, NOW())`,
         [uuidv4(), invite.tenant_id, req.user!.sub, invite.email, invite.role]
       );
 
-      await pool.query(
+      await client.query(
         "UPDATE tenant_invites SET accepted_at = NOW() WHERE id = $1",
         [invite.id]
       );
 
-      await pool.query("COMMIT");
+      await client.query("COMMIT");
 
       setUserTenantId(req.user!.sub, invite.tenant_id).catch((_e: unknown) =>
         console.error("[team] failed to set Auth0 tenant_id:", _e)
@@ -220,12 +222,14 @@ teamRouter.post(
 
       return res.json({ accepted: true, tenantId: invite.tenant_id, role: invite.role });
     } catch (err: any) {
-      await pool.query("ROLLBACK");
+      await client.query("ROLLBACK").catch(() => {});
       if (err.code === "23505") {
         return res.status(409).json({ error: "already_a_member" });
       }
       console.error("[team] accept error:", err);
       return res.status(500).json({ error: "internal_error" });
+    } finally {
+      client.release();
     }
   }
 );

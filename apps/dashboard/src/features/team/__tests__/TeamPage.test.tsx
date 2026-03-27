@@ -39,6 +39,7 @@ function mockInitialLoad() {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  vi.spyOn(window, "confirm").mockReturnValue(true);
 });
 
 describe("TeamPage", () => {
@@ -56,7 +57,7 @@ describe("TeamPage", () => {
     await waitFor(() => expect(screen.queryByText(/loading/i)).not.toBeInTheDocument());
 
     await userEvent.click(screen.getByText("+ Invite Member"));
-    expect(screen.getByText("Send Invite")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Send Invite" })).toBeInTheDocument();
     expect(screen.getByPlaceholderText("colleague@example.com")).toBeInTheDocument();
   });
 
@@ -105,8 +106,6 @@ describe("TeamPage", () => {
     mockInitialLoad();
     render(<TeamPage />);
     await waitFor(() => expect(screen.queryByText(/loading/i)).not.toBeInTheDocument());
-
-    vi.spyOn(window, "confirm").mockReturnValue(true);
 
     // Mock DELETE call
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({

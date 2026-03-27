@@ -5,6 +5,21 @@ reviews:
   high_level_summary: true
   poem: false
   path_instructions:
+    - path: "apps/gateway/src/**/*.ts"
+      instructions: |
+        Verify every mutating route uses a real transaction client instead of pool-level BEGIN/COMMIT.
+        Check webhook and billing handlers do not acknowledge success before durable publish/persist succeeds.
+        Verify tenantId, RBAC, and CSRF protections are applied consistently on all protected routes.
+        Check route modules are actually mounted in server startup and not left unreachable.
+    - path: "apps/dashboard/src/**/*.tsx"
+      instructions: |
+        Check React Testing Library queries match accessible markup and do not rely on brittle copy.
+        Verify route-level code splitting is preserved for heavy pages.
+        Check Auth0, routing, and API fetch flows avoid accidental full-page redirects in tests.
+    - path: "apps/telemetry-service/**/*.go"
+      instructions: |
+        Verify device creation writes remain tenant-scoped and outbox publishing is not skipped in production paths.
+        Check nil dependency guards exist only for tests and do not weaken runtime behavior.
     - path: "apps/read-model-builder/**/*.go"
       instructions: |
         Check pgx rows.Err() after rows.Close().
@@ -18,6 +33,11 @@ reviews:
     - path: "apps/load-generator/**"
       instructions: |
         Verify eventId and tenantId are always set.
+    - path: "apps/jobs-worker/src/**/*.ts"
+      instructions: |
+        Check Stripe event handlers recover tenant context safely and do not silently drop subscription lifecycle events.
+    - path: "apps/workflow-alerts/src/**/*.ts"
+      instructions: |
+        Verify alert delivery remains idempotent and tenant-scoped, especially across retries and webhook fan-out.
 chat:
   auto_reply: true
-

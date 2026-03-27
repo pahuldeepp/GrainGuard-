@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../../lib/apiFetch";
+import { getAccessTokenSilently } from "../../lib/auth0";
 import { useAuth } from "../../hooks/useAuth";
 import toast from "react-hot-toast";
 
@@ -39,17 +40,6 @@ export function SettingsPage() {
       ]);
       setAccount(acct);
       setNotifPrefs(prefs);
-    } catch (e) {
-      toast.error("Failed to load account info");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function loadAccount() {
-    try {
-      const data = await apiFetch("/account/me");
-      setAccount(data);
     } catch (e) {
       toast.error("Failed to load account info");
     } finally {

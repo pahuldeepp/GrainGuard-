@@ -10,17 +10,19 @@ const STRIPE_BILLING_QUEUE = "grainguard.stripe.billing";
 
 async function publishToStripeQueue(payload: object): Promise<void> {
   let conn: Awaited<ReturnType<typeof amqp.connect>> | null = null;
+  let ch: amqp.ConfirmChannel | null = null;
   try {
     conn = await amqp.connect(RABBITMQ_URL);
-    const ch = await conn.createChannel();
+    ch = await conn.createConfirmChannel();
     await ch.assertQueue(STRIPE_BILLING_QUEUE, { durable: true });
     ch.sendToQueue(
       STRIPE_BILLING_QUEUE,
       Buffer.from(JSON.stringify(payload)),
       { persistent: true }
     );
-    await ch.close();
+    await ch.waitForConfirms();
   } finally {
+    await ch?.close().catch(() => {});
     conn?.close().catch(() => {});
   }
 }
@@ -132,6 +134,12 @@ billingRouter.post(
         tenantId: req.user!.tenantId,
         plan,
       },
+      subscription_data: {
+        metadata: {
+          tenantId: req.user!.tenantId,
+          plan,
+        },
+      },
     });
 
     await writeAuditLog({
@@ -179,42 +187,31 @@ billingRouter.post(
   }
 );
 
-// ── POST /billing/webhook ─────────────────────────────────────────────────
-// Verifies Stripe signature immediately and returns 200 fast.
-// Actual processing is delegated to jobs-worker via RabbitMQ for reliability:
-//   retry on failure, DLQ on repeated failure, idempotency in DB.
-billingRouter.post(
-  "/billing/webhook",
-  async (req: Request, res: Response) => {
-    const sig = req.headers["stripe-signature"] as string;
+export async function stripeWebhookHandler(req: Request, res: Response) {
+  const sig = req.headers["stripe-signature"] as string;
 
-    let event: Stripe.Event;
-    try {
-      event = stripe.webhooks.constructEvent(
-        req.body,
-        sig,
-        process.env.STRIPE_WEBHOOK_SECRET!
-      );
-    } catch (err: any) {
-      console.error("[billing] webhook signature failed:", err.message);
-      return res.status(400).send(`Webhook Error: ${err.message}`);
-    }
-
-    // Return 200 to Stripe immediately — stops their retry clock
-    res.json({ received: true });
-
-    // Publish to RabbitMQ for reliable async processing
-    try {
-      await publishToStripeQueue({
-        stripeEventId:   event.id,
-        stripeEventType: event.type,
-        payload:         event.data.object,
-      });
-      console.log(`[billing] queued stripe event ${event.type} id=${event.id}`);
-    } catch (err) {
-      // Log but don't crash — Stripe will retry if we failed to queue.
-      // The idempotency table prevents double-processing on retry.
-      console.error("[billing] failed to queue stripe event:", err);
-    }
+  let event: Stripe.Event;
+  try {
+    event = stripe.webhooks.constructEvent(
+      req.body,
+      sig,
+      process.env.STRIPE_WEBHOOK_SECRET!
+    );
+  } catch (err: any) {
+    console.error("[billing] webhook signature failed:", err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
   }
-);
+
+  try {
+    await publishToStripeQueue({
+      stripeEventId: event.id,
+      stripeEventType: event.type,
+      payload: event.data.object,
+    });
+    console.log(`[billing] queued stripe event ${event.type} id=${event.id}`);
+    return res.json({ received: true });
+  } catch (err) {
+    console.error("[billing] failed to queue stripe event:", err);
+    return res.status(500).json({ error: "queue_publish_failed" });
+  }
+}

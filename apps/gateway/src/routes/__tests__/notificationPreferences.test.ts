@@ -19,7 +19,7 @@ const app = express();
 app.use(express.json());
 app.use(notificationPrefsRouter);
 
-const mockPool = pool as jest.Mocked<typeof pool>;
+const mockPool = pool as unknown as { query: jest.Mock };
 
 describe("GET /notifications/preferences", () => {
   it("returns defaults when no prefs exist", async () => {

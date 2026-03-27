@@ -1,4 +1,5 @@
-﻿import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+﻿import { createContext, useContext, useState, useEffect } from "react";
+import type { ReactNode } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
 
 // Auth0 Action injects claims under https://grainguard.com/ namespace

@@ -30,11 +30,11 @@ spec:
             - name: KAFKA_BROKERS
               value: kafka:9092
             - name: JWKS_URL
-              value: http://keycloak:8080/realms/grainguard/protocol/openid-connect/certs
+              value: https://dev-dz6bl3nngdeib7ro.us.auth0.com/.well-known/jwks.json
             - name: JWT_ISSUER
-              value: http://keycloak:8080/realms/grainguard
+              value: https://dev-dz6bl3nngdeib7ro.us.auth0.com/
             - name: JWT_AUDIENCE
-              value: grainguard-gateway
+              value: https://api.grainguard.com
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: otel-collector:4317
           resources:

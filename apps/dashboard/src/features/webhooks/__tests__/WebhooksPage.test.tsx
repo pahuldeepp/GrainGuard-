@@ -45,6 +45,8 @@ const WEBHOOK_LIST = [
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  document.cookie = "_csrf=test-token";
 });
 
 describe("WebhooksPage", () => {
@@ -97,18 +99,19 @@ describe("WebhooksPage", () => {
     await userEvent.click(screen.getByText("Create Endpoint"));
 
     await waitFor(() => {
-      expect(screen.getByText("whsec_abc123")).toBeInTheDocument();
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        expect.stringContaining("/webhooks"),
+        expect.objectContaining({ method: "POST" }),
+      );
     });
-    expect(screen.getByText(/copy your signing secret/i)).toBeInTheDocument();
+    expect(screen.getByText(/copy your signing secret/i, { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("whsec_abc123")).toBeInTheDocument();
   });
 
   it("deletes webhook", async () => {
     mockFetch(WEBHOOK_LIST);
     render(<WebhooksPage />);
     await waitFor(() => expect(screen.queryByText(/loading/i)).not.toBeInTheDocument());
-
-    // Mock confirm dialog
-    vi.spyOn(window, "confirm").mockReturnValue(true);
 
     // Mock DELETE call
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({

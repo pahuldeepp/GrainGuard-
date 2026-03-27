@@ -25,13 +25,13 @@ jest.mock("../../lib/auth", () => ({
 }));
 
 import { alertRulesRouter } from "../alertRules";
-import { pool } from "../../lib/db";
+import { writePool } from "../../lib/db";
 
 const app = express();
 app.use(express.json());
 app.use(alertRulesRouter);
 
-const mockPool = pool as jest.Mocked<typeof pool>;
+const mockPool = writePool as unknown as { query: jest.Mock };
 
 // ── Tests ─────────────────────────────────────────────────────────────────
 

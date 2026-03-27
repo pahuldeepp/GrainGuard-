@@ -184,6 +184,20 @@ bash tests/chaos/run-all.sh
 ./scripts/replay/replay_test.sh
 ```
 
+## Code Review Automation
+
+This repository is preconfigured for CodeRabbit via [`/.coderabbit.yaml`](./.coderabbit.yaml).
+
+To enable automated PR reviews:
+
+1. Install the CodeRabbit GitHub App on this repository.
+2. Open or update a pull request.
+3. CodeRabbit will use the repo-specific review instructions in `.coderabbit.yaml` when reviewing changed files.
+
+Notes:
+- The current config gives extra review guidance for `gateway`, `dashboard`, `telemetry-service`, `read-model-builder`, `bff`, `jobs-worker`, and `workflow-alerts`.
+- The GitHub App installation is the only step that cannot be completed from local code alone.
+
 ---
 
 ## Observability
