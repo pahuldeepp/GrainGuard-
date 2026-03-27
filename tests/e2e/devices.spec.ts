@@ -76,7 +76,9 @@ test.describe("Devices page", () => {
     const refreshBtn = page.getByRole("button", { name: "Refresh" });
     await expect(refreshBtn).toBeVisible({ timeout: 10_000 });
     const refreshRequest = page.waitForResponse((response) =>
-      response.url().includes("/graphql") && response.request().method() === "POST"
+      response.url().includes("/graphql") &&
+      response.request().method() === "POST" &&
+      /devices|Devices/.test(response.request().postData() ?? "")
     );
     await refreshBtn.click();
     await refreshRequest;

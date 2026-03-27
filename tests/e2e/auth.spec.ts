@@ -11,7 +11,7 @@ test.describe("Auth wall", () => {
     await expect(loginBtn).toBeVisible({ timeout: 10_000 });
   });
 
-  test("protected route redirects to login", async ({ page }) => {
+  test("protected route shows login prompt when unauthenticated", async ({ page }) => {
     await page.goto("/billing");
     const loginBtn = page.getByRole("button", { name: /log in|sign in/i });
     await expect(loginBtn).toBeVisible({ timeout: 10_000 });

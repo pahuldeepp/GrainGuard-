@@ -36,6 +36,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate namespace allowlist
+        run: |
+          case "$NAMESPACE" in
+            grainguard-dev)
+              ;;
+            *)
+              echo "Unsupported namespace: $NAMESPACE"
+              exit 1
+              ;;
+          esac
+
       - name: Configure kubectl
         uses: azure/setup-kubectl@v3
         with:

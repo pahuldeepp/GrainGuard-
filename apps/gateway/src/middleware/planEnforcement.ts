@@ -69,16 +69,32 @@ async function getTenantPlan(tenantId: string): Promise<TenantPlan> {
 
   try {
     const cached = await redis.get(cacheKey);
-    if (cached) return JSON.parse(cached) as TenantPlan;
-  } catch {
-    // Redis unavailable — fall through to DB
+    if (cached) {
+      try {
+        return JSON.parse(cached) as TenantPlan;
+      } catch (error) {
+        console.warn("Invalid tenant plan cache entry", { tenantId, error });
+      }
+    }
+  } catch (error) {
+    console.warn("Tenant plan cache lookup failed", { tenantId, error });
   }
 
-  const { rows } = await pool.query(
-    `SELECT plan, subscription_status, current_period_end
-     FROM tenants WHERE id = $1`,
-    [tenantId]
-  );
+  let rows: Array<{
+    plan?: string;
+    subscription_status?: string;
+    current_period_end?: string | null;
+  }>;
+  try {
+    ({ rows } = await pool.query(
+      `SELECT plan, subscription_status, current_period_end
+       FROM tenants WHERE id = $1`,
+      [tenantId]
+    ));
+  } catch (error) {
+    console.error("Tenant plan query failed", { tenantId, error });
+    throw error;
+  }
 
   if (rows.length === 0) {
     return { plan: "free", subscriptionStatus: "none", currentPeriodEnd: null };
@@ -92,8 +108,8 @@ async function getTenantPlan(tenantId: string): Promise<TenantPlan> {
 
   try {
     await redis.set(cacheKey, JSON.stringify(result), "EX", CACHE_TTL);
-  } catch {
-    // Non-critical
+  } catch (error) {
+    console.warn("Tenant plan cache write failed", { tenantId, error });
   }
 
   return result;
@@ -104,7 +120,10 @@ async function getDeviceCount(tenantId: string): Promise<number> {
 
   try {
     const cached = await redis.get(cacheKey);
-    if (cached) return parseInt(cached, 10);
+    if (cached) {
+      const parsed = parseInt(cached, 10);
+      if (!Number.isNaN(parsed)) return parsed;
+    }
   } catch { /* ignore */ }
 
   const { rows } = await pool.query(
@@ -135,18 +154,31 @@ export async function invalidatePlanCache(tenantId: string): Promise<void> {
   try {
     await redis.del(`tenant_plan:${tenantId}`);
     await redis.del(`device_count:${tenantId}`);
-  } catch {
-    // Non-critical
+  } catch (error) {
+    console.warn("Plan cache invalidation failed", { tenantId, error });
   }
+}
+
+function requireTenantId(req: Request, res: Response): string | null {
+  const tenantId = req.user?.tenantId;
+  if (!tenantId) {
+    res.status(401).json({
+      error: "authentication_required",
+      message: "Authentication required.",
+    });
+    return null;
+  }
+  return tenantId;
 }
 
 // ─── requireActiveSubscription ────────────────────────────────────────────────
 
 export function requireActiveSubscription() {
   return async (req: Request, res: Response, next: NextFunction) => {
-    if (!req.user?.tenantId) return next();
+    const tenantId = requireTenantId(req, res);
+    if (!tenantId) return;
 
-    const tenant = await getTenantPlan(req.user.tenantId);
+    const tenant = await getTenantPlan(tenantId);
 
     if (tenant.plan === "free") return next();
 
@@ -184,7 +216,9 @@ export function requireActiveSubscription() {
 
 export function enforceDeviceQuota() {
   return async (req: Request, res: Response, next: NextFunction) => {
-    const tenantId = req.user!.tenantId;
+    const tenantId = requireTenantId(req, res);
+    if (!tenantId) return;
+
     const tenant = await getTenantPlan(tenantId);
     const limits = PLAN_LIMITS[tenant.plan] ?? PLAN_LIMITS.free;
 
@@ -211,7 +245,9 @@ export function enforceDeviceQuota() {
 
 export function enforceBulkDeviceQuota() {
   return async (req: Request, res: Response, next: NextFunction) => {
-    const tenantId = req.user!.tenantId;
+    const tenantId = requireTenantId(req, res);
+    if (!tenantId) return;
+
     const tenant = await getTenantPlan(tenantId);
     const limits = PLAN_LIMITS[tenant.plan] ?? PLAN_LIMITS.free;
 
@@ -246,7 +282,9 @@ export function enforceBulkDeviceQuota() {
 
 export function enforceAlertRuleQuota() {
   return async (req: Request, res: Response, next: NextFunction) => {
-    const tenantId = req.user!.tenantId;
+    const tenantId = requireTenantId(req, res);
+    if (!tenantId) return;
+
     const tenant = await getTenantPlan(tenantId);
     const limits = PLAN_LIMITS[tenant.plan] ?? PLAN_LIMITS.free;
 
@@ -273,7 +311,9 @@ export function enforceAlertRuleQuota() {
 
 export function requireFeature(feature: keyof PlanLimits) {
   return async (req: Request, res: Response, next: NextFunction) => {
-    const tenantId = req.user!.tenantId;
+    const tenantId = requireTenantId(req, res);
+    if (!tenantId) return;
+
     const tenant = await getTenantPlan(tenantId);
     const limits = PLAN_LIMITS[tenant.plan] ?? PLAN_LIMITS.free;
 

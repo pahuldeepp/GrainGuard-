@@ -9,28 +9,30 @@ function b64(obj: object): string {
   return Buffer.from(JSON.stringify(obj)).toString("base64url");
 }
 
-const HEADER  = b64({ alg: "RS256", typ: "JWT" });
-const PAYLOAD = b64({
+const CLIENT_ID = process.env.VITE_AUTH0_CLIENT_ID || "e2e-client-id";
+const AUDIENCE = process.env.VITE_AUTH0_AUDIENCE || "https://api.grainguard.test";
+
+const HEADER = b64({ alg: "RS256", typ: "JWT" });
+const TOKEN_PAYLOAD = {
   sub:    "auth0|e2e-test-user",
   email:  "e2e@grainguard.com",
   name:   "E2E Test User",
   iss:    "https://e2e.auth0.local/",
-  aud:    "https://api.grainguard.test",
+  aud:    AUDIENCE,
   iat:    Math.floor(Date.now() / 1000),
   exp:    Math.floor(Date.now() / 1000) + 86400, // 24h
   "https://grainguard.com/tenant_id": "00000000-0000-0000-0000-000000000001",
   "https://grainguard.com/roles":     ["admin", "superadmin"],
   "https://grainguard/tenant_id": "00000000-0000-0000-0000-000000000001",
   "https://grainguard/roles":     ["admin", "superadmin"],
-});
+};
+const PAYLOAD = b64(TOKEN_PAYLOAD);
 
 export const FAKE_TOKEN = `${HEADER}.${PAYLOAD}.fake_signature`;
 
 // ─── Auth0 localStorage cache key ────────────────────────────────────────────
 // auth0-spa-js reads from this key to decide if the user is authenticated.
 
-const CLIENT_ID = process.env.VITE_AUTH0_CLIENT_ID || "e2e-client-id";
-const AUDIENCE  = process.env.VITE_AUTH0_AUDIENCE  || "https://api.grainguard.test";
 const AUTH0_CACHE_KEY = `@@auth0spajs@@::${CLIENT_ID}::${AUDIENCE}::openid profile email`;
 
 const AUTH0_CACHE_VALUE = JSON.stringify({
@@ -44,9 +46,9 @@ const AUTH0_CACHE_VALUE = JSON.stringify({
       encoded: { header: HEADER, payload: PAYLOAD, signature: "fake" },
       header:  { alg: "RS256", typ: "JWT" },
       user: {
-        sub:   "auth0|e2e-test-user",
-        email: "e2e@grainguard.com",
-        name:  "E2E Test User",
+        sub: TOKEN_PAYLOAD.sub,
+        email: TOKEN_PAYLOAD.email,
+        name: TOKEN_PAYLOAD.name,
         "https://grainguard.com/tenant_id": "00000000-0000-0000-0000-000000000001",
         "https://grainguard.com/roles": ["admin", "superadmin"],
         "https://grainguard/tenant_id": "00000000-0000-0000-0000-000000000001",

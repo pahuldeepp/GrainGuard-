@@ -26,7 +26,7 @@ jobs:
         working-directory: apps/dashboard
 
       - name: Install E2E deps
-        run: npm install --save-dev @playwright/test typescript ts-node
+        run: npm install --no-save @playwright/test typescript ts-node
         working-directory: tests/e2e
 
       - name: Install Playwright browsers
@@ -37,12 +37,12 @@ jobs:
         run: npm run build
         working-directory: apps/dashboard
         env:
-          VITE_E2E_MOCK_AUTH:   "true"
-          VITE_AUTH0_DOMAIN:    e2e.auth0.local
+          VITE_E2E_MOCK_AUTH: "true"
+          VITE_AUTH0_DOMAIN: e2e.auth0.local
           VITE_AUTH0_CLIENT_ID: e2e-client-id
-          VITE_AUTH0_AUDIENCE:  https://api.grainguard.test
-          VITE_BFF_URL:         http://localhost:5173/graphql
-          VITE_GATEWAY_URL:     http://localhost:5173
+          VITE_AUTH0_AUDIENCE: https://api.grainguard.test
+          VITE_BFF_URL: http://localhost:5173/graphql
+          VITE_GATEWAY_URL: http://localhost:5173
 
       - name: Serve dashboard
         run: npx serve -s dist -l 5173 &
@@ -55,9 +55,9 @@ jobs:
         run: npx playwright test --config playwright.config.ts
         working-directory: tests/e2e
         env:
-          E2E_BASE_URL:         http://localhost:5173
+          E2E_BASE_URL: http://localhost:5173
           VITE_AUTH0_CLIENT_ID: e2e-client-id
-          VITE_AUTH0_AUDIENCE:  https://api.grainguard.test
+          VITE_AUTH0_AUDIENCE: https://api.grainguard.test
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4
@@ -73,3 +73,5 @@ jobs:
         with:
           name: playwright-results-${{ github.run_number }}
           path: tests/e2e/playwright-results.xml
+          retention-days: 14
+          if-no-files-found: ignore

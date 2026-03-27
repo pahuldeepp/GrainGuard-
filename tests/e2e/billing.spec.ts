@@ -26,7 +26,7 @@ test.describe("Billing page", () => {
     await expect(contactButton).toBeEnabled();
   });
 
-  test("Upgrade button for Starter exists and is clickable", async ({ page }) => {
+  test("Starter upgrade button is visible and enabled", async ({ page }) => {
     const upgradeBtn = page.getByRole("button", { name: "Upgrade" }).first();
     await expect(upgradeBtn).toBeVisible({ timeout: 10_000 });
     await expect(upgradeBtn).toBeEnabled();
