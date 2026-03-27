@@ -71,11 +71,11 @@ jobs:
           JWT_ISSUER:       ${{ secrets.PERF_JWT_ISSUER }}
           JWT_AUDIENCE:     ${{ secrets.PERF_JWT_AUDIENCE }}
           ALLOWED_ORIGINS:  http://localhost:5173
-          STRIPE_SECRET_KEY:   sk_test_placeholder
-          STRIPE_WEBHOOK_SECRET: whsec_placeholder
-          STRIPE_PRICE_STARTER:       price_placeholder
-          STRIPE_PRICE_PROFESSIONAL:  price_placeholder
-          STRIPE_PRICE_ENTERPRISE:    price_placeholder
+          STRIPE_SECRET_KEY: ${{ secrets.PERF_STRIPE_SECRET_KEY || 'stripe-disabled' }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.PERF_STRIPE_WEBHOOK_SECRET || 'whsec-disabled' }}
+          STRIPE_PRICE_STARTER: price_placeholder
+          STRIPE_PRICE_PROFESSIONAL: price_placeholder
+          STRIPE_PRICE_ENTERPRISE: price_placeholder
           DASHBOARD_URL:    http://localhost:5173
           AUTH0_DOMAIN:         placeholder.auth0.com
           AUTH0_MANAGEMENT_CLIENT_ID: placeholder
