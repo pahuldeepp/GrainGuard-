@@ -197,9 +197,10 @@ export async function stripeWebhookHandler(req: Request, res: Response) {
       sig,
       process.env.STRIPE_WEBHOOK_SECRET!
     );
-  } catch (err: any) {
-    console.error("[billing] webhook signature failed:", err.message);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
+  } catch (err: unknown) {
+    const errorMessage = err instanceof Error ? err.message : "unknown";
+    console.error("[billing] webhook signature failed:", errorMessage);
+    return res.status(400).send("Webhook Error: invalid signature");
   }
 
   try {

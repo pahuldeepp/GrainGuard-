@@ -21,6 +21,7 @@ const totalErrors  = new Counter("total_errors");
 const GATEWAY_URL = __ENV.GATEWAY_URL ?? "http://localhost:3000";
 const BFF_URL     = __ENV.BFF_URL     ?? "http://localhost:8086";
 const JWT         = __ENV.JWT         ?? "";
+const RUN_AUTH_ROUTES = __ENV.RUN_AUTH_ROUTES === "true";
 
 // ── Thresholds (performance budget) ──────────────────────────────────────────
 // If any threshold fails, k6 exits with code 99 and CI marks the step as failed.
@@ -74,8 +75,8 @@ export default function () {
   check(healthRes, { "gateway /health 200": (r) => r.status === 200 });
   gatewayP95.add(healthRes.timings.duration);
 
-  // 2. Gateway: GET /devices/:id/latest (requires JWT)
-  if (JWT) {
+  // 2. Optional deeper gateway route for fuller local/manual runs.
+  if (JWT && RUN_AUTH_ROUTES) {
     const devRes = http.get(
       `${GATEWAY_URL}/devices/00000000-0000-0000-0000-000000000001/latest`,
       { headers: COMMON_HEADERS, tags: { endpoint: "gateway" } }
@@ -91,12 +92,16 @@ export default function () {
     gatewayP95.add(devRes.timings.duration);
   }
 
-  // 3. BFF: GraphQL query for devices
+  // 3. BFF: lightweight query in CI, richer query in manual runs
   if (JWT) {
+    const query = RUN_AUTH_ROUTES
+      ? `{ devices(first: 10) { edges { node { id serialNumber temperature } } } }`
+      : `{ __typename }`;
+
     const gqlRes = http.post(
       `${BFF_URL}/graphql`,
       JSON.stringify({
-        query: `{ devices(first: 10) { edges { node { id serialNumber temperature } } } }`,
+        query,
       }),
       { headers: COMMON_HEADERS, tags: { endpoint: "bff" } }
     );

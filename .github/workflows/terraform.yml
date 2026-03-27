@@ -13,14 +13,13 @@ on:
 env:
   TF_VERSION: "1.7.5"
   AWS_REGION: "us-east-1"
-  TF_SECRETS_CONFIGURED: ${{ secrets.AWS_TF_ROLE_ARN != '' && secrets.TF_VAR_DB_PASSWORD != '' }}
 
 jobs:
   # ── Plan — runs on every PR that touches terraform/ ────────────────────────
   plan:
     name: Terraform Plan (${{ matrix.env }})
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' && env.TF_SECRETS_CONFIGURED == 'true'
+    if: github.event_name == 'pull_request'
     strategy:
       matrix:
         env: [dev, prod]
@@ -36,34 +35,51 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check required Terraform secrets
+        id: secrets
+        run: |
+          if [ -n "${{ secrets.AWS_TF_ROLE_ARN }}" ] && [ -n "${{ secrets.TF_VAR_DB_PASSWORD }}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Terraform secrets are not configured; skipping plan."
+          fi
+
       - name: Configure AWS credentials (OIDC)
+        if: steps.secrets.outputs.enabled == 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_TF_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Set up Terraform
+        if: steps.secrets.outputs.enabled == 'true'
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
       - name: Terraform Init
+        if: steps.secrets.outputs.enabled == 'true'
         run: terraform init -input=false
 
       - name: Terraform Format check
+        if: steps.secrets.outputs.enabled == 'true'
         run: terraform fmt -check -recursive
 
       - name: Terraform Validate
+        if: steps.secrets.outputs.enabled == 'true'
         run: terraform validate
 
       - name: Terraform Plan
         id: plan
+        if: steps.secrets.outputs.enabled == 'true'
         env:
           TF_VAR_db_password: ${{ secrets.TF_VAR_DB_PASSWORD }}
         run: terraform plan -input=false -no-color -out=tfplan 2>&1 | tee plan.txt
         continue-on-error: true   # we post the plan even if it fails
 
       - name: Post plan as PR comment
+        if: steps.secrets.outputs.enabled == 'true'
         uses: actions/github-script@v7
         with:
           script: |
@@ -78,14 +94,14 @@ jobs:
             });
 
       - name: Fail if plan errored
-        if: steps.plan.outcome == 'failure'
+        if: steps.secrets.outputs.enabled == 'true' && steps.plan.outcome == 'failure'
         run: exit 1
 
   # ── Apply — runs only on push to master (after PR merged) ──────────────────
   apply:
     name: Terraform Apply (dev)
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && env.TF_SECRETS_CONFIGURED == 'true'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     environment: dev               # requires manual approval in GitHub Environments
     defaults:
       run:
@@ -98,21 +114,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check required Terraform secrets
+        id: secrets
+        run: |
+          if [ -n "${{ secrets.AWS_TF_ROLE_ARN }}" ] && [ -n "${{ secrets.TF_VAR_DB_PASSWORD }}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Terraform secrets are not configured; skipping apply."
+          fi
+
       - name: Configure AWS credentials (OIDC)
+        if: steps.secrets.outputs.enabled == 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_TF_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Set up Terraform
+        if: steps.secrets.outputs.enabled == 'true'
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
       - name: Terraform Init
+        if: steps.secrets.outputs.enabled == 'true'
         run: terraform init -input=false
 
       - name: Terraform Apply
+        if: steps.secrets.outputs.enabled == 'true'
         env:
           TF_VAR_db_password: ${{ secrets.TF_VAR_DB_PASSWORD }}
         run: terraform apply -input=false -auto-approve

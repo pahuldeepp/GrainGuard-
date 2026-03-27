@@ -184,7 +184,10 @@ devicesImportRouter.post(
 
     bb.on("error", (err: Error) => {
       console.error("[bulk-import] busboy error:", err);
-      emit({ error: "parse_error", message: err.message });
+      emit({
+        error: "parse_error",
+        message: process.env.NODE_ENV !== "production" ? err.message : "upload_parse_failed",
+      });
       res.end();
     });
 
