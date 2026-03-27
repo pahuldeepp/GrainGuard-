@@ -96,7 +96,7 @@ func main() {
 
 	// Application services
 	createDeviceService    := application.NewCreateDeviceService(pool, deviceRepo, outboxRepo)
-	recordTelemetryService := application.NewRecordTelemetryService(pool, telemetryRepo, outboxRepo)
+	recordTelemetryService := application.NewRecordTelemetryService(pool, deviceRepo, telemetryRepo, outboxRepo)
 
 	// Auth
 	authEnabled := envBool("AUTH_ENABLED", false)

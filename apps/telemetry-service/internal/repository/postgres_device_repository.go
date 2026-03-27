@@ -36,11 +36,11 @@ func (r *PostgresDeviceRepository) Save(ctx context.Context, device *domain.Devi
 
 func (r *PostgresDeviceRepository) FindByID(ctx context.Context, id uuid.UUID) (*domain.Device, error) {
 	row := r.db.QueryRow(ctx,
-		`SELECT id, tenant_id, serial_number, created_at
+		`SELECT id, tenant_id, serial_number, disabled, created_at
 		 FROM devices WHERE id=$1`, id)
 
 	var d domain.Device
-	err := row.Scan(&d.ID, &d.TenantID, &d.SerialNumber, &d.CreatedAt)
+	err := row.Scan(&d.ID, &d.TenantID, &d.SerialNumber, &d.Disabled, &d.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
