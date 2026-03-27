@@ -112,6 +112,8 @@ app.use("/graphql", (req: Request, res: Response) => {
     if (val !== undefined) headers[key] = val;
   }
   headers["host"] = `${BFF_HOST}:${BFF_PORT}`;
+  // Ensure correlation ID is always forwarded even if not set by client
+  if (req.requestId) headers["x-request-id"] = req.requestId;
 
   const options: http.RequestOptions = {
     hostname: BFF_HOST,

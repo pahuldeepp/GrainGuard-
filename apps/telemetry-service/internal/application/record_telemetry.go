@@ -13,6 +13,7 @@ import (
 
 	"github.com/pahuldeepp/grainguard/apps/telemetry-service/internal/domain"
 	"github.com/pahuldeepp/grainguard/apps/telemetry-service/internal/repository"
+	"github.com/pahuldeepp/grainguard/libs/correlationid"
 )
 
 type RecordTelemetryService struct {
@@ -47,6 +48,8 @@ func (s *RecordTelemetryService) Execute(
 	if err != nil {
 		return err
 	}
+
+	corrID := correlationid.FromContext(ctx)
 
 	// Reject ingest from disabled devices (over-quota tenants)
 	device, err := s.deviceRepo.FindByID(ctx, deviceUUID)
@@ -106,6 +109,7 @@ func (s *RecordTelemetryService) Execute(
 		deviceID,
 		"telemetry.recorded",
 		payloadBytes,
+		corrID,
 	)
 	if err != nil {
 		return err

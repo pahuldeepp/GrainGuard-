@@ -133,6 +133,7 @@ func main() {
 			grpc.Creds(creds),
 			grpc.StatsHandler(otelgrpc.NewServerHandler()),
 			grpc.ChainUnaryInterceptor(
+				interceptors.CorrelationUnaryInterceptor(),
 				jwtVerifier.UnaryAuthInterceptor(),
 				interceptors.RBACUnaryInterceptor(),
 			),
@@ -141,6 +142,9 @@ func main() {
 		grpcServer = grpc.NewServer(
 			grpc.Creds(creds),
 			grpc.StatsHandler(otelgrpc.NewServerHandler()),
+			grpc.ChainUnaryInterceptor(
+				interceptors.CorrelationUnaryInterceptor(),
+			),
 		)
 	}
 

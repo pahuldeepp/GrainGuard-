@@ -7,5 +7,5 @@ import (
 )
 
 type OutboxRepository interface {
-	Insert(ctx context.Context, tx pgx.Tx, aggregateType, aggregateID, eventType string, payload []byte) error
+	Insert(ctx context.Context, tx pgx.Tx, aggregateType, aggregateID, eventType string, payload []byte, correlationID string) error
 }

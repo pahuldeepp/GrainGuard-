@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/pahuldeepp/grainguard/libs/correlationid"
 	"github.com/pahuldeepp/grainguard/libs/observability"
 )
 
@@ -72,12 +73,25 @@ func (c *KafkaConsumer) Start(
 			workerTracer := otel.Tracer("read-model-builder.worker")
 
 			for msg := range jobs {
-				msgCtx, span := workerTracer.Start(ctx, "process_message")
+				// Extract correlation ID from Kafka message header
+				msgCtx := ctx
+				for _, h := range msg.Headers {
+					if h.Key == "x-request-id" && len(h.Value) > 0 {
+						msgCtx = correlationid.WithContext(msgCtx, string(h.Value))
+						break
+					}
+				}
+
+				corrID := correlationid.FromContext(msgCtx)
+				msgCtx, span := workerTracer.Start(msgCtx, "process_message")
 				span.SetAttributes(
 					attribute.String("kafka.topic", msg.Topic),
 					attribute.Int64("kafka.partition", int64(msg.Partition)),
 					attribute.Int64("kafka.offset", msg.Offset),
 				)
+				if corrID != "" {
+					span.SetAttributes(attribute.String("x-request-id", corrID))
+				}
 
 				err := retryWithBackoff(msgCtx, func() error {
 					return handler(msgCtx, msg.Value)
@@ -164,11 +178,23 @@ func (c *KafkaConsumer) StartBatch(
 					return
 				}
 
-				batchCtx, span := tracer.Start(ctx, "process_batch")
+				// Use correlation ID from first message in batch for span attribution
+				batchCtx := ctx
+				for _, h := range batch[0].Headers {
+					if h.Key == "x-request-id" && len(h.Value) > 0 {
+						batchCtx = correlationid.WithContext(batchCtx, string(h.Value))
+						break
+					}
+				}
+				corrID := correlationid.FromContext(batchCtx)
+				batchCtx, span := tracer.Start(batchCtx, "process_batch")
 				span.SetAttributes(
 					attribute.Int("batch.size", len(batch)),
 					attribute.String("kafka.topic", batch[0].Topic),
 				)
+				if corrID != "" {
+					span.SetAttributes(attribute.String("x-request-id", corrID))
+				}
 
 				err := retryWithBackoff(batchCtx, func() error {
 					return batchHandler(batchCtx, payloads)

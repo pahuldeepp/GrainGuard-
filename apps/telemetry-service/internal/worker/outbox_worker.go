@@ -62,7 +62,7 @@ func (w *OutboxWorker) processBatch(ctx context.Context) {
 	defer tx.Rollback(ctx)
 
 	rows, err := tx.Query(ctx, `
-		SELECT id, event_type, payload_bytes
+		SELECT id, event_type, payload_bytes, COALESCE(correlation_id, '') AS correlation_id
 		FROM outbox_events
 		WHERE published_at IS NULL
 		ORDER BY created_at
@@ -75,27 +75,28 @@ func (w *OutboxWorker) processBatch(ctx context.Context) {
 	defer rows.Close()
 
 	type event struct {
-		id        string
-		eventType string
-		payload   []byte
+		id            string
+		eventType     string
+		payload       []byte
+		correlationID string
 	}
 
 	var events []event
 
 	for rows.Next() {
-		var id string
-		var eventType string
+		var id, eventType, correlationID string
 		var payload []byte
 
-		if err := rows.Scan(&id, &eventType, &payload); err != nil {
+		if err := rows.Scan(&id, &eventType, &payload, &correlationID); err != nil {
 			log.Println("scan error:", err)
 			continue
 		}
 
 		events = append(events, event{
-			id:        id,
-			eventType: eventType,
-			payload:   payload,
+			id:            id,
+			eventType:     eventType,
+			payload:       payload,
+			correlationID: correlationID,
 		})
 	}
 
@@ -119,14 +120,19 @@ func (w *OutboxWorker) processBatch(ctx context.Context) {
 
 		key := []byte(env.AggregateId)
 
+		headers := []kafka.Header{
+			{Key: "event_type", Value: []byte(e.eventType)},
+			{Key: "schema_version", Value: []byte("1")},
+		}
+		if e.correlationID != "" {
+			headers = append(headers, kafka.Header{Key: "x-request-id", Value: []byte(e.correlationID)})
+		}
+
 		err := w.writer.WriteMessages(ctx,
 			kafka.Message{
-				Key:   key,
-				Value: e.payload, // raw protobuf bytes
-				Headers: []kafka.Header{
-					{Key: "event_type", Value: []byte(e.eventType)},
-					{Key: "schema_version", Value: []byte("1")},
-				},
+				Key:     key,
+				Value:   e.payload, // raw protobuf bytes
+				Headers: headers,
 			},
 		)
 		if err != nil {

@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pahuldeepp/grainguard/apps/telemetry-service/internal/domain"
 	"github.com/pahuldeepp/grainguard/apps/telemetry-service/internal/repository"
+	"github.com/pahuldeepp/grainguard/libs/correlationid"
 )
 
 type CreateDeviceService struct {
@@ -56,7 +57,7 @@ func (s *CreateDeviceService) Execute(ctx context.Context, tenantID string, seri
 	}
 	defer tx.Rollback(ctx)
 
-	if err = s.outboxRepo.Insert(ctx, tx, "device", device.ID.String(), "device_created_v1", payload); err != nil {
+	if err = s.outboxRepo.Insert(ctx, tx, "device", device.ID.String(), "device_created_v1", payload, correlationid.FromContext(ctx)); err != nil {
 		return nil, err
 	}
 

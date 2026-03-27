@@ -1,4 +1,5 @@
-﻿import { ApolloServer } from "@apollo/server";
+﻿import crypto from "crypto";
+import { ApolloServer } from "@apollo/server";
 import depthLimit from "graphql-depth-limit";
 import { expressMiddleware } from "@apollo/server/express4";
 import { ApolloServerPluginDrainHttpServer } from "@apollo/server/plugin/drainHttpServer";
@@ -42,10 +43,11 @@ async function verifyToken(token: string) {
 }
 
 export interface BffContext {
-  tenantId: string;
-  userId: string;
-  roles: string[];
+  tenantId:  string;
+  userId:    string;
+  roles:     string[];
   isSuperAdmin: boolean;
+  requestId: string;
 }
 
 async function startServer() {
@@ -138,12 +140,14 @@ async function startServer() {
     express.json({ limit: "10kb" }),
     expressMiddleware(server, {
       context: async ({ req }): Promise<BffContext> => {
+        const requestId = (req.headers["x-request-id"] as string) || crypto.randomUUID();
+
         // Dev bypass — AUTH_ENABLED=false skips JWT validation (non-production only)
         if (process.env.AUTH_ENABLED === "false" && process.env.NODE_ENV !== "production") {
           const tenantId =
             (req.headers["x-tenant-id"] as string) ||
             "11111111-1111-1111-1111-111111111111";
-          return { tenantId, userId: "dev-user", roles: ["admin", "member", "superadmin"], isSuperAdmin: true };
+          return { tenantId, userId: "dev-user", roles: ["admin", "member", "superadmin"], isSuperAdmin: true, requestId };
         }
 
         const authHeader = req.headers.authorization;
@@ -187,10 +191,11 @@ async function startServer() {
 
           const roles = Array.isArray(rawRoles) ? rawRoles.map(String) : [];
           return {
-            tenantId: String(tenantId),
-            userId: String(userId || ""),
+            tenantId:    String(tenantId),
+            userId:      String(userId || ""),
             roles,
             isSuperAdmin: roles.includes("superadmin"),
+            requestId,
           };
         } catch (err) {
           if (err instanceof GraphQLError) throw err;

@@ -22,6 +22,7 @@ func (r *PostgresOutboxRepository) Insert(
 	aggregateID,
 	eventType string,
 	payload []byte,
+	correlationID string,
 ) error {
 
 	id, err := uuid.NewV7()
@@ -29,15 +30,21 @@ func (r *PostgresOutboxRepository) Insert(
 		return err
 	}
 
+	var corrID *string
+	if correlationID != "" {
+		corrID = &correlationID
+	}
+
 	_, err = tx.Exec(ctx,
 		`INSERT INTO outbox_events
-		(id, aggregate_type, aggregate_id, event_type, payload, created_at)
-		VALUES ($1,$2,$3,$4,$5,NOW())`,
+		(id, aggregate_type, aggregate_id, event_type, payload, correlation_id, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,NOW())`,
 		id,
 		aggregateType,
 		aggregateID,
 		eventType,
 		payload,
+		corrID,
 	)
 
 	return err
