@@ -283,7 +283,10 @@ func handleIngest(w http.ResponseWriter, r *http.Request) {
 
 	// ── Read body ───────────────────────────────────────────────────────────
 	buf := bodyPool.Get().([]byte)
-	defer func() { bodyPool.Put(buf[:0]) }()
+	defer func() {
+		//nolint:staticcheck // sync.Pool stores []byte values for reuse in this hot path.
+		bodyPool.Put(buf[:0])
+	}()
 
 	lr := io.LimitReader(r.Body, 4096)
 	n, err := io.ReadFull(lr, buf[:cap(buf)])

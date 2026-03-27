@@ -13,13 +13,14 @@ on:
 env:
   TF_VERSION: "1.7.5"
   AWS_REGION: "us-east-1"
+  TF_SECRETS_CONFIGURED: ${{ secrets.AWS_TF_ROLE_ARN != '' && secrets.TF_VAR_DB_PASSWORD != '' }}
 
 jobs:
   # ── Plan — runs on every PR that touches terraform/ ────────────────────────
   plan:
     name: Terraform Plan (${{ matrix.env }})
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && env.TF_SECRETS_CONFIGURED == 'true'
     strategy:
       matrix:
         env: [dev, prod]
@@ -84,7 +85,7 @@ jobs:
   apply:
     name: Terraform Apply (dev)
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && env.TF_SECRETS_CONFIGURED == 'true'
     environment: dev               # requires manual approval in GitHub Environments
     defaults:
       run:

@@ -19,11 +19,9 @@ func Up(dsn string, migrations fs.FS, serviceName string) error {
     // Use a service-specific migrations table so services with different
     // migration counts don't clobber each other's schema_migrations row.
     tableParam := "schema_migrations_" + serviceName
-    dsnWithTable := dsn
+    dsnWithTable := dsn + "?x-migrations-table=" + tableParam
     if strings.Contains(dsn, "?") {
         dsnWithTable = dsn + "&x-migrations-table=" + tableParam
-    } else {
-        dsnWithTable = dsn + "?x-migrations-table=" + tableParam
     }
     m, err := migrate.NewWithSourceInstance("iofs", source, dsnWithTable)
     if err != nil {

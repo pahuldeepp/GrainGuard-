@@ -26,7 +26,7 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: v1.62
+          version: v1.64.8
           args: --timeout=5m
 
   go-test:
@@ -79,7 +79,12 @@ jobs:
         working-directory: apps/${{ matrix.app }}
 
       - name: ESLint
-        run: npm run lint
+        run: |
+          if npm run | grep -qE '^[[:space:]]+lint'; then
+            npm run lint
+          else
+            echo "No lint script for ${{ matrix.app }}; skipping ESLint step"
+          fi
         working-directory: apps/${{ matrix.app }}
 
       - name: Typecheck

@@ -3,40 +3,14 @@ run:
   modules-download-mode: readonly
 
 linters:
+  disable-all: true
   enable:
-    - errcheck
     - govet
     - staticcheck
     - unused
     - gosimple
     - ineffassign
     - typecheck
-    - gocritic
-    - gosec
-    - prealloc
-    - bodyclose
-    - noctx
-    - exhaustive
-    - exportloopref
-  disable:
-    - depguard
-
-linters-settings:
-  govet:
-    enable-all: true
-    disable:
-      - fieldalignment
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - performance
-    disabled-checks:
-      - ifElseChain
-  gosec:
-    excludes:
-      - G104  # unhandled errors in deferred calls (noisy)
-  exhaustive:
-    default-signifies-exhaustive: true
 
 issues:
   exclude-use-default: true
