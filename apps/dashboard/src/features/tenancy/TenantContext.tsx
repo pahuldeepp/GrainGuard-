@@ -4,6 +4,7 @@ import { useAuth0 } from "@auth0/auth0-react";
 
 // Auth0 Action injects claims under https://grainguard.com/ namespace
 const TENANT_CLAIM = "https://grainguard.com/tenant_id";
+const LEGACY_TENANT_CLAIM = "https://grainguard/tenant_id";
 
 interface TenantContextValue {
   activeTenantId: string | null;
@@ -19,32 +20,31 @@ interface Props {
 }
 
 export function TenantProvider({ children }: Props) {
-  const { isAuthenticated, isLoading: authLoading, getAccessTokenSilently } = useAuth0();
+  const { isAuthenticated, isLoading: authLoading, user } = useAuth0();
   const [activeTenantId, setActiveTenantId] = useState<string | null>(null);
   const [availableTenants, setAvailableTenants] = useState<string[]>([]);
 
   useEffect(() => {
-    if (!isAuthenticated) return;
-
-    async function extractTenant() {
-      try {
-        const token = await getAccessTokenSilently();
-        const payload = JSON.parse(atob(token.split(".")[1]));
-        console.log("Access token payload:", payload);
-        console.log("Tenant from access token:", payload[TENANT_CLAIM]);
-
-        const tenantId = payload[TENANT_CLAIM] as string | undefined;
-        if (tenantId) {
-          setActiveTenantId(tenantId);
-          setAvailableTenants([tenantId]);
-        }
-      } catch (err) {
-        console.error("Failed to extract tenant from token:", err);
-      }
+    if (!isAuthenticated) {
+      setActiveTenantId(null);
+      setAvailableTenants([]);
+      return;
     }
 
-    extractTenant();
-  }, [isAuthenticated, getAccessTokenSilently]);
+    const tenantId =
+      (user?.[TENANT_CLAIM] as string | undefined) ??
+      (user?.[LEGACY_TENANT_CLAIM] as string | undefined) ??
+      null;
+
+    if (tenantId) {
+      setActiveTenantId(tenantId);
+      setAvailableTenants([tenantId]);
+      return;
+    }
+
+    setActiveTenantId(null);
+    setAvailableTenants([]);
+  }, [isAuthenticated, user]);
 
   const setActiveTenant = (tenantId: string) => {
     setActiveTenantId(tenantId);
