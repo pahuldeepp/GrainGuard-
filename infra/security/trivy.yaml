@@ -1,15 +1,8 @@
 # Trivy configuration — vulnerability + secret + misconfiguration scanning
-version: "0.1"
 
-scan:
-  security-checks:
-    - vuln
-    - secret
-    - misconfig
-  severity:
-    - CRITICAL
-    - HIGH
-  exit-code: 0
+severity:
+  - CRITICAL
+  - HIGH
 
 vulnerability:
   ignore-unfixed: true
@@ -22,6 +15,3 @@ secret:
 
 misconfiguration:
   include-non-failures: false
-
-cache:
-  dir: /tmp/trivy-cache

@@ -211,7 +211,7 @@ async function startServer() {
     if (res.headersSent) return next(err);
     res.status(500).json({
       error: "internal_server_error",
-      message: err.message,
+      message: process.env.NODE_ENV !== "production" ? err.message : "An unexpected error occurred",
       requestId,
     });
   });

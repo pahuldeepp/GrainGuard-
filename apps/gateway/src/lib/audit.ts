@@ -23,10 +23,6 @@ export type AuditEventType =
   | "billing.subscription_cancelled"
   | "billing.subscription_updated"
   | "billing.portal_accessed"
-  | "device.created"
-  | "device.creation_failed"
-  | "device.registered"
-  | "webhook_endpoint.created"
   // API keys
   | "api_key.created"
   | "api_key.revoked"

@@ -83,9 +83,9 @@ func (p *ProvisionSaga) HandleEvent(ctx context.Context, raw []byte) error {
 			"occurred_at_ms": env.GetOccurredAtUnixMs(),
 		}
 		cmdBytes, cmdErr := json.Marshal(cmd)
-	if cmdErr != nil {
-		return fmt.Errorf("marshal tenant.attach_device command: %w", cmdErr)
-	}
+		if cmdErr != nil {
+			return fmt.Errorf("marshal tenant.attach_device command: %w", cmdErr)
+		}
 
 		if err := p.cmdProducer.Publish(ctx, []byte(correlationID), cmdBytes); err != nil {
 			_ = p.repo.MarkFailed(ctx, sagaID.String(), "failed to publish tenant.attach_device")
