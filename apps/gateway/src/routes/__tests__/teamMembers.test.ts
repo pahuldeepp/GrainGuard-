@@ -30,13 +30,21 @@ jest.mock("../../lib/auth0-mgmt", () => ({
 }));
 
 import { teamRouter } from "../teamMembers";
-import { pool } from "../../lib/db";
+import { writePool } from "../../lib/db";
 
 const app = express();
 app.use(express.json());
 app.use(teamRouter);
 
-const mockPool = pool as jest.Mocked<typeof pool>;
+const mockPool = writePool as unknown as { query: jest.Mock; connect: jest.Mock };
+
+beforeEach(() => {
+  mockPool.query.mockReset();
+  mockPool.connect = jest.fn().mockResolvedValue({
+    query: mockPool.query,
+    release: jest.fn(),
+  });
+});
 
 describe("GET /team/members", () => {
   it("lists members", async () => {
@@ -55,7 +63,8 @@ describe("POST /team/invite", () => {
     mockPool.query
       .mockResolvedValueOnce({ rows: [] } as any) // no existing member
       .mockResolvedValueOnce({ rows: [] } as any) // no pending invite
-      .mockResolvedValueOnce({ rowCount: 1 } as any); // INSERT
+      .mockResolvedValueOnce({ rowCount: 1 } as any) // INSERT
+      .mockResolvedValueOnce({ rows: [] } as any); // no auth0 org configured
 
     const res = await request(app).post("/team/invite").send({ email: "new@b.com" });
     expect(res.status).toBe(201);

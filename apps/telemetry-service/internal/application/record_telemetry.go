@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,19 +14,23 @@ import (
 	"github.com/pahuldeepp/grainguard/apps/telemetry-service/internal/domain"
 	"github.com/pahuldeepp/grainguard/apps/telemetry-service/internal/repository"
 )
+
 type RecordTelemetryService struct {
 	pool          *pgxpool.Pool
+	deviceRepo    repository.DeviceRepository
 	telemetryRepo repository.TelemetryRepository
 	outboxRepo    repository.OutboxRepository
 }
 
 func NewRecordTelemetryService(
 	pool *pgxpool.Pool,
+	deviceRepo repository.DeviceRepository,
 	tRepo repository.TelemetryRepository,
 	oRepo repository.OutboxRepository,
 ) *RecordTelemetryService {
 	return &RecordTelemetryService{
 		pool:          pool,
+		deviceRepo:    deviceRepo,
 		telemetryRepo: tRepo,
 		outboxRepo:    oRepo,
 	}
@@ -41,6 +46,15 @@ func (s *RecordTelemetryService) Execute(
 	deviceUUID, err := uuid.Parse(deviceID)
 	if err != nil {
 		return err
+	}
+
+	// Reject ingest from disabled devices (over-quota tenants)
+	device, err := s.deviceRepo.FindByID(ctx, deviceUUID)
+	if err != nil {
+		return fmt.Errorf("device not found: %w", err)
+	}
+	if device.Disabled {
+		return fmt.Errorf("device %s is disabled: tenant quota exceeded", deviceID)
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -65,7 +79,7 @@ func (s *RecordTelemetryService) Execute(
 		EventType:        "telemetry.recorded",
 		SchemaVersion:    1,
 		OccurredAtUnixMs: time.Now().UTC().UnixMilli(),
-		TenantId:         "default-tenant",
+		TenantId:         device.TenantID.String(),
 		AggregateId:      deviceID,
 		Payload: &eventspb.EventEnvelope_TelemetryRecordedV1{
 			TelemetryRecordedV1: &eventspb.TelemetryRecordedV1{

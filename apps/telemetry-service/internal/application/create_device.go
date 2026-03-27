@@ -39,6 +39,10 @@ func (s *CreateDeviceService) Execute(ctx context.Context, tenantID string, seri
 
 	// Write outbox event in its own transaction so the read-model-builder
 	// can upsert device_projections on the read DB.
+	if s.pool == nil || s.outboxRepo == nil {
+		return device, nil
+	}
+
 	payload, _ := json.Marshal(map[string]string{
 		"device_id":  device.ID.String(),
 		"tenant_id":  tenantID,
@@ -62,4 +66,3 @@ func (s *CreateDeviceService) Execute(ctx context.Context, tenantID string, seri
 
 	return device, nil
 }
-

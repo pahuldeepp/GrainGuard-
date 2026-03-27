@@ -21,24 +21,25 @@ tenantsRouter.post("/tenants/register", publicRateLimiter, async (req: Request, 
 
   const tenantId = uuidv4();
   const slug = orgName.toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-");
+  const client = await pool.connect();
 
   try {
-    await pool.query("BEGIN");
+    await client.query("BEGIN");
 
-    await pool.query(
+    await client.query(
       `INSERT INTO tenants (id, name, slug, email, plan, subscription_status, created_at)
        VALUES ($1, $2, $3, $4, 'free', 'trialing', NOW())`,
       [tenantId, orgName.trim(), slug, email.trim()]
     );
 
     // Create first admin user record
-    await pool.query(
+    await client.query(
       `INSERT INTO tenant_users (id, tenant_id, auth_user_id, email, role, created_at)
        VALUES ($1, $2, $3, $4, 'admin', NOW())`,
       [uuidv4(), tenantId, authUserId, email.trim()]
     );
 
-    await pool.query("COMMIT");
+    await client.query("COMMIT");
 
     // Set tenant_id in Auth0 app_metadata so it appears in all future JWTs.
     // Also assign the admin role so the first user gets full access.
@@ -54,11 +55,13 @@ tenantsRouter.post("/tenants/register", publicRateLimiter, async (req: Request, 
 
     return res.status(201).json({ tenantId, slug });
   } catch (err: any) {
-    await pool.query("ROLLBACK");
+    await client.query("ROLLBACK").catch(() => {});
     if (err.code === "23505") {
       return res.status(409).json({ error: "organisation already exists" });
     }
     console.error("[tenants] register error:", err);
     return res.status(500).json({ error: "internal_error" });
+  } finally {
+    client.release();
   }
 });

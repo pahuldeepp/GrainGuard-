@@ -16,7 +16,7 @@ KAFKA_BOOTSTRAP="${KAFKA_BOOTSTRAP:-kafka:9092}"
 PAUSE_SECONDS="${PAUSE_SECONDS:-60}"
 MAX_LAG="${MAX_LAG:-10000}"
 CONSUMERS=("read-model-builder" "cdc-transformer")
-TOPIC="telemetry.events"
+declare -A ORIGINAL_REPLICAS=()
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 
@@ -40,10 +40,29 @@ scale_consumer() {
   kubectl scale deployment "$deploy" -n "$NAMESPACE" --replicas="$replicas"
 }
 
+current_replicas() {
+  local deploy="$1"
+  kubectl get deployment "$deploy" -n "$NAMESPACE" -o jsonpath='{.spec.replicas}'
+}
+
+restore_consumers() {
+  for consumer in "${CONSUMERS[@]}"; do
+    local replicas="${ORIGINAL_REPLICAS[$consumer]:-1}"
+    kubectl scale deployment "$consumer" -n "$NAMESPACE" --replicas="$replicas" >/dev/null 2>&1 || true
+  done
+}
+
+cleanup() {
+  restore_consumers
+}
+
+trap cleanup EXIT INT TERM
+
 # ── steady-state: before ──────────────────────────────────────────────────────
 
 log "=== Steady-state check BEFORE chaos ==="
 for consumer in "${CONSUMERS[@]}"; do
+  ORIGINAL_REPLICAS["$consumer"]="$(current_replicas "$consumer")"
   kubectl rollout status "deployment/$consumer" -n "$NAMESPACE" --timeout=30s \
     || fail "Consumer $consumer not healthy before chaos"
   log "  $consumer — healthy"
@@ -68,10 +87,11 @@ done
 
 # ── action: resume consumers ──────────────────────────────────────────────────
 
-log "=== Resuming consumers (scale to 1) ==="
+log "=== Resuming consumers ==="
 for consumer in "${CONSUMERS[@]}"; do
-  scale_consumer "$consumer" 1
-  log "  Scaled $consumer → 1"
+  replicas="${ORIGINAL_REPLICAS[$consumer]:-1}"
+  scale_consumer "$consumer" "$replicas"
+  log "  Scaled $consumer → $replicas"
 done
 
 log "Waiting for deployments to be ready..."
@@ -98,5 +118,7 @@ for consumer in "${CONSUMERS[@]}"; do
     sleep 15
   done
 done
+
+trap - EXIT INT TERM
 
 log "=== Kafka consumer pause experiment PASSED ==="

@@ -7,8 +7,6 @@ import Busboy from "busboy";
 
 export const devicesImportRouter = Router();
 
-devicesImportRouter.use(bulkRateLimiter);
-
 // ── POST /devices/bulk ────────────────────────────────────────────────────────
 // Accepts a multipart CSV upload. Each row is a serial number.
 // Processing is synchronous per-row but streamed — the response is an SSE
@@ -26,6 +24,7 @@ devicesImportRouter.use(bulkRateLimiter);
 // A final event has done === total.
 devicesImportRouter.post(
   "/devices/bulk",
+  bulkRateLimiter,
   authMiddleware,
   async (req: Request, res: Response) => {
     // Verify admin or member role — viewers cannot register devices

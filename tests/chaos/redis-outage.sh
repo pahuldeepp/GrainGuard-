@@ -14,6 +14,7 @@ NAMESPACE="${NAMESPACE:-grainguard-dev}"
 GATEWAY_URL="${GATEWAY_URL:-http://localhost:3000}"
 OUTAGE_SECONDS="${OUTAGE_SECONDS:-45}"
 REDIS_DEPLOY="${REDIS_DEPLOY:-redis}"
+ORIGINAL_REPLICAS=""
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 
@@ -39,11 +40,24 @@ http_check() {
   fi
 }
 
+restore_redis() {
+  if [[ -n "${ORIGINAL_REPLICAS}" ]]; then
+    kubectl scale deployment "$REDIS_DEPLOY" -n "$NAMESPACE" --replicas="$ORIGINAL_REPLICAS" >/dev/null 2>&1 || true
+  fi
+}
+
+cleanup() {
+  restore_redis
+}
+
+trap cleanup EXIT INT TERM
+
 # ── steady-state: before ──────────────────────────────────────────────────────
 
 log "=== Steady-state BEFORE Redis outage ==="
 kubectl rollout status "deployment/$REDIS_DEPLOY" -n "$NAMESPACE" --timeout=30s \
   || fail "Redis not healthy before chaos"
+ORIGINAL_REPLICAS="$(kubectl get deployment "$REDIS_DEPLOY" -n "$NAMESPACE" -o jsonpath='{.spec.replicas}')"
 
 http_check "GraphQL deviceList before outage" \
   || fail "BFF not responding before chaos"
@@ -82,12 +96,15 @@ panic_count=$(kubectl logs -n "$NAMESPACE" deploy/saga-orchestrator \
 log "  ✓ saga-orchestrator — no panics"
 
 log "Waiting remaining outage window (${OUTAGE_SECONDS}s total)..."
-sleep "$(( OUTAGE_SECONDS - 15 ))"
+remaining_sleep=$(( OUTAGE_SECONDS - 15 ))
+if (( remaining_sleep > 0 )); then
+  sleep "$remaining_sleep"
+fi
 
 # ── action: restore Redis ─────────────────────────────────────────────────────
 
 log "=== Restoring Redis ==="
-kubectl scale deployment "$REDIS_DEPLOY" -n "$NAMESPACE" --replicas=1
+kubectl scale deployment "$REDIS_DEPLOY" -n "$NAMESPACE" --replicas="${ORIGINAL_REPLICAS:-1}"
 kubectl rollout status "deployment/$REDIS_DEPLOY" -n "$NAMESPACE" --timeout=60s
 
 # ── steady-state: after ───────────────────────────────────────────────────────
@@ -103,5 +120,7 @@ http_check "Cache warm-up probe"
 t_end=$(date +%s%N)
 elapsed_ms=$(( (t_end - t_start) / 1000000 ))
 log "  Response time after restore: ${elapsed_ms}ms"
+
+trap - EXIT INT TERM
 
 log "=== Redis outage experiment PASSED ==="

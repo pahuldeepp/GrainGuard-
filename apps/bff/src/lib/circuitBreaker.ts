@@ -119,7 +119,7 @@ export class CircuitBreaker {
       if (this.successCount >= this.successThreshold) {
         this.state = "CLOSED";
         this.successCount = 0;
-        this.syncToRedis();
+        this.syncToRedis().catch(() => {});
         console.log(
           JSON.stringify({
             level: "info",
@@ -140,7 +140,7 @@ export class CircuitBreaker {
     if (this.state === "HALF_OPEN") {
       this.state = "OPEN";
       this.successCount = 0;
-      this.syncToRedis();
+      this.syncToRedis().catch(() => {});
       console.error(
         JSON.stringify({
           level: "error",
@@ -155,7 +155,7 @@ export class CircuitBreaker {
 
     if (this.failureCount >= this.failureThreshold) {
       this.state = "OPEN";
-      this.syncToRedis();
+      this.syncToRedis().catch(() => {});
       console.error(
         JSON.stringify({
           level: "error",
@@ -189,4 +189,3 @@ export const postgresCircuitBreaker = new CircuitBreaker({
   successThreshold: 2,
   timeout:          30_000,
 });
-

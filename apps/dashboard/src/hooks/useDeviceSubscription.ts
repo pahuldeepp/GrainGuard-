@@ -1,4 +1,22 @@
-﻿import { useSubscription, gql } from "@apollo/client";
+﻿import { gql } from "@apollo/client";
+import { useSubscription } from "@apollo/client/react";
+
+interface TelemetryUpdate {
+  deviceId: string;
+  temperature: number | null;
+  humidity: number | null;
+  recordedAt: string | null;
+  updatedAt: string;
+  version: number;
+}
+
+interface TelemetryUpdatedData {
+  telemetryUpdated: TelemetryUpdate | null;
+}
+
+interface TenantTelemetryUpdatedData {
+  tenantTelemetryUpdated: TelemetryUpdate | null;
+}
 
 const TELEMETRY_UPDATED = gql`
   subscription TelemetryUpdated($deviceId: String!) {
@@ -27,7 +45,7 @@ const TENANT_TELEMETRY_UPDATED = gql`
 `;
 
 export function useDeviceSubscription(deviceId: string) {
-  const { data, loading, error } = useSubscription(TELEMETRY_UPDATED, {
+  const { data, loading, error } = useSubscription<TelemetryUpdatedData>(TELEMETRY_UPDATED, {
     variables: { deviceId },
     skip: !deviceId,
   });
@@ -41,7 +59,7 @@ export function useDeviceSubscription(deviceId: string) {
 }
 
 export function useTenantTelemetrySubscription(tenantId: string) {
-  const { data, loading, error } = useSubscription(TENANT_TELEMETRY_UPDATED, {
+  const { data, loading, error } = useSubscription<TenantTelemetryUpdatedData>(TENANT_TELEMETRY_UPDATED, {
     variables: { tenantId },
     skip: !tenantId,
   });
@@ -52,4 +70,3 @@ export function useTenantTelemetrySubscription(tenantId: string) {
     error,
   };
 }
-

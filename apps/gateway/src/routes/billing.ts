@@ -1,8 +1,31 @@
 import { Router, Request, Response } from "express";
 import Stripe from "stripe";
-import { pool } from "../lib/db";
+import amqp from "amqplib";
+import { writePool as pool } from "../lib/db";
 import { authMiddleware } from "../lib/auth";
 import { writeAuditLog } from "../lib/audit";
+
+const RABBITMQ_URL = process.env.RABBITMQ_URL || "amqp://grainguard:grainguard@rabbitmq:5672/grainguard";
+const STRIPE_BILLING_QUEUE = "grainguard.stripe.billing";
+
+async function publishToStripeQueue(payload: object): Promise<void> {
+  let conn: Awaited<ReturnType<typeof amqp.connect>> | null = null;
+  let ch: amqp.ConfirmChannel | null = null;
+  try {
+    conn = await amqp.connect(RABBITMQ_URL);
+    ch = await conn.createConfirmChannel();
+    await ch.assertQueue(STRIPE_BILLING_QUEUE, { durable: true });
+    ch.sendToQueue(
+      STRIPE_BILLING_QUEUE,
+      Buffer.from(JSON.stringify(payload)),
+      { persistent: true }
+    );
+    await ch.waitForConfirms();
+  } finally {
+    await ch?.close().catch(() => {});
+    conn?.close().catch(() => {});
+  }
+}
 
 export const billingRouter = Router();
 
@@ -48,7 +71,7 @@ billingRouter.get(
         const sub = await stripe.subscriptions.retrieve(
           billing.stripe_subscription_id
         );
-        currentPeriodEnd  = (sub as any).current_period_end ?? 0;     // Unix timestamp
+        currentPeriodEnd  = (sub as any).current_period_end;     // Unix timestamp
         cancelAtPeriodEnd = sub.cancel_at_period_end;
         paymentFailed     = sub.status === "past_due" || sub.status === "unpaid";
       } catch (err) {
@@ -111,6 +134,12 @@ billingRouter.post(
         tenantId: req.user!.tenantId,
         plan,
       },
+      subscription_data: {
+        metadata: {
+          tenantId: req.user!.tenantId,
+          plan,
+        },
+      },
     });
 
     await writeAuditLog({
@@ -158,83 +187,31 @@ billingRouter.post(
   }
 );
 
-// ── POST /billing/webhook ─────────────────────────────────────────────────
-billingRouter.post(
-  "/billing/webhook",
-  async (req: Request, res: Response) => {
-    const sig = req.headers["stripe-signature"] as string;
+export async function stripeWebhookHandler(req: Request, res: Response) {
+  const sig = req.headers["stripe-signature"] as string;
 
-    let event: Stripe.Event;
-    try {
-      event = stripe.webhooks.constructEvent(
-        req.body,                              // raw body — must use express.raw()
-        sig,
-        process.env.STRIPE_WEBHOOK_SECRET!
-      );
-    } catch (err: any) {
-      console.error("[billing] webhook signature failed:", err.message);
-      return res.status(400).send(`Webhook Error: ${err.message}`);
-    }
-
-    switch (event.type) {
-      case "checkout.session.completed": {
-        const session  = event.data.object as Stripe.Checkout.Session;
-        const tenantId = session.metadata?.tenantId;
-        const plan     = session.metadata?.plan;
-        if (tenantId && plan && session.subscription) {
-          await pool.query(
-            `UPDATE tenant_billing
-             SET stripe_subscription_id = $1, plan = $2, status = 'active', updated_at = NOW()
-             WHERE tenant_id = $3`,
-            [session.subscription, plan, tenantId]
-          );
-          await writeAuditLog({
-            tenantId,
-            actorId:      "stripe",
-            eventType:    "billing.subscription_created",
-            resourceType: "billing",
-            resourceId:   String(session.subscription),
-            meta:         { plan },
-          });
-        }
-        break;
-      }
-
-      case "customer.subscription.updated": {
-        const sub      = event.data.object as Stripe.Subscription;
-        const tenantId = sub.metadata?.tenantId;
-        if (tenantId) {
-          const plan = sub.items.data[0]?.price.metadata?.plan ?? "unknown";
-          await pool.query(
-            `UPDATE tenant_billing
-             SET status = $1, plan = $2, updated_at = NOW()
-             WHERE stripe_subscription_id = $3`,
-            [sub.status, plan, sub.id]
-          );
-          await writeAuditLog({
-            tenantId,
-            actorId:      "stripe",
-            eventType:    "billing.subscription_updated",
-            resourceId:   sub.id,
-            resourceType: "billing",
-            meta:         { status: sub.status, plan },
-          });
-        }
-        break;
-      }
-
-      case "customer.subscription.deleted": {
-        const sub = event.data.object as Stripe.Subscription;
-        await pool.query(
-          `UPDATE tenant_billing
-           SET status = 'cancelled', plan = 'free', updated_at = NOW()
-           WHERE stripe_subscription_id = $1`,
-          [sub.id]
-        );
-        break;
-      }
-    }
-
-    return res.json({ received: true });
+  let event: Stripe.Event;
+  try {
+    event = stripe.webhooks.constructEvent(
+      req.body,
+      sig,
+      process.env.STRIPE_WEBHOOK_SECRET!
+    );
+  } catch (err: any) {
+    console.error("[billing] webhook signature failed:", err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
   }
-);
+
+  try {
+    await publishToStripeQueue({
+      stripeEventId: event.id,
+      stripeEventType: event.type,
+      payload: event.data.object,
+    });
+    console.log(`[billing] queued stripe event ${event.type} id=${event.id}`);
+    return res.json({ received: true });
+  } catch (err) {
+    console.error("[billing] failed to queue stripe event:", err);
+    return res.status(500).json({ error: "queue_publish_failed" });
+  }
+}

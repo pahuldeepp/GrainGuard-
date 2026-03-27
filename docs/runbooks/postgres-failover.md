@@ -32,7 +32,7 @@ kubectl exec -n grainguard-dev deploy/postgres -- \
 
 # 4. Check PgBouncer pool status
 kubectl exec -n grainguard-dev deploy/pgbouncer -- \
-  psql -p 6432 -U pgbouncer pgbouncer -c "SHOW POOLS;"
+  psql -p 5432 -U pgbouncer pgbouncer -c "SHOW POOLS;"
 
 # 5. Check recent errors in BFF
 kubectl logs -n grainguard-dev deploy/bff --since=10m | grep -i "error\|circuit"
@@ -59,7 +59,7 @@ kubectl rollout status deployment/bff -n grainguard-dev --timeout=60s
 Fix — Connection pool exhausted
 # Reload PgBouncer config (no restart needed)
 kubectl exec -n grainguard-dev deploy/pgbouncer -- \
-  psql -p 6432 -U pgbouncer pgbouncer -c "RELOAD;"
+  psql -p 5432 -U pgbouncer pgbouncer -c "RELOAD;"
 
 # If still exhausted, kill idle connections
 kubectl exec -n grainguard-dev deploy/postgres -- \

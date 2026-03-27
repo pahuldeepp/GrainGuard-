@@ -19,6 +19,8 @@ jobs:
       # so k6 can hit them without needing a live cluster
       postgres:
         image: postgres:16-alpine
+        ports:
+          - 5432:5432
         env:
           POSTGRES_USER:     grainguard
           POSTGRES_PASSWORD: grainguard
@@ -31,6 +33,8 @@ jobs:
 
       redis:
         image: redis:7-alpine
+        ports:
+          - 6379:6379
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s
@@ -49,6 +53,10 @@ jobs:
       - name: Install gateway deps
         run: npm ci
         working-directory: apps/gateway
+
+      - name: Install BFF deps
+        run: npm ci
+        working-directory: apps/bff
 
       - name: Start gateway in background
         run: npx ts-node src/server.ts &
@@ -71,8 +79,32 @@ jobs:
           AUTH0_MANAGEMENT_CLIENT_ID: placeholder
           AUTH0_MANAGEMENT_CLIENT_SECRET: placeholder
 
+      - name: Start BFF in background
+        run: npx ts-node src/server.ts &
+        working-directory: apps/bff
+        env:
+          PORT: 4000
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_USER: grainguard
+          POSTGRES_PASSWORD: grainguard
+          POSTGRES_DB: grainguard
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          ELASTICSEARCH_URL: http://localhost:9200
+          CASSANDRA_HOST: localhost
+          CASSANDRA_PORT: 9042
+          AUTH0_DOMAIN: placeholder.auth0.com
+          AUTH0_AUDIENCE: placeholder
+          AUTH0_ORG_CLAIM: org_id
+          ALLOWED_ORIGINS: http://localhost:5173
+          JWT_SECRET: dev-secret
+
       - name: Wait for gateway
         run: npx wait-on http://localhost:3000/health --timeout 30000
+
+      - name: Wait for BFF
+        run: npx wait-on http://localhost:4000/graphql --timeout 30000
 
       - name: Install k6
         run: |
@@ -94,3 +126,4 @@ jobs:
           name: perf-results-${{ github.run_number }}
           path: scripts/load-tests/results/
           retention-days: 30
+          if-no-files-found: ignore

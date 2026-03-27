@@ -42,16 +42,16 @@ export function DevicesPage() {
 
   const stats = useMemo(() => ({
     total: devices.length,
-    withTelemetry: devices.filter((d) => d.temperature !== null).length,
-    noData: devices.filter((d) => d.temperature === null).length,
+    withTelemetry: devices.filter((d: typeof devices[number]) => d.temperature !== null).length,
+    noData: devices.filter((d: typeof devices[number]) => d.temperature === null).length,
   }), [devices]);
 
   const filteredDevices = useMemo(() => {
     let result = isSearching ? searchResults : devices;
     if (statusFilter === "with-telemetry") {
-      result = result.filter((d) => d.temperature !== null);
+      result = result.filter((d: typeof result[number]) => d.temperature !== null);
     } else if (statusFilter === "no-data") {
-      result = result.filter((d) => d.temperature === null);
+      result = result.filter((d: typeof result[number]) => d.temperature === null);
     }
     return result;
   }, [devices, searchResults, isSearching, statusFilter]);

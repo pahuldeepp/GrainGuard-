@@ -1,24 +1,10 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { ApolloProvider } from "@apollo/client/react";
 import { Routes, Route, Link } from "react-router-dom";
 import { Toaster } from "react-hot-toast";
 import { useAuth0 } from "@auth0/auth0-react";
 import client from "./lib/apollo";
 import { setGetAccessTokenSilently, setLoginWithRedirect } from "./lib/auth0";
-import { DevicesPage } from "./features/devices/components/DevicesPage";
-import { DeviceDetailPage } from "./features/devices/components/DeviceDetailPage";
-import { BillingPage } from "./features/billing/BillingPage";
-import { OnboardingPage } from "./features/onboarding/OnboardingPage";
-import { SSOPage } from "./features/sso/SSOPage";
-import { AlertRulesPage } from "./features/alerts/AlertRulesPage";
-import { AuditLogPage } from "./features/audit/AuditLogPage";
-import { TeamPage } from "./features/team/TeamPage";
-import { InviteAcceptPage } from "./features/team/InviteAcceptPage";
-import { ApiKeysPage } from "./features/apikeys/ApiKeysPage";
-import { WebhooksPage } from "./features/webhooks/WebhooksPage";
-import { SettingsPage } from "./features/settings/SettingsPage";
-import { BillingSuccessPage } from "./features/billing/BillingSuccessPage";
-import { SuperAdminPage } from "./features/admin/SuperAdminPage";
 import { ErrorBoundary } from "./shared/components/ErrorBoundary";
 import { NotFound } from "./shared/components/NotFound";
 import { ProtectedRoute } from "./features/auth/ProtectedRoute";
@@ -26,6 +12,49 @@ import { TenantProvider } from "./features/tenancy/TenantContext";
 import { TenantSwitcher } from "./features/tenancy/components/TenantSwitcher";
 import { useDarkMode } from "./hooks/useDarkMode";
 import { useAuth } from "./hooks/useAuth";
+
+const DevicesPage = lazy(() =>
+  import("./features/devices/components/DevicesPage").then((module) => ({ default: module.DevicesPage })),
+);
+const DeviceDetailPage = lazy(() =>
+  import("./features/devices/components/DeviceDetailPage").then((module) => ({ default: module.DeviceDetailPage })),
+);
+const BillingPage = lazy(() =>
+  import("./features/billing/BillingPage").then((module) => ({ default: module.BillingPage })),
+);
+const BillingSuccessPage = lazy(() =>
+  import("./features/billing/BillingSuccessPage").then((module) => ({ default: module.BillingSuccessPage })),
+);
+const OnboardingPage = lazy(() =>
+  import("./features/onboarding/OnboardingPage").then((module) => ({ default: module.OnboardingPage })),
+);
+const SSOPage = lazy(() =>
+  import("./features/sso/SSOPage").then((module) => ({ default: module.SSOPage })),
+);
+const AlertRulesPage = lazy(() =>
+  import("./features/alerts/AlertRulesPage").then((module) => ({ default: module.AlertRulesPage })),
+);
+const AuditLogPage = lazy(() =>
+  import("./features/audit/AuditLogPage").then((module) => ({ default: module.AuditLogPage })),
+);
+const TeamPage = lazy(() =>
+  import("./features/team/TeamPage").then((module) => ({ default: module.TeamPage })),
+);
+const InviteAcceptPage = lazy(() =>
+  import("./features/team/InviteAcceptPage").then((module) => ({ default: module.InviteAcceptPage })),
+);
+const ApiKeysPage = lazy(() =>
+  import("./features/apikeys/ApiKeysPage").then((module) => ({ default: module.ApiKeysPage })),
+);
+const WebhooksPage = lazy(() =>
+  import("./features/webhooks/WebhooksPage").then((module) => ({ default: module.WebhooksPage })),
+);
+const SettingsPage = lazy(() =>
+  import("./features/settings/SettingsPage").then((module) => ({ default: module.SettingsPage })),
+);
+const SuperAdminPage = lazy(() =>
+  import("./features/admin/SuperAdminPage").then((module) => ({ default: module.SuperAdminPage })),
+);
 
 function AppInner() {
   const { isDark, toggle } = useDarkMode();
@@ -36,6 +65,12 @@ function AppInner() {
     setGetAccessTokenSilently(getAccessTokenSilently);
     setLoginWithRedirect(loginWithRedirect);
   }, [getAccessTokenSilently, loginWithRedirect]);
+
+  const routeFallback = (
+    <div className="p-4 md:p-8 text-sm text-gray-500 dark:text-gray-400">
+      Loading...
+    </div>
+  );
 
   return (
     <TenantProvider>
@@ -108,35 +143,37 @@ function AppInner() {
             </div>
           </nav>
           <ErrorBoundary>
-            <Routes>
-              {/* Public — accessible without authentication */}
-              <Route path="/invite/accept" element={<InviteAcceptPage />} />
+            <Suspense fallback={routeFallback}>
+              <Routes>
+                {/* Public — accessible without authentication */}
+                <Route path="/invite/accept" element={<InviteAcceptPage />} />
 
-              {/* Protected — all other routes require login */}
-              <Route
-                path="*"
-                element={
-                  <ProtectedRoute>
-                    <Routes>
-                      <Route path="/" element={<DevicesPage />} />
-                      <Route path="/devices/:id" element={<DeviceDetailPage />} />
-                      <Route path="/billing" element={<BillingPage />} />
-                      <Route path="/billing/success" element={<BillingSuccessPage />} />
-                      <Route path="/onboarding" element={<OnboardingPage />} />
-                      <Route path="/sso" element={<SSOPage />} />
-                      <Route path="/alerts" element={<AlertRulesPage />} />
-                      <Route path="/audit" element={<AuditLogPage />} />
-                      <Route path="/team" element={<TeamPage />} />
-                      <Route path="/api-keys" element={<ApiKeysPage />} />
-                      <Route path="/webhooks" element={<WebhooksPage />} />
-                      <Route path="/settings" element={<SettingsPage />} />
-                      <Route path="/admin" element={<SuperAdminPage />} />
-                      <Route path="*" element={<NotFound />} />
-                    </Routes>
-                  </ProtectedRoute>
-                }
-              />
-            </Routes>
+                {/* Protected — all other routes require login */}
+                <Route
+                  path="*"
+                  element={
+                    <ProtectedRoute>
+                      <Routes>
+                        <Route path="/" element={<DevicesPage />} />
+                        <Route path="/devices/:id" element={<DeviceDetailPage />} />
+                        <Route path="/billing" element={<BillingPage />} />
+                        <Route path="/billing/success" element={<BillingSuccessPage />} />
+                        <Route path="/onboarding" element={<OnboardingPage />} />
+                        <Route path="/sso" element={<SSOPage />} />
+                        <Route path="/alerts" element={<AlertRulesPage />} />
+                        <Route path="/audit" element={<AuditLogPage />} />
+                        <Route path="/team" element={<TeamPage />} />
+                        <Route path="/api-keys" element={<ApiKeysPage />} />
+                        <Route path="/webhooks" element={<WebhooksPage />} />
+                        <Route path="/settings" element={<SettingsPage />} />
+                        <Route path="/admin" element={<SuperAdminPage />} />
+                        <Route path="*" element={<NotFound />} />
+                      </Routes>
+                    </ProtectedRoute>
+                  }
+                />
+              </Routes>
+            </Suspense>
           </ErrorBoundary>
         </div>
         <Toaster

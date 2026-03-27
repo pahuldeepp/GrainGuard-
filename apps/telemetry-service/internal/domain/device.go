@@ -10,6 +10,7 @@ type Device struct {
 	ID           uuid.UUID
 	TenantID     uuid.UUID
 	SerialNumber string
+	Disabled     bool
 	CreatedAt    time.Time
 }
 

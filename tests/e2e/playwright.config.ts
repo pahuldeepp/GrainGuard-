@@ -7,6 +7,7 @@ export default defineConfig({
   testDir: ".",
   timeout: 30_000,          // 30s per test
   retries: process.env.CI ? 2 : 0,  // retry twice in CI to handle flakiness
+  forbidOnly: !!process.env.CI,
   fullyParallel: true,
   workers: process.env.CI ? 2 : undefined,
 

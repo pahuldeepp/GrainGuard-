@@ -81,7 +81,7 @@ func main() {
 	defer pool.Close()
 
 	// Migrations
-	if err := libmigrate.Up(dbURL, migrations.FS, "grainguard"); err != nil {
+	if err := libmigrate.Up(dbURL, migrations.FS, "telemetry_service"); err != nil {
 		log.Fatal().Err(err).Msg("migration failed")
 	}
 
@@ -96,7 +96,7 @@ func main() {
 
 	// Application services
 	createDeviceService    := application.NewCreateDeviceService(pool, deviceRepo, outboxRepo)
-	recordTelemetryService := application.NewRecordTelemetryService(pool, telemetryRepo, outboxRepo)
+	recordTelemetryService := application.NewRecordTelemetryService(pool, deviceRepo, telemetryRepo, outboxRepo)
 
 	// Auth
 	authEnabled := envBool("AUTH_ENABLED", false)

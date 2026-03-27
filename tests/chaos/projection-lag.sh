@@ -18,6 +18,7 @@ CONSUMER_GROUP="${CONSUMER_GROUP:-read-model-builder}"
 LAG_THRESHOLD="${LAG_THRESHOLD:-5000}"
 ALERT_WINDOW="${ALERT_WINDOW:-120}"   # seconds to wait for alert to fire
 RECOVERY_WINDOW="${RECOVERY_WINDOW:-300}"  # seconds to wait for lag to drop
+STRICT_ALERT_CHECK="${STRICT_ALERT_CHECK:-0}"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 
@@ -76,8 +77,12 @@ while (( $(date +%s) < deadline )); do
 done
 
 (( alert_fired )) \
-  || warn "  ProjectionLagHigh alert did NOT fire within ${ALERT_WINDOW}s (check Prometheus rules)"
-# Warn only — alert rule might not be installed in dev; do not hard-fail CI
+  || {
+    if [[ "$STRICT_ALERT_CHECK" == "1" ]]; then
+      fail "ProjectionLagHigh alert did NOT fire within ${ALERT_WINDOW}s"
+    fi
+    warn "  ProjectionLagHigh alert did NOT fire within ${ALERT_WINDOW}s (check Prometheus rules)"
+  }
 
 # ── action: restore consumer ──────────────────────────────────────────────────
 

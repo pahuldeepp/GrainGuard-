@@ -43,9 +43,9 @@ jobs:
 
       - name: Set kubeconfig
         run: |
-          mkdir -p $HOME/.kube
-          echo "${{ secrets.KUBECONFIG_DEV }}" | base64 -d > $HOME/.kube/config
-          chmod 600 $HOME/.kube/config
+          mkdir -p "$HOME/.kube"
+          echo "${{ secrets.KUBECONFIG_DEV }}" | base64 -d > "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
 
       - name: Install Chaos Toolkit
         run: |
@@ -69,6 +69,8 @@ jobs:
 
       - name: Run — pod-kill
         if: ${{ github.event.inputs.experiment == 'pod-kill' }}
+        env:
+          NAMESPACE: ${{ env.NAMESPACE }}
         run: chaos run tests/chaos/pod-kill.yaml
 
       - name: Run — kafka-consumer-pause
@@ -92,10 +94,13 @@ jobs:
           NAMESPACE: ${{ env.NAMESPACE }}
           KAFKA_BOOTSTRAP: kafka:9092
           PROMETHEUS_URL: ${{ secrets.CHAOS_PROMETHEUS_URL }}
+          STRICT_ALERT_CHECK: "1"
         run: bash tests/chaos/projection-lag.sh
 
       - name: Run — network-partition
         if: ${{ github.event.inputs.experiment == 'network-partition' }}
+        env:
+          NAMESPACE: ${{ env.NAMESPACE }}
         run: chaos run tests/chaos/network-partition.yaml
 
       - name: Upload chaos logs
@@ -105,6 +110,7 @@ jobs:
           name: chaos-results-${{ github.run_number }}
           path: tests/chaos/results/
           retention-days: 30
+          if-no-files-found: ignore
 
       - name: Notify Slack on failure
         if: failure()

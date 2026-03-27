@@ -6,12 +6,17 @@ const REDIS_CLUSTER_NODES = process.env.REDIS_CLUSTER_NODES;
 
 const client = (() => {
   if (REDIS_CLUSTER_NODES) {
-    const nodes = REDIS_CLUSTER_NODES.split(",").map((n) => {
+    const rootNodes = REDIS_CLUSTER_NODES.split(",").map((n) => {
       const [host, port] = n.trim().split(":");
-      return { host, port: parseInt(port || "6379") };
+      return {
+        socket: {
+          host,
+          port: parseInt(port || "6379"),
+        },
+      };
     });
-    console.log(`Redis cluster mode: ${nodes.length} nodes`);
-    return createCluster({ nodes });
+    console.log(`Redis cluster mode: ${rootNodes.length} nodes`);
+    return createCluster({ rootNodes });
   }
 
   // Single-node (local dev / docker-compose default)
@@ -38,10 +43,8 @@ export const cache = {
 
   async getMany<T>(keys: string[]): Promise<(T | null)[]> {
     if (keys.length === 0) return [];
-    const pipeline = client.multi();
-    keys.forEach(key => pipeline.get(key));
-    const results = await pipeline.exec();
-    return results.map((r: any) => r ? JSON.parse(r) : null);
+    const results = await Promise.all(keys.map((key) => client.get(key)));
+    return results.map((value) => (value ? JSON.parse(value) as T : null));
   },
 
   async set(key: string, value: any, ttlSeconds: number): Promise<void> {

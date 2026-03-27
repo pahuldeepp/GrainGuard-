@@ -5,17 +5,27 @@ import (
     "fmt"
     "io/fs"
     "log"
+    "strings"
     "github.com/golang-migrate/migrate/v4"
     _ "github.com/golang-migrate/migrate/v4/database/postgres"
     "github.com/golang-migrate/migrate/v4/source/iofs"
 )
 
-func Up(dsn string, migrations fs.FS, dbName string) error {
+func Up(dsn string, migrations fs.FS, serviceName string) error {
     source, err := iofs.New(migrations, ".")
     if err != nil {
         return fmt.Errorf("migrate source: %w", err)
     }
-    m, err := migrate.NewWithSourceInstance("iofs", source, dsn)
+    // Use a service-specific migrations table so services with different
+    // migration counts don't clobber each other's schema_migrations row.
+    tableParam := "schema_migrations_" + serviceName
+    dsnWithTable := dsn
+    if strings.Contains(dsn, "?") {
+        dsnWithTable = dsn + "&x-migrations-table=" + tableParam
+    } else {
+        dsnWithTable = dsn + "?x-migrations-table=" + tableParam
+    }
+    m, err := migrate.NewWithSourceInstance("iofs", source, dsnWithTable)
     if err != nil {
         return fmt.Errorf("migrate init: %w", err)
     }

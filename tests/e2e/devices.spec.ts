@@ -29,8 +29,11 @@ test.describe("Devices page", () => {
 
   test("modal closes on backdrop click", async ({ page }) => {
     await page.getByRole("button", { name: "+ Register Device" }).click();
-    await expect(page.getByRole("dialog")).toBeVisible();
-    await page.mouse.click(10, 10);
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    const box = await dialog.boundingBox();
+    if (!box) throw new Error("Dialog bounding box unavailable");
+    await page.mouse.click(box.x - 10, box.y - 10);
     await expect(page.getByRole("dialog")).not.toBeVisible();
   });
 
@@ -69,6 +72,10 @@ test.describe("Devices page", () => {
   test("Refresh button triggers refetch", async ({ page }) => {
     const refreshBtn = page.getByRole("button", { name: "Refresh" });
     await expect(refreshBtn).toBeVisible({ timeout: 10_000 });
+    const refreshRequest = page.waitForResponse((response) =>
+      response.url().includes("/graphql") && response.request().method() === "POST"
+    );
     await refreshBtn.click();
+    await refreshRequest;
   });
 });

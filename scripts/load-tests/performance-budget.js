@@ -101,7 +101,15 @@ export default function () {
       { headers: COMMON_HEADERS, tags: { endpoint: "bff" } }
     );
 
-    const bffOk = gqlRes.status === 200;
+    let gqlErrors = false;
+    try {
+      const body = gqlRes.json();
+      gqlErrors = Array.isArray(body?.errors) && body.errors.length > 0;
+    } catch {
+      gqlErrors = true;
+    }
+
+    const bffOk = gqlRes.status === 200 && !gqlErrors;
     check(gqlRes, { "bff graphql 200": () => bffOk });
     if (!bffOk) {
       errorRate.add(1);
