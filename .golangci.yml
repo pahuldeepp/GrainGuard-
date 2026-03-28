@@ -3,10 +3,6 @@ version: "2"
 run:
   timeout: 5m
   modules-download-mode: readonly
-  exclude-dirs:
-    - vendor
-    - node_modules
-    - dist
 
 linters:
   default: none
@@ -21,29 +17,28 @@ linters:
     - bodyclose
     - noctx
     - exhaustive
-
-linters-settings:
-  govet:
-    enable-all: true
-    disable:
-      - fieldalignment
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - performance
-    disabled-checks:
-      - ifElseChain
-      - exitAfterDefer
-      - hugeParam
-      - rangeValCopy
-      - sloppyReassign
-      - sprintfQuotedString
-  gosec:
-    excludes:
-      - G104  # unhandled errors in deferred calls (noisy)
-      - G404  # math/rand is acceptable here for jitter and synthetic test data
-  exhaustive:
-    default-signifies-exhaustive: true
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+      disabled-checks:
+        - ifElseChain
+        - exitAfterDefer
+        - hugeParam
+        - rangeValCopy
+        - sloppyReassign
+        - sprintfQuotedString
+    gosec:
+      excludes:
+        - G104  # unhandled errors in deferred calls (noisy)
+        - G404  # math/rand is acceptable here for jitter and synthetic test data
+    exhaustive:
+      default-signifies-exhaustive: true
 
 issues:
   max-issues-per-linter: 50
