@@ -10,7 +10,7 @@ import fs from "fs";
 
 const protoPath = path.resolve(
   __dirname,
-  "../../libs/proto/device.proto"
+  "../../../../libs/proto/device.proto"
 );
 
 const packageDefinition = protoLoader.loadSync(protoPath, {
@@ -97,6 +97,10 @@ export function createDevice(
       (err: any, response: any) => {
         if (err) {
           return reject(err);
+        }
+        // Validate response structure
+        if (!response || !response.device_id) {
+          return reject(new Error("Invalid gRPC response: missing device_id"));
         }
         resolve(response);
       }

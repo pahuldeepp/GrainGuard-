@@ -40,7 +40,7 @@ type parsedEvent struct {
 	recordedAt  time.Time
 }
 
-func HandleTelemetry(pool *pgxpool.Pool, redisClient *redis.Client) func([]byte) error {
+func HandleTelemetry(pool *pgxpool.Pool, redisClient redis.UniversalClient) func([]byte) error {
 	return func(payload []byte) error {
 		start := time.Now()
 
@@ -206,7 +206,7 @@ func HandleTelemetry(pool *pgxpool.Pool, redisClient *redis.Client) func([]byte)
 	}
 }
 
-func HandleTelemetryBatch(pool *pgxpool.Pool, redisClient *redis.Client) func(context.Context, [][]byte) error {
+func HandleTelemetryBatch(pool *pgxpool.Pool, redisClient redis.UniversalClient) func(context.Context, [][]byte) error {
 	return func(ctx context.Context, payloads [][]byte) error {
 		start := time.Now()
 

@@ -62,6 +62,9 @@ function RegisterDeviceModalContent({ onClose, onRegistered }: Omit<Props, "open
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
       onKeyDown={handleKey}
       role="dialog"
       aria-modal="true"

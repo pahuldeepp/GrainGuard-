@@ -22,11 +22,10 @@ type postgresChecker struct{ pool *pgxpool.Pool }
 func NewPostgresChecker(pool *pgxpool.Pool) Checker        { return &postgresChecker{pool} }
 func (c *postgresChecker) Name() string                    { return "postgres" }
 func (c *postgresChecker) Check(ctx context.Context) error { return c.pool.Ping(ctx) }
+type redisChecker struct{ client redis.UniversalClient }
 
-type redisChecker struct{ client *redis.Client }
-
-func NewRedisChecker(client *redis.Client) Checker { return &redisChecker{client} }
-func (c *redisChecker) Name() string               { return "redis" }
+func NewRedisChecker(client redis.UniversalClient) Checker { return &redisChecker{client} }
+func (c *redisChecker) Name() string                       { return "redis" }
 func (c *redisChecker) Check(ctx context.Context) error {
 	return c.client.Ping(ctx).Err()
 }

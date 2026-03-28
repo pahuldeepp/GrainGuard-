@@ -1,0 +1,141 @@
+version: "1.0.0"
+title: Network Partition — telemetry-service → Kafka
+description: >
+  Apply a NetworkPolicy that drops all egress from telemetry-service to Kafka.
+  Messages should be buffered in the producer.
+  After the policy is removed, all buffered messages must be delivered
+  (consumer lag returns to pre-chaos level within 2 minutes).
+
+tags:
+  - kubernetes
+  - network
+  - kafka
+  - producer-buffering
+
+configuration:
+  namespace:
+    type: env
+    key: NAMESPACE
+    default: grainguard-dev
+
+steady-state-hypothesis:
+  title: telemetry-service is healthy and Kafka consumer lag is low
+  probes:
+    - name: telemetry-service-healthy
+      type: probe
+      tolerance: true
+      provider:
+        type: process
+        path: kubectl
+        arguments:
+          - rollout
+          - status
+          - deployment/telemetry-service
+          - -n
+          - "${namespace}"
+          - --timeout=30s
+
+    - name: kafka-healthy
+      type: probe
+      tolerance: true
+      provider:
+        type: process
+        path: kubectl
+        arguments:
+          - rollout
+          - status
+          - deployment/kafka
+          - -n
+          - "${namespace}"
+          - --timeout=30s
+
+method:
+  # ── Apply deny-egress NetworkPolicy ─────────────────────────────────────────
+  - name: apply-network-partition
+    type: action
+    provider:
+      type: process
+      path: kubectl
+      arguments:
+        - apply
+        - -f
+        - -
+        - --stdin
+      stdin: |
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: chaos-deny-telemetry-to-kafka
+          namespace: "${namespace}"
+        spec:
+          podSelector:
+            matchLabels:
+              app: telemetry-service
+          policyTypes:
+            - Egress
+          egress:
+            - ports:
+                - port: 53      # allow DNS only
+                  protocol: UDP
+
+  # ── Let the partition run for 60 s ───────────────────────────────────────────
+  - name: wait-during-partition
+    type: action
+    provider:
+      type: process
+      path: sleep
+      arguments:
+        - "60"
+
+  # ── Verify telemetry-service pod is still alive (didn't crash) ───────────────
+  - name: telemetry-still-running
+    type: probe
+    tolerance: true
+    provider:
+      type: process
+      path: kubectl
+      arguments:
+        - rollout
+        - status
+        - deployment/telemetry-service
+        - -n
+        - "${namespace}"
+        - --timeout=10s
+
+  # ── Remove network partition ──────────────────────────────────────────────────
+  - name: remove-network-partition
+    type: action
+    provider:
+      type: process
+      path: kubectl
+      arguments:
+        - delete
+        - networkpolicy
+        - chaos-deny-telemetry-to-kafka
+        - -n
+        - "${namespace}"
+        - --ignore-not-found
+
+  # ── Wait for Kafka producer flush ─────────────────────────────────────────────
+  - name: wait-producer-flush
+    type: action
+    provider:
+      type: process
+      path: sleep
+      arguments:
+        - "30"
+
+rollbacks:
+  # Safety rollback — remove the policy even if experiment fails mid-way
+  - name: rollback-remove-network-partition
+    type: action
+    provider:
+      type: process
+      path: kubectl
+      arguments:
+        - delete
+        - networkpolicy
+        - chaos-deny-telemetry-to-kafka
+        - -n
+        - "${namespace}"
+        - --ignore-not-found

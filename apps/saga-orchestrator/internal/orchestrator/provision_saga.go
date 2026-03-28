@@ -51,13 +51,16 @@ func (p *ProvisionSaga) HandleEvent(ctx context.Context, raw []byte) error {
 		}
 
 		sagaID := uuid.New()
-		initialPayload, _ := json.Marshal(map[string]any{
+		initialPayload, initialErr := json.Marshal(map[string]any{
 			"device_id":  payload.GetDeviceId(),
 			"tenant_id":  payload.GetTenantId(),
 			"serial":     payload.GetSerial(),
 			"created_at": payload.GetCreatedAt(),
 			"event_id":   env.GetEventId(),
 		})
+		if initialErr != nil {
+			return fmt.Errorf("marshal initial payload: %w", initialErr)
+		}
 
 		saga := &domain.Saga{
 			ID:            sagaID,
@@ -79,7 +82,10 @@ func (p *ProvisionSaga) HandleEvent(ctx context.Context, raw []byte) error {
 			"tenant_id":      payload.GetTenantId(),
 			"occurred_at_ms": env.GetOccurredAtUnixMs(),
 		}
-		cmdBytes, _ := json.Marshal(cmd)
+		cmdBytes, cmdErr := json.Marshal(cmd)
+	if cmdErr != nil {
+		return fmt.Errorf("marshal tenant.attach_device command: %w", cmdErr)
+	}
 
 		if err := p.cmdProducer.Publish(ctx, []byte(correlationID), cmdBytes); err != nil {
 			_ = p.repo.MarkFailed(ctx, sagaID.String(), "failed to publish tenant.attach_device")
@@ -123,7 +129,10 @@ func (p *ProvisionSaga) handleTenantAttached(ctx context.Context, env *eventspb.
 		"tenant_id":      env.GetTenantId(),
 		"occurred_at_ms": env.GetOccurredAtUnixMs(),
 	}
-	cmdBytes, _ := json.Marshal(cmd)
+	cmdBytes, detachErr := json.Marshal(cmd)
+	if detachErr != nil {
+		return fmt.Errorf("marshal tenant.detach_device command: %w", detachErr)
+	}
 
 	if err := p.cmdProducer.Publish(ctx, []byte(correlationID), cmdBytes); err != nil {
 		_ = p.repo.MarkFailed(ctx, saga.ID.String(), "failed to publish quota.allocate_device")

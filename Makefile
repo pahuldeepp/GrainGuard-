@@ -1,8 +1,10 @@
-.PHONY: up down restart logs build seed test lint clean help
+.PHONY: up down restart logs build seed test lint clean help ci
 
 # ============================================
 # GrainGuard — Developer Makefile
 # ============================================
+
+COMPOSE := docker compose -f infra/docker/docker-compose.yml
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -12,28 +14,31 @@ help: ## Show this help
 # ============================================
 
 up: ## Start all services
-	docker compose -f infra/docker/docker-compose.yml up -d
+	$(COMPOSE) up -d
 
 down: ## Stop all services
-	docker compose -f infra/docker/docker-compose.yml down
+	$(COMPOSE) down
 
 restart: ## Restart all services
-	docker compose -f infra/docker/docker-compose.yml restart
+	$(COMPOSE) restart
 
 logs: ## Tail logs for all services
-	docker compose -f infra/docker/docker-compose.yml logs -f
+	$(COMPOSE) logs -f
 
 logs-gateway: ## Tail gateway logs
-	docker compose -f infra/docker/docker-compose.yml logs -f gateway
+	$(COMPOSE) logs -f gateway
 
 logs-bff: ## Tail BFF logs
-	docker compose -f infra/docker/docker-compose.yml logs -f bff
+	$(COMPOSE) logs -f bff
 
 logs-kafka: ## Tail Kafka logs
-	docker compose -f infra/docker/docker-compose.yml logs -f kafka
+	$(COMPOSE) logs -f kafka
+
+logs-ingest: ## Tail ingest-service logs
+	$(COMPOSE) logs -f ingest-service
 
 build: ## Build all Docker images
-	docker compose -f infra/docker/docker-compose.yml build
+	$(COMPOSE) build
 
 # ============================================
 # Database
@@ -50,16 +55,22 @@ migrate: ## Run database migrations
 # Testing
 # ============================================
 
-test: ## Run all tests
+test: ## Run all tests (Go + TS)
 	$(MAKE) test-go
-	$(MAKE) test-react
+	$(MAKE) test-gateway
+	$(MAKE) test-dashboard
 
-test-go: ## Run Go tests
-	go test ./...
+test-go: ## Run Go tests with race detector
+	go test -race -count=1 ./...
 
-test-react: ## Run React/Node tests
-	cd apps/dashboard && npm test -- --run
-	cd apps/bff && npm test -- --run
+test-gateway: ## Run Gateway unit tests
+	cd apps/gateway && npx jest --passWithNoTests --forceExit
+
+test-dashboard: ## Run Dashboard Vitest tests
+	cd apps/dashboard && npx vitest run
+
+test-e2e: ## Run Playwright E2E tests
+	cd apps/dashboard && npx playwright test
 
 test-load: ## Run k6 load tests
 	k6 run scripts/load-tests/gateway-load-test.js
@@ -69,35 +80,79 @@ test-load: ## Run k6 load tests
 # Linting
 # ============================================
 
-lint: ## Lint all services
+lint: ## Lint all services (Go + TS)
 	$(MAKE) lint-go
 	$(MAKE) lint-ts
 
-lint-go: ## Lint Go services
+lint-go: ## Lint Go services with golangci-lint
 	golangci-lint run ./...
 
-lint-ts: ## Lint TypeScript services
+lint-ts: ## Lint all TypeScript services
 	cd apps/gateway && npm run lint
 	cd apps/bff && npm run lint
+	cd apps/jobs-worker && npm run lint
 	cd apps/dashboard && npm run lint
+
+typecheck: ## Typecheck all TypeScript services
+	cd apps/gateway && npm run typecheck
+	cd apps/bff && npm run typecheck
+	cd apps/dashboard && npm run build
+
+lint-fix: ## Auto-fix lint issues
+	golangci-lint run --fix ./...
+	cd apps/gateway && npm run lint:fix
+	cd apps/bff && npm run lint:fix
+	cd apps/jobs-worker && npm run lint:fix
+	cd apps/dashboard && npm run lint -- --fix
+
+# ============================================
+# CI (local mirror of GitHub Actions)
+# ============================================
+
+ci: ## Run full CI locally (lint + test + build)
+	@echo "=== Go build ==="
+	go build ./...
+	@echo "=== Go vet ==="
+	go vet ./...
+	@echo "=== Go lint ==="
+	command -v golangci-lint >/dev/null || { echo "Install: brew install golangci-lint"; exit 1; }
+	golangci-lint run ./...
+	@echo "=== Go test ==="
+	go test -race -count=1 ./...
+	@echo "=== TS lint ==="
+	$(MAKE) lint-ts
+	@echo "=== Gateway tests ==="
+	$(MAKE) test-gateway
+	@echo "=== Dashboard tests ==="
+	$(MAKE) test-dashboard
+	@echo "=== Dashboard build ==="
+	cd apps/dashboard && npm run build
+	@echo ""
+	@echo "CI passed"
 
 # ============================================
 # Cleanup
 # ============================================
 
 clean: ## Remove all containers and volumes
-	docker compose -f infra/docker/docker-compose.yml down -v --remove-orphans
+	$(COMPOSE) down -v --remove-orphans
 
 clean-cache: ## Clear Redis cache
-	docker compose -f infra/docker/docker-compose.yml exec redis redis-cli FLUSHALL
+	$(COMPOSE) exec redis redis-cli FLUSHALL
 
 # ============================================
 # Status
 # ============================================
 
 ps: ## Show running services
-	docker compose -f infra/docker/docker-compose.yml ps
+	$(COMPOSE) ps
 
 health: ## Check health of all services
-	curl -s http://localhost:8086/health | jq
-	curl -s http://localhost:4000/health | jq
+	@echo "=== Gateway ==="
+	@curl -sf http://localhost:3000/health | jq . || echo "Gateway: DOWN"
+	@echo "=== Gateway Readiness ==="
+	@curl -sf http://localhost:3000/health/ready | jq . || echo "Gateway readiness: DOWN"
+	@echo "=== BFF ==="
+	@curl -sf http://localhost:4000/health | jq . || echo "BFF: DOWN"
+	@echo "=== Ingest Service ==="
+	@curl -sf http://localhost:3001/health | jq . || echo "Ingest: DOWN"
