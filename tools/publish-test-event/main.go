@@ -60,7 +60,7 @@ func main() {
         Topic:    "device.events",
         Balancer: &kafka.LeastBytes{},
     }
-    defer writer.Close()
+    defer writer.Close() //nolint:errcheck
 
     // Step 1: start saga
     publishEvent(writer, deviceID, tenantID, "device_created_v1")

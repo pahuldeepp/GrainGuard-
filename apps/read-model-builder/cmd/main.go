@@ -84,7 +84,7 @@ func main() {
 	redisClient := redis.NewClient(&redis.Options{
 		Addr: getenv("REDIS_ADDR", "redis:6379"),
 	})
-	defer redisClient.Close()
+	defer redisClient.Close() //nolint:errcheck
 
 	if err := redisClient.Ping(ctx).Err(); err != nil {
 		log.Warn().Err(err).Msg("redis ping failed (cache best-effort)")

@@ -45,8 +45,3 @@ linters:
 issues:
   max-issues-per-linter: 50
   max-same-issues: 5
-  exclude-rules:
-    # defer x.Close() returning an error is idiomatic Go for cleanup paths;
-    # suppressing globally is standard practice.
-    - linters: [errcheck]
-      source: "defer "
