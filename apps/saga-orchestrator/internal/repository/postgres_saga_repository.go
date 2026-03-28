@@ -16,10 +16,11 @@ const dbQueryTimeout = 10 * time.Second
 
 // withTimeout wraps a context with a query timeout if one isn't already set.
 func withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
-    if _, ok := ctx.Deadline(); ok {
-        return ctx, func() {} // caller already set a deadline
-    }
-    return context.WithTimeout(ctx, dbQueryTimeout)
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {} // caller already set a deadline
+	}
+	//nolint:gosec // callers always defer the returned cancel func
+	return context.WithTimeout(ctx, dbQueryTimeout)
 }
 
 type PostgresSagaRepository struct {

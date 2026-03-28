@@ -15,14 +15,12 @@ jobs:
     timeout-minutes: 15
 
     services:
-      # Spin up the gateway and BFF as Docker Compose services
-      # so k6 can hit them without needing a live cluster
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER:     grainguard
+          POSTGRES_USER: grainguard
           POSTGRES_PASSWORD: grainguard
-          POSTGRES_DB:       grainguard
+          POSTGRES_DB: grainguard
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -42,9 +40,11 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
-          cache-dependency-path: apps/gateway/package-lock.json
+          cache-dependency-path: |
+            apps/gateway/package-lock.json
+            apps/bff/package-lock.json
 
       - name: Install gateway deps
         run: npm ci
@@ -54,25 +54,66 @@ jobs:
         run: npx ts-node src/server.ts &
         working-directory: apps/gateway
         env:
-          PORT:             3000
-          DATABASE_URL:     postgres://grainguard:grainguard@localhost:5432/grainguard
-          REDIS_URL:        redis://localhost:6379
-          JWKS_URL:         ${{ secrets.PERF_JWKS_URL }}
-          JWT_ISSUER:       ${{ secrets.PERF_JWT_ISSUER }}
-          JWT_AUDIENCE:     ${{ secrets.PERF_JWT_AUDIENCE }}
-          ALLOWED_ORIGINS:  http://localhost:5173
-          STRIPE_SECRET_KEY:   sk_test_placeholder
+          PORT: 3000
+          DATABASE_URL: postgres://grainguard:grainguard@localhost:5432/grainguard
+          REDIS_URL: redis://localhost:6379
+          JWKS_URL: ${{ secrets.PERF_JWKS_URL }}
+          JWT_ISSUER: ${{ secrets.PERF_JWT_ISSUER }}
+          JWT_AUDIENCE: ${{ secrets.PERF_JWT_AUDIENCE }}
+          ALLOWED_ORIGINS: http://localhost:5173
+          STRIPE_SECRET_KEY: sk_test_placeholder
           STRIPE_WEBHOOK_SECRET: whsec_placeholder
-          STRIPE_PRICE_STARTER:       price_placeholder
-          STRIPE_PRICE_PROFESSIONAL:  price_placeholder
-          STRIPE_PRICE_ENTERPRISE:    price_placeholder
-          DASHBOARD_URL:    http://localhost:5173
-          AUTH0_DOMAIN:         placeholder.auth0.com
+          STRIPE_PRICE_STARTER: price_placeholder
+          STRIPE_PRICE_PROFESSIONAL: price_placeholder
+          STRIPE_PRICE_ENTERPRISE: price_placeholder
+          DASHBOARD_URL: http://localhost:5173
+          AUTH0_DOMAIN: placeholder.auth0.com
           AUTH0_MANAGEMENT_CLIENT_ID: placeholder
           AUTH0_MANAGEMENT_CLIENT_SECRET: placeholder
 
+      - name: Install BFF deps
+        run: npm ci
+        working-directory: apps/bff
+
+      - name: Create minimal read-model tables for BFF startup
+        run: |
+          PGPASSWORD=grainguard psql \
+            -h localhost \
+            -U grainguard \
+            -d grainguard \
+            -c 'CREATE TABLE IF NOT EXISTS device_telemetry_latest (
+                  device_id uuid PRIMARY KEY,
+                  tenant_id uuid,
+                  temperature double precision,
+                  humidity double precision,
+                  recorded_at timestamptz,
+                  updated_at timestamptz,
+                  version bigint
+                );'
+
+      - name: Start BFF in background
+        run: npx ts-node-dev --transpile-only src/server.ts &
+        working-directory: apps/bff
+        env:
+          PORT: 4000
+          NODE_ENV: test
+          AUTH_ENABLED: "false"
+          READ_DATABASE_URL: postgres://grainguard:grainguard@localhost:5432/grainguard
+          REDIS_HOST: localhost
+          REDIS_PORT: "6379"
+          ELASTICSEARCH_URL: http://localhost:9200
+          CASSANDRA_HOSTS: localhost
+          CASSANDRA_KEYSPACE: grainguard_telemetry
+          JWKS_URL: https://example.com/.well-known/jwks.json
+          JWT_ISSUER: https://example.com/
+          JWT_AUDIENCE: grainguard
+          ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
+
       - name: Wait for gateway
         run: npx wait-on http://localhost:3000/health --timeout 30000
+
+      - name: Wait for BFF
+        run: npx wait-on tcp:4000 --timeout 30000
 
       - name: Install k6
         run: |
@@ -85,7 +126,6 @@ jobs:
             --env GATEWAY_URL=http://localhost:3000 \
             --env BFF_URL=http://localhost:4000 \
             scripts/load-tests/performance-budget.js
-        # k6 exits 99 if thresholds are breached — this step fails and blocks the PR
 
       - name: Upload performance results
         uses: actions/upload-artifact@v4

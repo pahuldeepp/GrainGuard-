@@ -6,12 +6,14 @@ const REDIS_CLUSTER_NODES = process.env.REDIS_CLUSTER_NODES;
 
 const client = (() => {
   if (REDIS_CLUSTER_NODES) {
-    const nodes = REDIS_CLUSTER_NODES.split(",").map((n) => {
+    const rootNodes = REDIS_CLUSTER_NODES.split(",").map((n) => {
       const [host, port] = n.trim().split(":");
-      return { host, port: parseInt(port || "6379") };
+      return {
+        url: `redis://${host}:${parseInt(port || "6379", 10)}`,
+      };
     });
-    console.log(`Redis cluster mode: ${nodes.length} nodes`);
-    return createCluster({ rootNodes: nodes });
+    console.log(`Redis cluster mode: ${rootNodes.length} nodes`);
+    return createCluster({ rootNodes });
   }
 
   // Single-node (local dev / docker-compose default)
@@ -19,7 +21,7 @@ const client = (() => {
   return createClient({
     socket: {
       host: process.env.REDIS_HOST || "localhost",
-      port: parseInt(process.env.REDIS_PORT || "6379"),
+      port: parseInt(process.env.REDIS_PORT || "6379", 10),
     },
   });
 })();

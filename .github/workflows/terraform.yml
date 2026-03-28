@@ -19,7 +19,7 @@ jobs:
   plan:
     name: Terraform Plan (${{ matrix.env }})
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && secrets.AWS_TF_ROLE_ARN != ''
     strategy:
       matrix:
         env: [dev, prod]
@@ -84,7 +84,7 @@ jobs:
   apply:
     name: Terraform Apply (dev)
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && secrets.AWS_TF_ROLE_ARN != ''
     environment: dev               # requires manual approval in GitHub Environments
     defaults:
       run:

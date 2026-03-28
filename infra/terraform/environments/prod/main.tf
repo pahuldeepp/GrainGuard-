@@ -55,6 +55,6 @@ module "msk" {
 }
 
 # ── Outputs consumed by the DR region ────────────────────────────────────────
-output "aurora_global_cluster_id"   { value = module.aurora.global_cluster_id }
-output "redis_global_datastore_id"  { value = module.redis.global_datastore_id }
-output "msk_bootstrap_brokers"      { value = module.msk.bootstrap_brokers }
+output "aurora_global_cluster_id" { value = module.aurora.global_cluster_id }
+output "redis_global_datastore_id" { value = module.redis.global_datastore_id }
+output "msk_bootstrap_brokers" { value = module.msk.bootstrap_brokers_tls }
