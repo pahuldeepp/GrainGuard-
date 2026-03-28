@@ -1,8 +1,10 @@
-# Root Application — manages all child Applications via App-of-Apps pattern
+# Legacy app-of-apps pointing to argocd/environments.
+# The canonical root Application is k8s/argocd/app-of-apps.yaml (name: grainguard-apps).
+# This file uses a distinct name to avoid last-write-wins identity collision.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: grainguard-apps
+  name: grainguard-apps-legacy
   namespace: argocd
   # Cascade delete: removing this app also removes all children
   finalizers:

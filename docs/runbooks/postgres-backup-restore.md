@@ -12,8 +12,8 @@ This runbook matches the local Docker stack:
 - write DB container: `grainguard-postgres`
 - read DB container: `grainguard-postgres-read`
 - scripts:
-  - [`backup-postgres.sh`](/Users/pahuldeep/Developer/grainguard/infra/scripts/backup-postgres.sh)
-  - [`restore-postgres.sh`](/Users/pahuldeep/Developer/grainguard/infra/scripts/restore-postgres.sh)
+  - [`backup-postgres.sh`](infra/scripts/backup-postgres.sh)
+  - [`restore-postgres.sh`](infra/scripts/restore-postgres.sh)
 
 These scripts create custom-format dumps for:
 
@@ -25,7 +25,6 @@ These scripts create custom-format dumps for:
 ## Backup
 
 ```bash
-cd /Users/pahuldeep/Developer/grainguard
 ./infra/scripts/backup-postgres.sh
 ```
 
@@ -65,7 +64,6 @@ Warning: this is destructive. The target database is dropped and recreated befor
 Restore both databases:
 
 ```bash
-cd /Users/pahuldeep/Developer/grainguard
 ./infra/scripts/restore-postgres.sh infra/backups/postgres/<timestamp>
 ```
 

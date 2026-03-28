@@ -11,8 +11,8 @@ This runbook targets the standalone Redis container in local Docker:
 
 - redis container: `grainguard-redis`
 - scripts:
-  - [`backup-redis.sh`](/Users/pahuldeep/Developer/grainguard/infra/scripts/backup-redis.sh)
-  - [`restore-redis.sh`](/Users/pahuldeep/Developer/grainguard/infra/scripts/restore-redis.sh)
+  - [`backup-redis.sh`](infra/scripts/backup-redis.sh)
+  - [`restore-redis.sh`](infra/scripts/restore-redis.sh)
 
 It does **not** back up the six-node Redis cluster used for cluster-mode experiments.
 
@@ -21,7 +21,6 @@ It does **not** back up the six-node Redis cluster used for cluster-mode experim
 ## Backup
 
 ```bash
-cd /Users/pahuldeep/Developer/grainguard
 ./infra/scripts/backup-redis.sh
 ```
 
@@ -58,7 +57,6 @@ docker exec grainguard-redis redis-cli DBSIZE
 Warning: this restarts the Redis container and can evict hot cache state and distributed locks.
 
 ```bash
-cd /Users/pahuldeep/Developer/grainguard
 ./infra/scripts/restore-redis.sh infra/backups/redis/<timestamp>
 ```
 
