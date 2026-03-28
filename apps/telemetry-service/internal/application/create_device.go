@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -56,7 +57,12 @@ func (s *CreateDeviceService) Execute(ctx context.Context, tenantID string, seri
 		return nil, err
 	}
 	defer func() {
-		_ = tx.Rollback(ctx)
+		rollbackCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if rollbackErr := tx.Rollback(rollbackCtx); rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+			log.Printf("create device rollback failed: %v", rollbackErr)
+		}
 	}()
 
 	if saveErr := txRepo.SaveTx(ctx, tx, device); saveErr != nil {

@@ -3,10 +3,13 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/pahuldeepp/grainguard/apps/telemetry-service/internal/domain"
@@ -71,7 +74,12 @@ func (s *RecordTelemetryService) Execute(
 		return err
 	}
 	defer func() {
-		_ = tx.Rollback(ctx)
+		rollbackCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if rollbackErr := tx.Rollback(rollbackCtx); rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+			log.Printf("record telemetry rollback failed: %v", rollbackErr)
+		}
 	}()
 
 	telemetry, err := domain.NewTelemetry(deviceUUID, temp, humidity)

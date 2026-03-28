@@ -328,6 +328,7 @@ func main() {
 			}
 
 			if event.EventType != "telemetry.recorded" {
+				skipped.Add(1)
 				if commitErr := reader.CommitMessages(ctx, msg); commitErr != nil {
 					log.Printf("commit error after skipping event type: %v", commitErr)
 				}
