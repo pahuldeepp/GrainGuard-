@@ -1,24 +1,26 @@
+version: "2"
+
 run:
   timeout: 5m
   modules-download-mode: readonly
+  exclude-dirs:
+    - vendor
+    - node_modules
+    - dist
 
 linters:
+  default: none
   enable:
     - errcheck
     - govet
     - staticcheck
-    - unused
-    - gosimple
     - ineffassign
-    - typecheck
     - gocritic
     - gosec
     - prealloc
     - bodyclose
     - noctx
     - exhaustive
-  disable:
-    - depguard
 
 linters-settings:
   govet:
@@ -44,10 +46,5 @@ linters-settings:
     default-signifies-exhaustive: true
 
 issues:
-  exclude-use-default: true
   max-issues-per-linter: 50
   max-same-issues: 5
-  exclude-dirs:
-    - vendor
-    - node_modules
-    - dist
