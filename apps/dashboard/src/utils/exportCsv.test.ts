@@ -15,7 +15,7 @@ beforeEach(() => {
     download: "",
     click: mockClick,
     remove: mockRemove,
-  } as any);
+  } as unknown as HTMLElement);
 });
 
 const makeDevice = (overrides: Partial<Device> = {}): Device => ({
@@ -39,7 +39,7 @@ function captureCSV(devices: Device[]): string {
       captured = (parts?.[0] as string) ?? "";
       super(parts, options);
     }
-  } as any;
+  } as unknown as typeof Blob;
   exportDevicesToCsv(devices);
   global.Blob = OrigBlob;
   return captured;

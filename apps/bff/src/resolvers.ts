@@ -25,9 +25,9 @@ function tenantFilter(ctx: BffContext): string | undefined {
 export const resolvers = {
   Query: {
 
-    device: async (_: any, args: { deviceId: string }, ctx: BffContext) => {
+    device: async (_: unknown, args: { deviceId: string }, ctx: BffContext) => {
       const cacheKey = `device:full:${ctx.tenantId}:${args.deviceId}`;
-      const cached = await cache.get<any>(cacheKey);
+      const cached = await cache.get<Record<string,unknown>>(cacheKey);
       if (cached) return cached;
 
       const row = await db.getDeviceWithTelemetry(args.deviceId);
@@ -50,17 +50,17 @@ export const resolvers = {
       return result;
     },
 
-    devices: async (_: any, args: { limit?: number }, ctx: BffContext) => {
+    devices: async (_: unknown, args: { limit?: number }, ctx: BffContext) => {
       const limit = args.limit || 20;
       const tid = tenantFilter(ctx);
       const cacheKey = `devices:all:${tid || "global"}:${limit}`;
 
-      const cached = await cache.get<any[]>(cacheKey);
+      const cached = await cache.get<Record<string,unknown>[]>(cacheKey);
       if (cached) return cached;
 
       const rows = await db.getAllDevicesWithTelemetry(limit, tid);
 
-      const result = rows.map((row: any) => ({
+      const result = rows.map((row: Record<string,unknown>) => ({
         deviceId:     row.device_id,
         tenantId:     row.tenant_id,
         serialNumber: row.serial_number,
@@ -75,16 +75,16 @@ export const resolvers = {
       return result;
     },
 
-    deviceTelemetry: async (_: any, args: { deviceId: string }, ctx: BffContext) => {
+    deviceTelemetry: async (_: unknown, args: { deviceId: string }, ctx: BffContext) => {
       const cacheKey = `telemetry:device:${ctx.tenantId}:${args.deviceId}`;
 
-      const cached = await cache.get<any>(cacheKey);
+      const cached = await cache.get<Record<string,unknown>>(cacheKey);
       if (cached) return cached;
 
       const lockAcquired = await cache.acquireLock(cacheKey, 5);
       if (!lockAcquired) {
         await sleep(100);
-        const retried = await cache.get<any>(cacheKey);
+        const retried = await cache.get<Record<string,unknown>>(cacheKey);
         if (retried) return retried;
       }
 
@@ -114,25 +114,25 @@ export const resolvers = {
       }
     },
 
-    allTelemetry: async (_: any, args: { limit?: number }, ctx: BffContext) => {
+    allTelemetry: async (_: unknown, args: { limit?: number }, ctx: BffContext) => {
       const limit = args.limit || 20;
       const tid = tenantFilter(ctx);
       const cacheKey = `telemetry:all:${tid || "global"}:${limit}`;
 
-      const cached = await cache.get<any[]>(cacheKey);
+      const cached = await cache.get<Record<string,unknown>[]>(cacheKey);
       if (cached) return cached;
 
       const lockAcquired = await cache.acquireLock(cacheKey, 5);
       if (!lockAcquired) {
         await sleep(100);
-        const retried = await cache.get<any[]>(cacheKey);
+        const retried = await cache.get<Record<string,unknown>[]>(cacheKey);
         if (retried) return retried;
       }
 
       try {
         const rows = await db.getAllTelemetry(limit, tid);
 
-        const result = rows.map((row: any) => ({
+        const result = rows.map((row: Record<string,unknown>) => ({
           deviceId:    row.device_id,
           temperature: row.temperature,
           humidity:    row.humidity,
@@ -148,11 +148,11 @@ export const resolvers = {
       }
     },
 
-    manyDeviceTelemetry: async (_: any, args: { deviceIds: string[] }, ctx: BffContext) => {
+    manyDeviceTelemetry: async (_: unknown, args: { deviceIds: string[] }, ctx: BffContext) => {
       const keys = args.deviceIds.map(id => `telemetry:device:${ctx.tenantId}:${id}`);
-      const cachedResults = await cache.getMany<any>(keys);
+      const cachedResults = await cache.getMany<Record<string,unknown>>(keys);
 
-      const results: any[] = [];
+      const results: (Record<string,unknown> | null)[] = [];
       const missedIds: string[] = [];
       const missedIndexes: number[] = [];
 
@@ -190,7 +190,7 @@ export const resolvers = {
       return results.filter(Boolean);
     },
 
-    deviceTelemetryHistory: async (_: any, args: { deviceId: string; limit?: number }, ctx: BffContext) => {
+    deviceTelemetryHistory: async (_: unknown, args: { deviceId: string; limit?: number }, ctx: BffContext) => {
       // Tenant isolation — superadmins bypass
       if (!ctx.isSuperAdmin) {
         const device = await db.getDeviceWithTelemetry(args.deviceId);
@@ -211,19 +211,19 @@ export const resolvers = {
       console.log('[history] falling back to Postgres');
       const tid = tenantFilter(ctx);
       const rows = await db.getTelemetryHistory(args.deviceId, limit, tid);
-      return rows.map((row: any) => ({
+      return rows.map((row: Record<string,unknown>) => ({
         deviceId:    row.deviceId,
         temperature: row.temperature,
         humidity:    row.humidity,
         recordedAt:  toIsoDate(row.recordedAt),
       }));
     },
-    devicesConnection: async (_: any, args: { first?: number; after?: string }, ctx: BffContext) => {
+    devicesConnection: async (_: unknown, args: { first?: number; after?: string }, ctx: BffContext) => {
       const first = Math.min(args.first || 20, 100); // cap at 100
       const after = args.after || null;
       return db.getDevicesWithCursor(first, after, tenantFilter(ctx));
     },
-    searchDevices: async (_: any, args: { query: string; limit?: number }, ctx: BffContext) => {
+    searchDevices: async (_: unknown, args: { query: string; limit?: number }, ctx: BffContext) => {
       const q = (args.query || "").trim();
       if (q.length < 2) return [];
       // Search: superadmins search all tenants
@@ -233,16 +233,16 @@ export const resolvers = {
   },
   Subscription: {
     telemetryUpdated: {
-      subscribe: (_: any, args: { deviceId: string }, ctx: BffContext) => {
+      subscribe: (_: unknown, args: { deviceId: string }, ctx: BffContext) => {
         return pubsub.asyncIterableIterator(
           `${TELEMETRY_UPDATED}:${ctx.tenantId}:${args.deviceId}`
         );
       },
-      resolve: (payload: any) => payload,
+      resolve: (payload: unknown) => payload,
     },
 
     tenantTelemetryUpdated: {
-      subscribe: (_: any, args: { tenantId: string }, ctx: BffContext) => {
+      subscribe: (_: unknown, args: { tenantId: string }, ctx: BffContext) => {
         // Superadmins can subscribe to any tenant's updates
         if (!ctx.isSuperAdmin && args.tenantId !== ctx.tenantId) {
           throw new Error("Unauthorized: cannot subscribe to another tenant");
@@ -251,7 +251,7 @@ export const resolvers = {
           `${TENANT_TELEMETRY_UPDATED}:${args.tenantId}`
         );
       },
-      resolve: (payload: any) => payload,
+      resolve: (payload: unknown) => payload,
     },
   },
 };

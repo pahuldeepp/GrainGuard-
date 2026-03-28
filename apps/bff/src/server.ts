@@ -15,7 +15,6 @@ import { typeDefs } from "./schema";
 import { resolvers } from "./resolvers";
 import { createRemoteJWKSet, jwtVerify, JWTPayload } from "jose";
 import { startTelemetryWatcher } from "./telemetryWatcher";
-import { postgresCircuitBreaker } from "./lib/circuitBreaker";
 
 const JWKS_URL = process.env.JWKS_URL!;
 const ISSUER = process.env.JWT_ISSUER!;
@@ -83,7 +82,7 @@ async function startServer() {
   const serverCleanup = useServer(
     {
       schema,
-      context: async (ctx: Record<string, any>) => {
+      context: async (ctx: { connectionParams?: Record<string, unknown> }) => {
         const token = ctx.connectionParams?.authorization as string | undefined;
         if (!token?.startsWith("Bearer ")) throw new Error("Missing token");
         const payload = await verifyToken(token.substring("Bearer ".length));
@@ -160,13 +159,14 @@ async function startServer() {
           const payload = await verifyToken(token);
           // Auth0 Action injects claims under https://grainguard.com/ namespace
           const NS = "https://grainguard.com";
+          const p = payload as Record<string, unknown>;
           const tenantId =
-            (payload as any)[`${NS}/tenant_id`] ??
-            (payload as any)["https://grainguard/tenant_id"];
+            p[`${NS}/tenant_id`] ??
+            p["https://grainguard/tenant_id"];
           const rawRoles =
-            (payload as any)[`${NS}/roles`] ??
-            (payload as any)["https://grainguard/roles"] ??
-            (payload as any).roles;
+            p[`${NS}/roles`] ??
+            p["https://grainguard/roles"] ??
+            p.roles;
           const userId = payload.sub;
 
           if (!tenantId) {
