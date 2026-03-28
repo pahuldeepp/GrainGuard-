@@ -10,6 +10,9 @@ jest.mock("../../database/db", () => ({
   writePool: { query: jest.fn() },
 }));
 jest.mock("../../lib/audit", () => ({ writeAuditLog: jest.fn() }));
+jest.mock("../../lib/emailQueue", () => ({
+  publishEmailJob: jest.fn().mockResolvedValue(undefined),
+}));
 jest.mock("../../middleware/auth", () => ({
   authMiddleware: (req: any, _res: any, next: any) => {
     req.user = { sub: "u1", tenantId: "tid-1", roles: ["admin"], role: "admin" };
@@ -27,19 +30,24 @@ jest.mock("../../lib/auth0-mgmt", () => ({
   setUserTenantId: jest.fn().mockResolvedValue(undefined),
   assignRoleByName: jest.fn().mockResolvedValue(undefined),
   inviteToOrg: jest.fn().mockResolvedValue(undefined),
+  createOrganization: jest.fn().mockResolvedValue({ orgId: "org-123" }),
 }));
 
 import { teamRouter } from "../teamMembers";
 import { writePool } from "../../lib/db";
+import { publishEmailJob } from "../../lib/emailQueue";
 
 const app = express();
 app.use(express.json());
 app.use(teamRouter);
 
 const mockPool = writePool as unknown as { query: jest.Mock; connect: jest.Mock };
+const mockPublishEmailJob = publishEmailJob as jest.Mock;
 
 beforeEach(() => {
   mockPool.query.mockReset();
+  mockPublishEmailJob.mockReset();
+  mockPublishEmailJob.mockResolvedValue(undefined);
   mockPool.connect = jest.fn().mockResolvedValue({
     query: mockPool.query,
     release: jest.fn(),
@@ -64,11 +72,14 @@ describe("POST /team/invite", () => {
       .mockResolvedValueOnce({ rows: [] } as any) // no existing member
       .mockResolvedValueOnce({ rows: [] } as any) // no pending invite
       .mockResolvedValueOnce({ rowCount: 1 } as any) // INSERT
-      .mockResolvedValueOnce({ rows: [] } as any); // no auth0 org configured
+      .mockResolvedValueOnce({ rows: [{ auth0_org_id: null, name: "Acme" }] } as any) // tenant lookup
+      .mockResolvedValueOnce({ rowCount: 1 } as any); // update org id
 
     const res = await request(app).post("/team/invite").send({ email: "new@b.com" });
     expect(res.status).toBe(201);
     expect(res.body.invited).toBe(true);
+    expect(res.body.inviteEmailQueued).toBe(true);
+    expect(mockPublishEmailJob).toHaveBeenCalled();
   });
 
   it("rejects missing email", async () => {
@@ -80,6 +91,20 @@ describe("POST /team/invite", () => {
     mockPool.query.mockResolvedValueOnce({ rows: [{ id: "m1" }] } as any);
     const res = await request(app).post("/team/invite").send({ email: "dup@b.com" });
     expect(res.status).toBe(409);
+  });
+
+  it("fails if no delivery path is available", async () => {
+    mockPublishEmailJob.mockRejectedValueOnce(new Error("rabbitmq down"));
+    mockPool.query
+      .mockResolvedValueOnce({ rows: [] } as any)
+      .mockResolvedValueOnce({ rows: [] } as any)
+      .mockResolvedValueOnce({ rowCount: 1 } as any)
+      .mockResolvedValueOnce({ rows: [] } as any)
+      .mockResolvedValueOnce({ rowCount: 1 } as any);
+
+    const res = await request(app).post("/team/invite").send({ email: "new@b.com" });
+    expect(res.status).toBe(502);
+    expect(res.body.error).toBe("invite_delivery_failed");
   });
 });
 

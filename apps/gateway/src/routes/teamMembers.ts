@@ -3,10 +3,17 @@ import { v4 as uuidv4 } from "uuid";
 import { writePool as pool } from "../lib/db";
 import { authMiddleware } from "../lib/auth";
 import { apiRateLimiter } from "../middleware/rateLimiting";
-import { setUserTenantId, assignRoleByName, inviteToOrg } from "../lib/auth0-mgmt";
+import {
+  setUserTenantId,
+  assignRoleByName,
+  inviteToOrg,
+  createOrganization,
+} from "../lib/auth0-mgmt";
 import { writeAuditLog } from "../lib/audit";
+import { publishEmailJob } from "../lib/emailQueue";
 
 export const teamRouter = Router();
+const DASHBOARD_URL = process.env.DASHBOARD_URL || "http://localhost:5173";
 
 teamRouter.use(apiRateLimiter);
 
@@ -16,6 +23,28 @@ function requireAdmin(req: Request, res: Response): boolean {
     return false;
   }
   return true;
+}
+
+async function ensureAuth0OrgId(tenantId: string): Promise<string | null> {
+  const { rows } = await pool.query(
+    "SELECT auth0_org_id, name FROM tenants WHERE id = $1",
+    [tenantId]
+  );
+
+  if (!rows[0]) return null;
+  if (rows[0].auth0_org_id) return rows[0].auth0_org_id;
+
+  try {
+    const { orgId } = await createOrganization(tenantId, rows[0].name);
+    await pool.query("UPDATE tenants SET auth0_org_id = $1 WHERE id = $2", [
+      orgId,
+      tenantId,
+    ]);
+    return orgId;
+  } catch (err) {
+    console.error("[team] failed to create Auth0 org:", err);
+    return null;
+  }
 }
 
 // ── GET /team/members ─────────────────────────────────────────────────────
@@ -42,7 +71,8 @@ teamRouter.post(
     if (!requireAdmin(req, res)) return;
 
     const { email, role } = req.body as { email: string; role?: string };
-    if (!email?.trim()) {
+    const normalizedEmail = email?.trim().toLowerCase();
+    if (!normalizedEmail) {
       return res.status(400).json({ error: "email is required" });
     }
 
@@ -54,7 +84,7 @@ teamRouter.post(
     // Check if already a member
     const existing = await pool.query(
       "SELECT id FROM tenant_users WHERE tenant_id = $1 AND email = $2",
-      [tenantId, email.trim().toLowerCase()]
+      [tenantId, normalizedEmail]
     );
     if (existing.rows.length > 0) {
       return res.status(409).json({ error: "user_already_member" });
@@ -64,7 +94,7 @@ teamRouter.post(
     const pendingInvite = await pool.query(
       `SELECT id FROM tenant_invites
        WHERE tenant_id = $1 AND email = $2 AND accepted_at IS NULL AND expires_at > NOW()`,
-      [tenantId, email.trim().toLowerCase()]
+      [tenantId, normalizedEmail]
     );
     if (pendingInvite.rows.length > 0) {
       return res.status(409).json({ error: "invite_already_pending" });
@@ -73,25 +103,48 @@ teamRouter.post(
     await pool.query(
       `INSERT INTO tenant_invites (id, tenant_id, email, role, invited_by, token, expires_at, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, NOW() + INTERVAL '7 days', NOW())`,
-      [inviteId, tenantId, email.trim().toLowerCase(), memberRole, req.user!.sub, token]
+      [inviteId, tenantId, normalizedEmail, memberRole, req.user!.sub, token]
     );
 
-    // Send Auth0 org invite so the user gets an email and lands in the org
-    // Auth0 org invite — requires auth0_org_id from tenant table
-    pool.query("SELECT auth0_org_id FROM tenants WHERE id = $1", [tenantId])
-      .then((result: { rows: Array<{ auth0_org_id?: string }> }) => {
-        const rows = result.rows;
-        if (!rows[0]?.auth0_org_id) return;
-        return inviteToOrg({
-          orgId:       rows[0].auth0_org_id,
-          email:       email.trim().toLowerCase(),
+    const inviteUrl = `${DASHBOARD_URL}/invite/accept?token=${encodeURIComponent(token)}`;
+    let inviteEmailQueued = false;
+    try {
+      await publishEmailJob({
+        to:      normalizedEmail,
+        type:    "invite",
+        subject: `You've been invited to join GrainGuard as ${memberRole}`,
+        body: `
+          <p>You've been invited to join GrainGuard as <strong>${memberRole}</strong>.</p>
+          <p><a href="${inviteUrl}">Accept invitation →</a></p>
+          <p>This invitation expires in 7 days.</p>
+        `.trim(),
+        tenantId,
+      });
+      inviteEmailQueued = true;
+    } catch (err) {
+      console.error("[team] failed to queue invite email:", err);
+    }
+
+    let auth0InviteRequested = false;
+    const auth0OrgId = await ensureAuth0OrgId(tenantId);
+    if (auth0OrgId) {
+      try {
+        await inviteToOrg({
+          orgId:       auth0OrgId,
+          email:       normalizedEmail,
           role:        memberRole,
           inviterName: "GrainGuard",
         });
-      })
-      .catch((_e: unknown) =>
-        console.error("[team] inviteToOrg failed (non-fatal):", _e)
-      );
+        auth0InviteRequested = true;
+      } catch (err) {
+        console.error("[team] inviteToOrg failed:", err);
+      }
+    }
+
+    if (!inviteEmailQueued && !auth0InviteRequested) {
+      await pool.query("DELETE FROM tenant_invites WHERE id = $1", [inviteId]);
+      return res.status(502).json({ error: "invite_delivery_failed" });
+    }
 
     await writeAuditLog({
       tenantId,
@@ -99,15 +152,23 @@ teamRouter.post(
       eventType:    "team.member_invited",
       resourceId:   inviteId,
       resourceType: "invite",
-      meta:         { email: email.trim().toLowerCase(), role: memberRole },
+      meta:         {
+        email: normalizedEmail,
+        role: memberRole,
+        inviteEmailQueued,
+        auth0InviteRequested,
+      },
       ipAddress:    req.ip,
     });
 
     return res.status(201).json({
       invited:     true,
-      email:       email.trim().toLowerCase(),
+      email:       normalizedEmail,
       role:        memberRole,
       inviteToken: token,
+      inviteUrl,
+      inviteEmailQueued,
+      auth0InviteRequested,
     });
   }
 );

@@ -13,6 +13,10 @@
 const AUTH0_DOMAIN   = process.env.AUTH0_DOMAIN ?? "";
 const M2M_CLIENT_ID  = process.env.AUTH0_MANAGEMENT_CLIENT_ID ?? "";
 const M2M_CLIENT_SEC = process.env.AUTH0_MANAGEMENT_CLIENT_SECRET ?? "";
+const ORG_INVITE_CLIENT_ID =
+  process.env.AUTH0_ORG_INVITE_CLIENT_ID ??
+  process.env.VITE_AUTH0_CLIENT_ID ??
+  "";
 
 // Not validated at startup — only SSO routes call these functions.
 // If the env vars are missing, calls to mgmt() will throw at request time.
@@ -82,6 +86,11 @@ async function mgmt(
   return res.json();
 }
 
+async function getRoleIdByName(roleName: string): Promise<string | null> {
+  const roles: Array<{ id: string; name: string }> = await mgmt("roles?per_page=50");
+  return roles.find((role) => role.name === roleName)?.id ?? null;
+}
+
 // ── User onboarding operations ────────────────────────────────────────────────
 
 /**
@@ -107,15 +116,14 @@ export async function assignRoleByName(
   roleName: string
 ): Promise<void> {
   try {
-    const roles: Array<{ id: string; name: string }> = await mgmt("roles?per_page=50");
-    const role = roles.find((r) => r.name === roleName);
-    if (!role) {
+    const roleId = await getRoleIdByName(roleName);
+    if (!roleId) {
       console.warn(`[auth0] role "${roleName}" not found — skipping assignment`);
       return;
     }
     await mgmt(`users/${encodeURIComponent(authUserId)}/roles`, {
       method: "POST",
-      body: JSON.stringify({ roles: [role.id] }),
+      body: JSON.stringify({ roles: [roleId] }),
     });
   } catch (err) {
     // Non-fatal — user can still proceed without the role
@@ -268,13 +276,26 @@ export async function inviteToOrg(opts: {
   role:      string;
   inviterName: string;
 }): Promise<void> {
+  if (!ORG_INVITE_CLIENT_ID) {
+    throw new Error(
+      "Auth0 org invites require AUTH0_ORG_INVITE_CLIENT_ID or VITE_AUTH0_CLIENT_ID"
+    );
+  }
+
+  const roleId = await getRoleIdByName(opts.role);
+  if (!roleId) {
+    console.warn(
+      `[auth0] role "${opts.role}" not found while creating invite — sending without org role binding`
+    );
+  }
+
   await mgmt(`organizations/${opts.orgId}/invitations`, {
     method: "POST",
     body: JSON.stringify({
       inviter: { name: opts.inviterName },
       invitee: { email: opts.email },
-      client_id:   M2M_CLIENT_ID,
-      roles:       [opts.role],
+      client_id:   ORG_INVITE_CLIENT_ID,
+      ...(roleId ? { roles: [roleId] } : {}),
       send_invitation_email: true,
     }),
   });

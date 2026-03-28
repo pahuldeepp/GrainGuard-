@@ -14,6 +14,7 @@ interface Invite {
   id: string;
   email: string;
   role: string;
+  token: string;
   accepted_at: string | null;
   expires_at: string;
   created_at: string;
@@ -27,6 +28,7 @@ export function TeamPage() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("member");
   const [saving, setSaving] = useState(false);
+  const [latestInviteUrl, setLatestInviteUrl] = useState<string | null>(null);
 
   useEffect(() => {
     load();
@@ -52,11 +54,24 @@ export function TeamPage() {
     e.preventDefault();
     setSaving(true);
     try {
-      await apiFetch("/team/invite", {
+      const invite = await apiFetch("/team/invite", {
         method: "POST",
         body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
       });
-      toast.success(`Invite sent to ${inviteEmail}`);
+      const inviteUrl =
+        typeof invite?.inviteUrl === "string" && invite.inviteUrl
+          ? invite.inviteUrl
+          : null;
+
+      setLatestInviteUrl(inviteUrl);
+
+      if (inviteUrl && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(inviteUrl);
+        toast.success(`Invite created for ${inviteEmail}. Link copied.`);
+      } else {
+        toast.success(`Invite created for ${inviteEmail}`);
+      }
+
       setInviteEmail("");
       setShowInvite(false);
       await load();
@@ -109,6 +124,23 @@ export function TeamPage() {
   const pendingInvites = invites.filter(
     (i) => !i.accepted_at && new Date(i.expires_at) > new Date()
   );
+
+  function getInviteUrl(invite: Invite): string | null {
+    if (!invite.token) return null;
+    const origin =
+      typeof window !== "undefined" ? window.location.origin : "";
+    return `${origin}/invite/accept?token=${encodeURIComponent(invite.token)}`;
+  }
+
+  async function copyInviteLink(invite: Invite) {
+    const inviteUrl = getInviteUrl(invite);
+    if (!inviteUrl || !navigator.clipboard?.writeText) {
+      toast.error("Invite link is unavailable");
+      return;
+    }
+    await navigator.clipboard.writeText(inviteUrl);
+    toast.success(`Invite link copied for ${invite.email}`);
+  }
 
   return (
     <div className="p-4 md:p-8 max-w-4xl mx-auto">
@@ -176,6 +208,39 @@ export function TeamPage() {
               Cancel
             </button>
           </form>
+        </div>
+      )}
+
+      {latestInviteUrl && (
+        <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900 rounded-xl p-4 mb-6">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                Share this invite link directly
+              </p>
+              <p className="text-xs text-blue-700 dark:text-blue-300">
+                Email delivery depends on external provider configuration, but this link always works.
+              </p>
+            </div>
+            <div className="flex gap-2 items-center">
+              <input
+                readOnly
+                value={latestInviteUrl}
+                className="w-[320px] max-w-full px-3 py-2 rounded-lg border border-blue-200 dark:border-blue-800 bg-white dark:bg-gray-900 text-xs text-gray-700 dark:text-gray-200"
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  navigator.clipboard?.writeText(latestInviteUrl).then(() => {
+                    toast.success("Invite link copied");
+                  })
+                }
+                className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700"
+              >
+                Copy
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -262,6 +327,12 @@ export function TeamPage() {
                           {new Date(inv.expires_at).toLocaleDateString()}
                         </td>
                         <td className="px-4 py-3 text-right">
+                          <button
+                            onClick={() => copyInviteLink(inv)}
+                            className="mr-3 text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+                          >
+                            Copy Link
+                          </button>
                           <button
                             onClick={() => revokeInvite(inv.id)}
                             className="text-xs text-red-500 hover:text-red-700"

@@ -29,7 +29,7 @@ const MEMBERS = [
 ];
 
 const INVITES = [
-  { id: "inv1", email: "charlie@example.com", role: "member", accepted_at: null, expires_at: "2099-12-31T00:00:00Z", created_at: "2024-06-01T00:00:00Z" },
+  { id: "inv1", email: "charlie@example.com", role: "member", token: "tok-1", accepted_at: null, expires_at: "2099-12-31T00:00:00Z", created_at: "2024-06-01T00:00:00Z" },
 ];
 
 function mockInitialLoad() {
@@ -88,7 +88,7 @@ describe("TeamPage", () => {
         status: 200,
         json: async () => [
           ...INVITES,
-          { id: "inv2", email: "dave@example.com", role: "member", accepted_at: null, expires_at: "2099-12-31T00:00:00Z", created_at: "2024-06-15T00:00:00Z" },
+          { id: "inv2", email: "dave@example.com", role: "member", token: "tok-2", accepted_at: null, expires_at: "2099-12-31T00:00:00Z", created_at: "2024-06-15T00:00:00Z" },
         ],
       } as Response);
 
