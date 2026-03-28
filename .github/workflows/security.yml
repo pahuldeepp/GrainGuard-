@@ -9,6 +9,9 @@ on:
     # Full scan every Monday 03:00 UTC
     - cron: '0 3 * * 1'
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   # ── Trivy — container image vulnerability scan ───────────────────────────
   trivy-scan:
@@ -37,11 +40,11 @@ jobs:
           docker build \
             -f apps/${{ matrix.service }}/Dockerfile \
             -t grainguard/${{ matrix.service }}:${{ github.sha }} \
-            apps/${{ matrix.service }}
+            .
 
       - name: Run Trivy vulnerability scan
         continue-on-error: true
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.33.1
         with:
           image-ref: grainguard/${{ matrix.service }}:${{ github.sha }}
           format: sarif
@@ -78,7 +81,7 @@ jobs:
 
       - name: Scan filesystem for secrets and misconfigs
         continue-on-error: true
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.33.1
         with:
           scan-type: fs
           scan-ref: .
