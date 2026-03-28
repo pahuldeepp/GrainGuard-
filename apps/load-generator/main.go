@@ -71,6 +71,7 @@ func main() {
 	defer writer.Close() //nolint:errcheck
 
 	ctx, cancel := context.WithTimeout(
+		//nolint:gosec // Load generation is driven by a standalone process-scoped context.
 		context.Background(),
 		time.Duration(durationSec)*time.Second,
 	)

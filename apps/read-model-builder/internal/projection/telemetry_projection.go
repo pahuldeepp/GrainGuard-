@@ -97,6 +97,7 @@ func HandleTelemetry(pool *pgxpool.Pool, redisClient *redis.Client) func([]byte)
 
 		tenantID := event.Data.TenantID
 
+		//nolint:gosec // Projection transactions must finish independently of caller contexts.
 		ctx := context.Background()
 
 		tx, err := pool.Begin(ctx)
@@ -271,6 +272,7 @@ func HandleTelemetryBatch(pool *pgxpool.Pool, redisClient *redis.Client) func(co
 			return nil
 		}
 
+		//nolint:gosec // Batch projection work needs a bounded root context.
 		txCtx, txCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer txCancel()
 

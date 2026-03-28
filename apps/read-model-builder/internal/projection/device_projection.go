@@ -153,6 +153,7 @@ func HandleDevice(pool *pgxpool.Pool, redisClient *redis.Client) func([]byte) er
 			serialNumber = "UNKNOWN"
 		}
 
+		//nolint:gosec // Projection transactions must finish independently of caller contexts.
 		ctx := context.Background()
 
 		tx, err := pool.Begin(ctx)
