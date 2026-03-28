@@ -46,7 +46,6 @@ export function WebhooksPage() {
       const data = await apiFetch("/webhooks");
       setEndpoints(data);
     } catch (e) {
-      toast.error(e.message ?? "Failed to load webhooks");
       toast.error(e instanceof Error ? e.message : "Failed to load webhooks");
     } finally {
       setLoading(false);
@@ -72,7 +71,6 @@ export function WebhooksPage() {
       await load();
       toast.success("Webhook endpoint created");
     } catch (e) {
-      toast.error(e.message ?? "Failed to create webhook");
       toast.error(e instanceof Error ? e.message : "Failed to create webhook");
     } finally {
       setCreating(false);
@@ -87,7 +85,6 @@ export function WebhooksPage() {
       });
       await load();
     } catch (e) {
-      toast.error(e.message ?? "Failed to update webhook");
       toast.error(e instanceof Error ? e.message : "Failed to update webhook");
     }
   }
@@ -99,7 +96,6 @@ export function WebhooksPage() {
       setEndpoints((prev) => prev.filter((e) => e.id !== id));
       toast.success("Webhook deleted");
     } catch (e) {
-      toast.error(e.message ?? "Failed to delete webhook");
       toast.error(e instanceof Error ? e.message : "Failed to delete webhook");
     }
   }
@@ -114,7 +110,6 @@ export function WebhooksPage() {
         toast.error(`Test delivery failed (HTTP ${data.statusCode || "timeout"})`);
       }
     } catch (e) {
-      toast.error(e.message ?? "Test failed");
       toast.error(e instanceof Error ? e.message : "Test failed");
     } finally {
       setTesting(null);
