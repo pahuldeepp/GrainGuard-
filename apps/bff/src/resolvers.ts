@@ -9,6 +9,11 @@ const TELEMETRY_TTL = 30;
 const DEVICE_TTL = 300;
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+function toIsoDate(value: unknown): string {
+  if (value instanceof Date) return value.toISOString();
+  return new Date(value as string | number).toISOString();
+}
+
 /**
  * Tenant filter helper — superadmins can see all tenants.
  * Returns undefined (no filter) for superadmins, ctx.tenantId otherwise.
@@ -34,10 +39,10 @@ export const resolvers = {
         deviceId:     row.device_id,
         tenantId:     row.tenant_id,
         serialNumber: row.serial_number,
-        createdAt:    new Date(row.created_at).toISOString(),
+        createdAt:    toIsoDate(row.created_at),
         temperature:  row.temperature || null,
         humidity:     row.humidity || null,
-        recordedAt:   row.recorded_at ? new Date(row.recorded_at).toISOString() : null,
+        recordedAt:   row.recorded_at ? toIsoDate(row.recorded_at) : null,
         version:      row.version || null,
       };
 
@@ -59,10 +64,10 @@ export const resolvers = {
         deviceId:     row.device_id,
         tenantId:     row.tenant_id,
         serialNumber: row.serial_number,
-        createdAt:    new Date(row.created_at).toISOString(),
+        createdAt:    toIsoDate(row.created_at),
         temperature:  row.temperature || null,
         humidity:     row.humidity || null,
-        recordedAt:   row.recorded_at ? new Date(row.recorded_at).toISOString() : null,
+        recordedAt:   row.recorded_at ? toIsoDate(row.recorded_at) : null,
         version:      row.version || null,
       }));
 
@@ -97,8 +102,8 @@ export const resolvers = {
           deviceId:    row.device_id,
           temperature: row.temperature,
           humidity:    row.humidity,
-          recordedAt:  new Date(row.recorded_at).toISOString(),
-          updatedAt:   new Date(row.updated_at).toISOString(),
+          recordedAt:  toIsoDate(row.recorded_at),
+          updatedAt:   toIsoDate(row.updated_at),
           version:     row.version,
         };
 
@@ -131,8 +136,8 @@ export const resolvers = {
           deviceId:    row.device_id,
           temperature: row.temperature,
           humidity:    row.humidity,
-          recordedAt:  new Date(row.recorded_at).toISOString(),
-          updatedAt:   new Date(row.updated_at).toISOString(),
+          recordedAt:  toIsoDate(row.recorded_at),
+          updatedAt:   toIsoDate(row.updated_at),
           version:     row.version,
         }));
 
@@ -173,8 +178,8 @@ export const resolvers = {
             deviceId:    row.device_id,
             temperature: row.temperature,
             humidity:    row.humidity,
-            recordedAt:  new Date(row.recorded_at).toISOString(),
-            updatedAt:   new Date(row.updated_at).toISOString(),
+            recordedAt:  toIsoDate(row.recorded_at),
+            updatedAt:   toIsoDate(row.updated_at),
             version:     row.version,
           };
           await cache.set(keys[missedIndexes[i]], result, TELEMETRY_TTL);
@@ -210,7 +215,7 @@ export const resolvers = {
         deviceId:    row.deviceId,
         temperature: row.temperature,
         humidity:    row.humidity,
-        recordedAt:  new Date(row.recordedAt).toISOString(),
+        recordedAt:  toIsoDate(row.recordedAt),
       }));
     },
     devicesConnection: async (_: unknown, args: { first?: number; after?: string }, ctx: BffContext) => {

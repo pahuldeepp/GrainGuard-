@@ -30,7 +30,7 @@ func Up(dsn string, migrations fs.FS, serviceName string) error {
 	if err != nil {
 		return fmt.Errorf("migrate init: %w", err)
 	}
-	defer m.Close()
+	defer m.Close() //nolint:errcheck
 
 	migrateErr := m.Up()
 	if migrateErr != nil && !errors.Is(migrateErr, migrate.ErrNoChange) {

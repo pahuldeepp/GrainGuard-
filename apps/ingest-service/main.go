@@ -214,7 +214,7 @@ func main() {
 		BatchTimeout: time.Duration(getenvInt("KAFKA_BATCH_TIMEOUT_MS", 5)) * time.Millisecond,
 		Async:        false, // sync so we can return 500 on failure
 	}
-	defer writer.Close()
+	defer writer.Close() //nolint:errcheck
 
 	// ── Postgres pool (for API key lookups) ─────────────────────────────────
 	dbURL := getenv("DATABASE_URL", "postgres://postgres:postgres@postgres:5432/grainguard?sslmode=disable")
@@ -260,7 +260,7 @@ func main() {
 		WriteTimeout:   2 * time.Second,
 		RouteByLatency: len(addrs) > 1, // only relevant for cluster
 	})
-	defer rdb.Close()
+	defer rdb.Close() //nolint:errcheck
 
 	if err := rdb.Ping(ctx).Err(); err != nil {
 		log.Printf("Redis not available (continuing without cache): %v", err)

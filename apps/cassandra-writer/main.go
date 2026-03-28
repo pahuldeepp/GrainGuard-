@@ -205,7 +205,7 @@ func main() {
 		MaxWait:     500 * time.Millisecond,
 		StartOffset: kafka.LastOffset,
 	})
-	defer reader.Close()
+	defer reader.Close() //nolint:errcheck
 	log.Printf("Kafka consumer started topic=%s group=%s workers=%d batchSize=%d",
 		kafkaTopic, kafkaGroup, workerCount, batchSize)
 

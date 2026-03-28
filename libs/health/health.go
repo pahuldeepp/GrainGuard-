@@ -45,7 +45,7 @@ func (c *kafkaChecker) Check(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("dial kafka %s: %w", c.addr, err)
 	}
-	conn.Close()
+	_ = conn.Close()
 	return nil
 }
 
