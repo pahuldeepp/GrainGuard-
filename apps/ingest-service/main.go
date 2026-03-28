@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"github.com/segmentio/kafka-go"
@@ -74,6 +76,55 @@ type apiKeyCache struct {
 	ttl     time.Duration
 }
 
+type deviceLookupEntry struct {
+	DeviceID string
+	Disabled bool
+	CachedAt time.Time
+}
+
+type deviceLookupCache struct {
+	mu      sync.RWMutex
+	entries map[string]*deviceLookupEntry
+	ttl     time.Duration
+}
+
+func newDeviceLookupCache(ttl time.Duration) *deviceLookupCache {
+	return &deviceLookupCache{
+		entries: make(map[string]*deviceLookupEntry, 2048),
+		ttl:     ttl,
+	}
+}
+
+func (c *deviceLookupCache) get(cacheKey string) (*deviceLookupEntry, bool) {
+	c.mu.RLock()
+	entry, ok := c.entries[cacheKey]
+	c.mu.RUnlock()
+	if !ok {
+		return nil, false
+	}
+	if time.Since(entry.CachedAt) > c.ttl {
+		c.mu.Lock()
+		entry, ok = c.entries[cacheKey]
+		if ok && time.Since(entry.CachedAt) > c.ttl {
+			delete(c.entries, cacheKey)
+			c.mu.Unlock()
+			return nil, false
+		}
+		c.mu.Unlock()
+		if ok {
+			return entry, true
+		}
+		return nil, false
+	}
+	return entry, true
+}
+
+func (c *deviceLookupCache) set(cacheKey string, entry *deviceLookupEntry) {
+	c.mu.Lock()
+	c.entries[cacheKey] = entry
+	c.mu.Unlock()
+}
+
 func newAPIKeyCache(ttl time.Duration) *apiKeyCache {
 	return &apiKeyCache{
 		entries: make(map[string]*apiKeyEntry, 1024),
@@ -124,17 +175,23 @@ type IngestPayload struct {
 // ── Globals ─────────────────────────────────────────────────────────────────
 
 var (
-	writer     *kafka.Writer
-	db         *pgxpool.Pool
-	rdb        redis.UniversalClient // supports both single-node and cluster
-	cache      *apiKeyCache
-	ingested   atomic.Int64
-	rejected   atomic.Int64
-	kafkaTopic string
-	bodyPool   = sync.Pool{New: func() any {
+	writer      *kafka.Writer
+	db          *pgxpool.Pool
+	rdb         redis.UniversalClient // supports both single-node and cluster
+	cache       *apiKeyCache
+	deviceCache *deviceLookupCache
+	ingested    atomic.Int64
+	rejected    atomic.Int64
+	kafkaTopic  string
+	bodyPool    = sync.Pool{New: func() any {
 		buf := make([]byte, 0, 4096)
 		return &buf
 	}}
+)
+
+var (
+	errDeviceNotFound = errors.New("device not found")
+	errDeviceDisabled = errors.New("device disabled")
 )
 
 func main() {
@@ -215,6 +272,7 @@ func main() {
 	// ── In-memory API key cache ─────────────────────────────────────────────
 	cacheTTL := time.Duration(getenvInt("API_KEY_CACHE_TTL_SECONDS", 300)) * time.Second
 	cache = newAPIKeyCache(cacheTTL)
+	deviceCache = newDeviceLookupCache(time.Duration(getenvInt("DEVICE_LOOKUP_CACHE_TTL_SECONDS", 60)) * time.Second)
 
 	// ── HTTP server ─────────────────────────────────────────────────────────
 	mux := http.NewServeMux()
@@ -327,6 +385,27 @@ func handleIngest(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, `{"error":"missing_serialNumber"}`)
 		return
 	}
+	payload.SerialNumber = strings.TrimSpace(payload.SerialNumber)
+	if payload.SerialNumber == "" {
+		rejected.Add(1)
+		writeJSON(w, 400, `{"error":"missing_serialNumber"}`)
+		return
+	}
+
+	device, err := resolveDeviceID(r.Context(), entry.TenantID, payload.SerialNumber)
+	if err != nil {
+		rejected.Add(1)
+		switch {
+		case errors.Is(err, errDeviceNotFound):
+			writeJSON(w, 404, `{"error":"unknown_device"}`)
+		case errors.Is(err, errDeviceDisabled):
+			writeJSON(w, 403, `{"error":"device_disabled"}`)
+		default:
+			log.Printf("[ingest] device lookup error: %v", err)
+			writeJSON(w, 500, `{"error":"internal_error"}`)
+		}
+		return
+	}
 
 	// ── Build Kafka envelope ────────────────────────────────────────────────
 	eventID := uuid.New().String()
@@ -338,19 +417,20 @@ func handleIngest(w http.ResponseWriter, r *http.Request) {
 	envelope, _ := json.Marshal(map[string]any{
 		"eventId":     eventID,
 		"eventType":   "telemetry.recorded",
-		"aggregateId": payload.SerialNumber,
+		"aggregateId": device.DeviceID,
 		"occurredAt":  occurredAt,
 		"data": map[string]any{
-			"deviceId":    payload.SerialNumber,
-			"tenantId":    entry.TenantID,
-			"temperature": payload.Temperature,
-			"humidity":    payload.Humidity,
+			"deviceId":     device.DeviceID,
+			"serialNumber": payload.SerialNumber,
+			"tenantId":     entry.TenantID,
+			"temperature":  payload.Temperature,
+			"humidity":     payload.Humidity,
 		},
 	})
 
 	// ── Produce to Kafka ────────────────────────────────────────────────────
 	err = writer.WriteMessages(r.Context(), kafka.Message{
-		Key:   []byte(payload.SerialNumber),
+		Key:   []byte(device.DeviceID),
 		Value: envelope,
 	})
 	if err != nil {
@@ -465,6 +545,93 @@ func resolveAPIKey(ctx context.Context, rawKey string) (*apiKeyEntry, error) {
 	}
 
 	return entry, nil
+}
+
+func resolveDeviceID(ctx context.Context, tenantID, serialNumber string) (*deviceLookupEntry, error) {
+	cacheKey := tenantID + ":" + serialNumber
+
+	if entry, ok := deviceCache.get(cacheKey); ok {
+		if entry.Disabled {
+			return nil, errDeviceDisabled
+		}
+		return entry, nil
+	}
+
+	if rdb != nil {
+		cached, err := rdb.Get(ctx, "device:"+cacheKey).Result()
+		if err == nil && cached != "" {
+			var entry deviceLookupEntry
+			if json.Unmarshal([]byte(cached), &entry) == nil {
+				entry.CachedAt = time.Now()
+				deviceCache.set(cacheKey, &entry)
+				if entry.Disabled {
+					return nil, errDeviceDisabled
+				}
+				return &entry, nil
+			}
+		}
+	}
+
+	entry, err := fetchDeviceLookup(ctx, tenantID, serialNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	deviceCache.set(cacheKey, entry)
+	if rdb != nil {
+		data, _ := json.Marshal(entry)
+		_ = rdb.Set(ctx, "device:"+cacheKey, data, time.Minute).Err()
+	}
+
+	if entry.Disabled {
+		return nil, errDeviceDisabled
+	}
+	return entry, nil
+}
+
+func fetchDeviceLookup(ctx context.Context, tenantID, serialNumber string) (*deviceLookupEntry, error) {
+	var entry deviceLookupEntry
+	err := db.QueryRow(ctx,
+		`SELECT id, disabled
+		   FROM devices
+		  WHERE tenant_id = $1
+		    AND serial_number = $2
+		  LIMIT 1`,
+		tenantID,
+		serialNumber,
+	).Scan(&entry.DeviceID, &entry.Disabled)
+
+	if err == nil {
+		entry.CachedAt = time.Now()
+		return &entry, nil
+	}
+
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("device query by serial: %w", err)
+	}
+
+	if _, parseErr := uuid.Parse(serialNumber); parseErr != nil {
+		return nil, errDeviceNotFound
+	}
+
+	err = db.QueryRow(ctx,
+		`SELECT id, disabled
+		   FROM devices
+		  WHERE tenant_id = $1
+		    AND id = $2
+		  LIMIT 1`,
+		tenantID,
+		serialNumber,
+	).Scan(&entry.DeviceID, &entry.Disabled)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errDeviceNotFound
+		}
+		return nil, fmt.Errorf("device query by id: %w", err)
+	}
+
+	entry.CachedAt = time.Now()
+	return &entry, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, body string) {

@@ -471,7 +471,7 @@ services:
       KAFKA_GROUP_ID: read-model-builder-v2
       READ_DB_URL: postgres://postgres:postgres@pgbouncer-read:5432/grainguard_read?sslmode=disable
       REDIS_ADDR: redis:6379
-      WORKER_COUNT: 12
+      WORKER_COUNT: 1
       METRICS_PORT: "2112"
       OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
     depends_on:
@@ -783,6 +783,7 @@ services:
   cassandra:
     image: cassandra:4.1
     container_name: grainguard-cassandra
+    restart: unless-stopped
     ports:
       - '9042:9042'
     environment:
@@ -790,8 +791,8 @@ services:
       CASSANDRA_DC: dc1
       CASSANDRA_RACK: rack1
       CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
-      MAX_HEAP_SIZE: 512M
-      HEAP_NEWSIZE: 128M
+      MAX_HEAP_SIZE: 256M
+      HEAP_NEWSIZE: 64M
     volumes:
       - cassandra-data:/var/lib/cassandra
     healthcheck:
@@ -814,6 +815,7 @@ services:
       KAFKA_GROUP_ID: cassandra-writer
       CASSANDRA_HOSTS: cassandra
       CASSANDRA_KEYSPACE: grainguard_telemetry
+      WORKER_COUNT: 1
     depends_on:
       kafka:
         condition: service_healthy
