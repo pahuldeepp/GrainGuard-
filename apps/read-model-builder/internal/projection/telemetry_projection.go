@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -60,6 +61,10 @@ func HandleTelemetry(pool *pgxpool.Pool, redisClient *redis.Client) func([]byte)
 			observability.EventsRetry.Inc()
 			return errors.New("missing eventId")
 		}
+		if _, err := uuid.Parse(event.EventID); err != nil {
+			observability.EventsRetry.Inc()
+			return fmt.Errorf("invalid eventId: %w", err)
+		}
 
 		deviceIDStr := event.Data.DeviceID
 		if deviceIDStr == "" {
@@ -97,6 +102,7 @@ func HandleTelemetry(pool *pgxpool.Pool, redisClient *redis.Client) func([]byte)
 
 		tenantID := event.Data.TenantID
 
+		//nolint:gosec // Projection transactions must finish independently of caller contexts.
 		ctx := context.Background()
 
 		tx, err := pool.Begin(ctx)
@@ -157,9 +163,9 @@ func HandleTelemetry(pool *pgxpool.Pool, redisClient *redis.Client) func([]byte)
 		_, err = tx.Exec(
 			ctx,
 			`INSERT INTO device_telemetry_history
-			 (device_id, temperature, humidity, recorded_at)
-			 VALUES ($1, $2, $3, $4)`,
-			deviceID, temperature, humidity, recordedAt,
+			 (event_id, device_id, tenant_id, temperature, humidity, recorded_at)
+			 VALUES ($1::uuid, $2, $3, $4, $5, $6)`,
+			event.EventID, deviceID, tenantID, temperature, humidity, recordedAt,
 		)
 		if err != nil {
 			observability.EventsRetry.Inc()
@@ -182,9 +188,6 @@ func HandleTelemetry(pool *pgxpool.Pool, redisClient *redis.Client) func([]byte)
 			"version":     newVersion,
 		})
 
-		if redisClient == nil {
-			return nil
-		}
 		if redisClient == nil {
 			return nil
 		}
@@ -221,6 +224,9 @@ func HandleTelemetryBatch(pool *pgxpool.Pool, redisClient *redis.Client) func(co
 				continue
 			}
 			if event.EventID == "" {
+				continue
+			}
+			if _, err := uuid.Parse(event.EventID); err != nil {
 				continue
 			}
 
@@ -271,6 +277,7 @@ func HandleTelemetryBatch(pool *pgxpool.Pool, redisClient *redis.Client) func(co
 			return nil
 		}
 
+		//nolint:gosec // Batch projection work needs a bounded root context.
 		txCtx, txCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer txCancel()
 
@@ -326,7 +333,7 @@ func HandleTelemetryBatch(pool *pgxpool.Pool, redisClient *redis.Client) func(co
 		// Deduplicate by deviceID — keep latest recordedAt per device.
 		deduped := make(map[uuid.UUID]parsedEvent, len(newEvents))
 		for _, e := range newEvents {
-			if existing, ok := deduped[e.deviceID]; !ok || e.recordedAt.After(existing.recordedAt) {
+			if existing, ok := deduped[e.deviceID]; !ok || !e.recordedAt.Before(existing.recordedAt) {
 				deduped[e.deviceID] = e
 			}
 		}
@@ -334,6 +341,9 @@ func HandleTelemetryBatch(pool *pgxpool.Pool, redisClient *redis.Client) func(co
 		for _, e := range deduped {
 			dedupedEvents = append(dedupedEvents, e)
 		}
+		sort.Slice(dedupedEvents, func(i, j int) bool {
+			return dedupedEvents[i].deviceID.String() < dedupedEvents[j].deviceID.String()
+		})
 
 		args := make([]any, 0, len(dedupedEvents)*5)
 		valueClauses := make([]string, 0, len(dedupedEvents))
@@ -386,21 +396,32 @@ func HandleTelemetryBatch(pool *pgxpool.Pool, redisClient *redis.Client) func(co
 			return err
 		}
 
-		// Bulk insert into history table
-		historyArgs := make([]any, 0, len(newEvents)*5)
-		historyClauses := make([]string, 0, len(newEvents))
-		for i, e := range newEvents {
-			base := i * 5
-			historyClauses = append(historyClauses,
-				fmt.Sprintf("($%d,$%d,$%d,$%d,$%d)", base+1, base+2, base+3, base+4, base+5),
-			)
-			historyArgs = append(historyArgs, e.deviceID, e.tenantID, e.temperature, e.humidity, e.recordedAt)
+		historyRows := make([][]any, 0, len(newEvents))
+		sort.Slice(newEvents, func(i, j int) bool {
+			if newEvents[i].deviceID == newEvents[j].deviceID {
+				if newEvents[i].recordedAt.Equal(newEvents[j].recordedAt) {
+					return newEvents[i].eventID < newEvents[j].eventID
+				}
+				return newEvents[i].recordedAt.Before(newEvents[j].recordedAt)
+			}
+			return newEvents[i].deviceID.String() < newEvents[j].deviceID.String()
+		})
+		for _, e := range newEvents {
+			historyRows = append(historyRows, []any{
+				e.eventID,
+				e.deviceID,
+				e.tenantID,
+				e.temperature,
+				e.humidity,
+				e.recordedAt,
+			})
 		}
-		historySQL := fmt.Sprintf(
-			`INSERT INTO device_telemetry_history (device_id, tenant_id, temperature, humidity, recorded_at) VALUES %s`,
-			strings.Join(historyClauses, ","),
-		)
-		if _, err := tx.Exec(txCtx, historySQL, historyArgs...); err != nil {
+		if _, err := tx.CopyFrom(
+			txCtx,
+			pgx.Identifier{"device_telemetry_history"},
+			[]string{"event_id", "device_id", "tenant_id", "temperature", "humidity", "recorded_at"},
+			pgx.CopyFromRows(historyRows),
+		); err != nil {
 			observability.EventsRetry.Inc()
 			return err
 		}
@@ -410,8 +431,8 @@ func HandleTelemetryBatch(pool *pgxpool.Pool, redisClient *redis.Client) func(co
 			return err
 		}
 
-		eventByDevice := make(map[uuid.UUID]parsedEvent, len(newEvents))
-		for _, e := range newEvents {
+		eventByDevice := make(map[uuid.UUID]parsedEvent, len(dedupedEvents))
+		for _, e := range dedupedEvents {
 			eventByDevice[e.deviceID] = e
 		}
 

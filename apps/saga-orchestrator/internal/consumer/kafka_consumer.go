@@ -206,6 +206,7 @@ func (c *KafkaConsumer) Start(ctx context.Context, handler func(context.Context,
 
 	commitWG.Add(1)
 
+	//nolint:gosec // Commit worker needs fresh bounded contexts after worker cancellation.
 	go func() {
 
 		defer commitWG.Done()

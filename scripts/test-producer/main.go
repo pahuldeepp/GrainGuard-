@@ -12,6 +12,7 @@ import (
 )
 
 func main() {
+	//nolint:gosec // Local test producer owns its full process lifetime.
 	ctx := context.Background()
 
 	writer := &kafka.Writer{

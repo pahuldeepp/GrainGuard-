@@ -53,6 +53,7 @@ func main() {
 		}
 
 		payload, _ := json.Marshal(event)
+		//nolint:gosec // CLI publisher intentionally uses a detached background context.
 		err := w.WriteMessages(context.Background(), kafka.Message{
 			Key:   []byte(deviceID),
 			Value: payload,

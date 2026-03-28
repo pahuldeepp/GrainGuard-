@@ -68,7 +68,7 @@ func setupTestDB(t *testing.T) *pgxpool.Pool {
 		);
 
 		CREATE TABLE IF NOT EXISTS device_telemetry_history (
-			id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+			event_id     UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
 			device_id    UUID        NOT NULL,
 			tenant_id    UUID        NOT NULL,
 			temperature  DOUBLE PRECISION NOT NULL,
@@ -83,6 +83,19 @@ func setupTestDB(t *testing.T) *pgxpool.Pool {
 
 func makePayload(t *testing.T, deviceID, tenantID string, temp, humidity float64) []byte {
 	t.Helper()
+	return makePayloadAt(t, uuid.New().String(), deviceID, tenantID, time.Now().UTC(), temp, humidity)
+}
+
+func makePayloadAt(
+	t *testing.T,
+	eventID string,
+	deviceID string,
+	tenantID string,
+	recordedAt time.Time,
+	temp float64,
+	humidity float64,
+) []byte {
+	t.Helper()
 	type dataField struct {
 		DeviceID    string  `json:"deviceId"`
 		TenantID    string  `json:"tenantId"`
@@ -96,10 +109,10 @@ func makePayload(t *testing.T, deviceID, tenantID string, temp, humidity float64
 		OccurredAt  string    `json:"occurredAt"`
 		Data        dataField `json:"data"`
 	}{
-		EventID:     uuid.New().String(),
+		EventID:     eventID,
 		EventType:   "telemetry.recorded",
 		AggregateID: deviceID,
-		OccurredAt:  time.Now().UTC().Format(time.RFC3339Nano),
+		OccurredAt:  recordedAt.UTC().Format(time.RFC3339Nano),
 		Data: dataField{
 			DeviceID:    deviceID,
 			TenantID:    tenantID,
@@ -229,6 +242,36 @@ func TestHandleTelemetryBatch_DeduplicatesWithinBatch(t *testing.T) {
 	var historyCount int
 	err = pool.QueryRow(ctx,
 		`SELECT COUNT(*) FROM device_telemetry_history WHERE device_id = $1`, deviceID,
+	).Scan(&historyCount)
+	require.NoError(t, err)
+	assert.Equal(t, 2, historyCount)
+}
+
+func TestHandleTelemetryBatch_AllowsSameTimestampHistoryRows(t *testing.T) {
+	pool := setupTestDB(t)
+	ctx := context.Background()
+
+	tenantID := "11111111-1111-1111-1111-111111111111"
+	deviceID := uuid.New().String()
+
+	_, err := pool.Exec(ctx,
+		`INSERT INTO device_projections (device_id, tenant_id, serial_number) VALUES ($1, $2, $3)`,
+		deviceID, tenantID, "SN-TEST-004",
+	)
+	require.NoError(t, err)
+
+	recordedAt := time.Now().UTC().Truncate(time.Millisecond)
+	payloadA := makePayloadAt(t, uuid.New().String(), deviceID, tenantID, recordedAt, 18.0, 45.0)
+	payloadB := makePayloadAt(t, uuid.New().String(), deviceID, tenantID, recordedAt, 19.0, 46.0)
+
+	handler := HandleTelemetryBatch(pool, nil)
+	err = handler(ctx, [][]byte{payloadA, payloadB})
+	require.NoError(t, err)
+
+	var historyCount int
+	err = pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM device_telemetry_history WHERE device_id = $1`,
+		deviceID,
 	).Scan(&historyCount)
 	require.NoError(t, err)
 	assert.Equal(t, 2, historyCount)

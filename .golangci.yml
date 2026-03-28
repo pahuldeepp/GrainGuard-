@@ -3,6 +3,10 @@ version: "2"
 run:
   timeout: 5m
   modules-download-mode: readonly
+  exclude-dirs:
+    - vendor
+    - node_modules
+    - dist
 
 linters:
   default: none
@@ -37,8 +41,6 @@ linters:
       excludes:
         - G104  # unhandled errors in deferred calls (noisy)
         - G404  # math/rand is acceptable here for jitter and synthetic test data
-        - G101  # dev-default connection strings are not real credentials
-        - G118  # background context in long-lived goroutines is intentional
     exhaustive:
       default-signifies-exhaustive: true
 

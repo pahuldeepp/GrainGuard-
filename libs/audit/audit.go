@@ -13,15 +13,15 @@ import (
 type EventType string
 
 const (
-	EventDeviceCreated       EventType = "device.created"
-	EventDeviceProvisioned   EventType = "device.provisioned"
+	EventDeviceCreated         EventType = "device.created"
+	EventDeviceProvisioned     EventType = "device.provisioned"
 	EventDeviceProvisionFailed EventType = "device.provision_failed"
-	EventTenantSwitched      EventType = "tenant.switched"
-	EventTelemetryRecorded   EventType = "telemetry.recorded"
-	EventSagaStarted         EventType = "saga.started"
-	EventSagaCompleted       EventType = "saga.completed"
-	EventSagaFailed          EventType = "saga.failed"
-	EventAdminAction         EventType = "admin.action"
+	EventTenantSwitched        EventType = "tenant.switched"
+	EventTelemetryRecorded     EventType = "telemetry.recorded"
+	EventSagaStarted           EventType = "saga.started"
+	EventSagaCompleted         EventType = "saga.completed"
+	EventSagaFailed            EventType = "saga.failed"
+	EventAdminAction           EventType = "admin.action"
 )
 
 type Event struct {
@@ -46,6 +46,7 @@ func NewLogger(pool *pgxpool.Pool) *Logger {
 func (l *Logger) Log(ctx context.Context, event Event) {
 	// Fire and forget — use Background() to decouple from request lifecycle
 	// The caller context may be cancelled after the request completes
+	//nolint:gosec // Audit writes must outlive the request context.
 	go func() {
 		if err := l.write(context.Background(), event); err != nil {
 			log.Printf("[audit] failed to write event=%s actor=%s err=%v",
@@ -82,4 +83,3 @@ func (l *Logger) write(ctx context.Context, event Event) error {
 	)
 	return err
 }
-
