@@ -2,14 +2,12 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"google.golang.org/protobuf/proto"
-
-	eventspb "github.com/pahuldeepp/grainguard/libs/events/gen"
 
 	"github.com/pahuldeepp/grainguard/apps/telemetry-service/internal/domain"
 	"github.com/pahuldeepp/grainguard/apps/telemetry-service/internal/repository"
@@ -21,6 +19,14 @@ type RecordTelemetryService struct {
 	deviceRepo    repository.DeviceRepository
 	telemetryRepo repository.TelemetryRepository
 	outboxRepo    repository.OutboxRepository
+}
+
+type telemetryOutboxEvent struct {
+	EventID     string         `json:"eventId"`
+	EventType   string         `json:"eventType"`
+	AggregateID string         `json:"aggregateId"`
+	OccurredAt  string         `json:"occurredAt"`
+	Data        map[string]any `json:"data"`
 }
 
 func NewRecordTelemetryService(
@@ -76,32 +82,24 @@ func (s *RecordTelemetryService) Execute(
 		return err
 	}
 
-	// 🔥 Build protobuf envelope
-	env := &eventspb.EventEnvelope{
-		EventId:          uuid.NewString(),
-		EventType:        "telemetry.recorded",
-		SchemaVersion:    1,
-		OccurredAtUnixMs: time.Now().UTC().UnixMilli(),
-		TenantId:         device.TenantID.String(),
-		AggregateId:      deviceID,
-		Payload: &eventspb.EventEnvelope_TelemetryRecordedV1{
-			TelemetryRecordedV1: &eventspb.TelemetryRecordedV1{
-				Id:          telemetry.ID.String(),
-				DeviceId:    telemetry.DeviceID.String(),
-				Temperature: telemetry.Temperature,
-				Humidity:    telemetry.Humidity,
-				RecordedAt:  telemetry.RecordedAt.Format(time.RFC3339),
-			},
+	payloadBytes, err := json.Marshal(telemetryOutboxEvent{
+		EventID:     uuid.NewString(),
+		EventType:   "telemetry.recorded",
+		AggregateID: deviceID,
+		OccurredAt:  time.Now().UTC().Format(time.RFC3339Nano),
+		Data: map[string]any{
+			"id":          telemetry.ID.String(),
+			"deviceId":    telemetry.DeviceID.String(),
+			"tenantId":    device.TenantID.String(),
+			"temperature": telemetry.Temperature,
+			"humidity":    telemetry.Humidity,
+			"recordedAt":  telemetry.RecordedAt.Format(time.RFC3339),
 		},
-	}
-
-	// 🔥 Marshal protobuf
-	payloadBytes, err := proto.Marshal(env)
+	})
 	if err != nil {
 		return err
 	}
 
-	// 🔥 Insert protobuf bytes into outbox
 	err = s.outboxRepo.Insert(
 		ctx,
 		tx,

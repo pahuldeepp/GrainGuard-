@@ -23,7 +23,7 @@ const ISSUER = process.env.JWT_ISSUER!;
 const AUDIENCE = process.env.JWT_AUDIENCE!;
 const ALLOWED_ORIGINS =
   (process.env.ALLOWED_ORIGINS ||
-    "http://localhost:5173,http://localhost:8086").split(",");
+    "http://localhost:5173,http://localhost:5174,http://localhost:8086").split(",");
 if (!JWKS_URL || !ISSUER || !AUDIENCE) {
   throw new Error("JWKS_URL, JWT_ISSUER, JWT_AUDIENCE must be set");
 }
@@ -63,6 +63,8 @@ async function startServer() {
         imgSrc: ["'self'", "data:"],
         connectSrc: [
           "'self'",
+          "http://localhost:4000",
+          "ws://localhost:4000",
           "http://localhost:8086",
           "ws://localhost:8086",
         ],
@@ -238,4 +240,3 @@ startServer().catch((err) => {
   console.error("Failed to start BFF:", err);
   process.exit(1);
 });
-

@@ -26,6 +26,10 @@ const ALL_EVENT_TYPES = [
   "api_key.revoked",
 ];
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 export function WebhooksPage() {
   const { isAdmin }                   = useAuth();
   const [endpoints, setEndpoints]     = useState<WebhookEndpoint[]>([]);
@@ -45,8 +49,8 @@ export function WebhooksPage() {
     try {
       const data = await apiFetch("/webhooks");
       setEndpoints(data);
-    } catch (e: any) {
-      toast.error(e.message ?? "Failed to load webhooks");
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, "Failed to load webhooks"));
     } finally {
       setLoading(false);
     }
@@ -70,8 +74,8 @@ export function WebhooksPage() {
       setShowForm(false);
       await load();
       toast.success("Webhook endpoint created");
-    } catch (e: any) {
-      toast.error(e.message ?? "Failed to create webhook");
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, "Failed to create webhook"));
     } finally {
       setCreating(false);
     }
@@ -84,8 +88,8 @@ export function WebhooksPage() {
         body:   JSON.stringify({ enabled }),
       });
       await load();
-    } catch (e: any) {
-      toast.error(e.message ?? "Failed to update webhook");
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, "Failed to update webhook"));
     }
   }
 
@@ -95,8 +99,8 @@ export function WebhooksPage() {
       await apiFetch(`/webhooks/${id}`, { method: "DELETE" });
       setEndpoints((prev) => prev.filter((e) => e.id !== id));
       toast.success("Webhook deleted");
-    } catch (e: any) {
-      toast.error(e.message ?? "Failed to delete webhook");
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, "Failed to delete webhook"));
     }
   }
 
@@ -109,8 +113,8 @@ export function WebhooksPage() {
       } else {
         toast.error(`Test delivery failed (HTTP ${data.statusCode || "timeout"})`);
       }
-    } catch (e: any) {
-      toast.error(e.message ?? "Test failed");
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, "Test failed"));
     } finally {
       setTesting(null);
     }

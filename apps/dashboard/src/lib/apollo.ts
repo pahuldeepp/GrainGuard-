@@ -15,7 +15,7 @@ import { getAccessTokenSilently } from "./auth0";
  * Base URL (Gateway / BFF)
  */
 const BFF_URL =
-  import.meta.env.VITE_BFF_URL || "http://localhost:8086/graphql";
+  import.meta.env.VITE_BFF_URL || "http://localhost:4000/graphql";
 
 /**
  * Build WS URL safely

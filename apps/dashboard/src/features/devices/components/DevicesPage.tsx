@@ -4,7 +4,7 @@ import { useDevices, useSearchDevices } from "../hooks/useDevices";
 import { useDebounce } from "../../../hooks/useDebounce";
 import { DeviceTable } from "./DeviceTable";
 import { EmptyState } from "../../../shared/components/EmptyState";
-import { useTenantContext } from "../../tenancy/TenantContext";
+import { useTenantContext } from "../../tenancy/useTenantContext";
 import { RegisterDeviceModal } from "./RegisterDeviceModal";
 import toast from "react-hot-toast";
 import { exportDevicesToCsv, buildCsvFilename } from "../../../utils/exportCsv";

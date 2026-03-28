@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pahuldeepp/grainguard/apps/telemetry-service/internal/domain"
 )
@@ -19,7 +20,23 @@ func NewPostgresDeviceRepository(db *pgxpool.Pool) *PostgresDeviceRepository {
 // Save inserts the device. On serial number conflict for the same tenant,
 // it returns the existing device's ID by updating device.ID in-place.
 func (r *PostgresDeviceRepository) Save(ctx context.Context, device *domain.Device) error {
-	row := r.db.QueryRow(ctx,
+	return r.saveWithQuerier(ctx, r.db, device)
+}
+
+func (r *PostgresDeviceRepository) SaveTx(ctx context.Context, tx pgx.Tx, device *domain.Device) error {
+	return r.saveWithQuerier(ctx, tx, device)
+}
+
+type deviceQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func (r *PostgresDeviceRepository) saveWithQuerier(
+	ctx context.Context,
+	q deviceQuerier,
+	device *domain.Device,
+) error {
+	row := q.QueryRow(ctx,
 		`INSERT INTO devices (id, tenant_id, serial_number, created_at)
 		 VALUES ($1, $2, $3, $4)
 		 ON CONFLICT (tenant_id, serial_number)
@@ -30,7 +47,6 @@ func (r *PostgresDeviceRepository) Save(ctx context.Context, device *domain.Devi
 		device.SerialNumber,
 		device.CreatedAt,
 	)
-	// Scan the actual persisted ID (new or existing) back into the struct
 	return row.Scan(&device.ID)
 }
 
@@ -47,4 +63,3 @@ func (r *PostgresDeviceRepository) FindByID(ctx context.Context, id uuid.UUID) (
 
 	return &d, nil
 }
-

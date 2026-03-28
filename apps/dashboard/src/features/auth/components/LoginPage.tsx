@@ -1,4 +1,5 @@
 import { useAuth0 } from "@auth0/auth0-react";
+import { BrandLogo } from "../../../shared/components/BrandLogo";
 
 export function LoginPage() {
   const { loginWithRedirect, isLoading } = useAuth0();
@@ -6,12 +7,11 @@ export function LoginPage() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center px-4">
       <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-lg p-8 w-full max-w-md text-center">
-        <div className="w-16 h-16 bg-green-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
-          <span className="text-white text-2xl font-bold">G</span>
-        </div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
-          GrainGuard
-        </h1>
+        <BrandLogo
+          className="flex flex-col items-center gap-3 mb-2"
+          markClassName="h-16 w-16"
+          wordmarkClassName="text-2xl font-bold text-gray-900 dark:text-white"
+        />
         <p className="text-gray-500 dark:text-gray-400 text-sm mb-8">
           IoT monitoring for modern agriculture
         </p>

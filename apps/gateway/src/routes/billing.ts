@@ -35,7 +35,6 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   maxNetworkRetries: 2,  // auto-retry on network errors
 });
 
-const GATEWAY_URL  = process.env.GATEWAY_URL  || "http://localhost:3000";
 const DASHBOARD_URL = process.env.DASHBOARD_URL || "http://localhost:5173";
 
 const PRICE_IDS: Record<string, string> = {
@@ -43,15 +42,37 @@ const PRICE_IDS: Record<string, string> = {
   professional: process.env.STRIPE_PRICE_PROFESSIONAL  || "",
 };
 
+function parseCurrentPeriodEnd(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return Math.floor(value.getTime() / 1000);
+  }
+  if (typeof value === "string" || typeof value === "number") {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) {
+      return Math.floor(parsed.getTime() / 1000);
+    }
+  }
+  return null;
+}
+
 // ── GET /billing/subscription ─────────────────────────────────────────────
 billingRouter.get(
   "/billing/subscription",
   authMiddleware,
   async (req: Request, res: Response) => {
     const { rows } = await pool.query(
-      `SELECT stripe_customer_id, stripe_subscription_id, plan, status, trial_ends_at
-       FROM tenant_billing
-       WHERE tenant_id = $1`,
+      `SELECT tb.stripe_customer_id,
+              tb.stripe_subscription_id,
+              tb.plan,
+              tb.status,
+              tb.trial_ends_at,
+              t.current_period_end
+         FROM tenant_billing tb
+         JOIN tenants t ON t.id = tb.tenant_id
+        WHERE tb.tenant_id = $1`,
       [req.user!.tenantId]
     );
 
@@ -71,12 +92,18 @@ billingRouter.get(
         const sub = await stripe.subscriptions.retrieve(
           billing.stripe_subscription_id
         );
-        currentPeriodEnd  = (sub as any).current_period_end;     // Unix timestamp
+        currentPeriodEnd  = parseCurrentPeriodEnd(
+          (sub as unknown as { current_period_end?: number }).current_period_end
+        );
         cancelAtPeriodEnd = sub.cancel_at_period_end;
         paymentFailed     = sub.status === "past_due" || sub.status === "unpaid";
       } catch (err) {
         console.error("[billing] stripe subscription fetch failed:", err);
       }
+    }
+
+    if (currentPeriodEnd == null) {
+      currentPeriodEnd = parseCurrentPeriodEnd(billing.current_period_end);
     }
 
     return res.json({
@@ -119,7 +146,9 @@ billingRouter.post(
       await pool.query(
         `INSERT INTO tenant_billing (tenant_id, stripe_customer_id, plan, status, created_at)
          VALUES ($1, $2, 'free', 'none', NOW())
-         ON CONFLICT (tenant_id) DO UPDATE SET stripe_customer_id = $2`,
+         ON CONFLICT (tenant_id) DO UPDATE
+           SET stripe_customer_id = $2,
+               updated_at = NOW()`,
         [req.user!.tenantId, customerId]
       );
     }
