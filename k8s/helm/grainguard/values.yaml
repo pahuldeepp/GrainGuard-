@@ -46,6 +46,14 @@ services:
       maxReplicas: 10
       targetCPUUtilizationPercentage: 70
       targetMemoryUtilizationPercentage: 80
+    pdb:
+      enabled: true
+      minAvailable: 1
+    networkPolicy:
+      enabled: true
+      allowExternal: true
+      allowFromSameNamespace: true
+      allowFromServices: []
 
   bff:
     enabled: true
@@ -80,6 +88,15 @@ services:
       maxReplicas: 8
       targetCPUUtilizationPercentage: 70
       targetMemoryUtilizationPercentage: 80
+    pdb:
+      enabled: true
+      minAvailable: 1
+    networkPolicy:
+      enabled: true
+      allowExternal: false
+      allowFromSameNamespace: true
+      allowFromServices:
+        - gateway
 
   telemetry-service:
     enabled: true
@@ -112,6 +129,15 @@ services:
       maxReplicas: 12
       targetCPUUtilizationPercentage: 60
       targetMemoryUtilizationPercentage: 75
+    pdb:
+      enabled: true
+      minAvailable: 1
+    networkPolicy:
+      enabled: true
+      allowExternal: false
+      allowFromSameNamespace: true
+      allowFromServices:
+        - gateway
 
   saga-orchestrator:
     enabled: true
@@ -144,6 +170,14 @@ services:
       maxReplicas: 6
       targetCPUUtilizationPercentage: 70
       targetMemoryUtilizationPercentage: 80
+    pdb:
+      enabled: true
+      minAvailable: 1
+    networkPolicy:
+      enabled: true
+      allowExternal: false
+      allowFromSameNamespace: true
+      allowFromServices: []
 
   read-model-builder:
     enabled: true
@@ -174,6 +208,14 @@ services:
       maxReplicas: 8
       targetCPUUtilizationPercentage: 70
       targetMemoryUtilizationPercentage: 80
+    pdb:
+      enabled: true
+      minAvailable: 1
+    networkPolicy:
+      enabled: true
+      allowExternal: false
+      allowFromSameNamespace: true
+      allowFromServices: []
 
   cdc-transformer:
     enabled: true
@@ -253,6 +295,15 @@ services:
       maxReplicas: 6
       targetCPUUtilizationPercentage: 70
       targetMemoryUtilizationPercentage: 80
+    pdb:
+      enabled: true
+      minAvailable: 1
+    networkPolicy:
+      enabled: true
+      allowExternal: false
+      allowFromSameNamespace: true
+      allowFromServices:
+        - gateway
 
   risk-engine:
     enabled: true
@@ -279,6 +330,14 @@ services:
       maxReplicas: 8
       targetCPUUtilizationPercentage: 60
       targetMemoryUtilizationPercentage: 75
+    pdb:
+      enabled: true
+      minAvailable: 1
+    networkPolicy:
+      enabled: true
+      allowExternal: false
+      allowFromSameNamespace: true
+      allowFromServices: []
 
   search-indexer:
     enabled: true
@@ -333,6 +392,14 @@ services:
       maxReplicas: 6
       targetCPUUtilizationPercentage: 70
       targetMemoryUtilizationPercentage: 80
+    pdb:
+      enabled: true
+      minAvailable: 1
+    networkPolicy:
+      enabled: true
+      allowExternal: false
+      allowFromSameNamespace: true
+      allowFromServices: []
 
   jobs-worker:
     enabled: true
@@ -360,6 +427,14 @@ services:
       maxReplicas: 6
       targetCPUUtilizationPercentage: 70
       targetMemoryUtilizationPercentage: 80
+    pdb:
+      enabled: true
+      minAvailable: 1
+    networkPolicy:
+      enabled: true
+      allowExternal: false
+      allowFromSameNamespace: true
+      allowFromServices: []
 
   cassandra-writer:
     enabled: true
@@ -387,3 +462,11 @@ services:
       maxReplicas: 8
       targetCPUUtilizationPercentage: 60
       targetMemoryUtilizationPercentage: 75
+    pdb:
+      enabled: true
+      minAvailable: 1
+    networkPolicy:
+      enabled: true
+      allowExternal: false
+      allowFromSameNamespace: true
+      allowFromServices: []

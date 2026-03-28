@@ -6,15 +6,15 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: default
+  project: grainguard
   source:
-    repoURL: https://github.com/your-org/grainguard
+    repoURL: https://github.com/pahuldeepp/GrainGuard-.git
     targetRevision: HEAD
-    path: helm/grainguard
+    path: k8s/helm/grainguard
     helm:
       valueFiles:
         - values.yaml
-        - values.dev.yaml
+        - values-dev.yaml
       # Override image tags per deploy — CI will patch this
       parameters:
         - name: gateway.image.tag

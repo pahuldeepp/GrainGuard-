@@ -657,6 +657,7 @@ services:
     ports:
       - "4317:4317"
       - "4318:4318"
+      - "127.0.0.1:13133:13133"
     depends_on:
       - tempo
     networks:

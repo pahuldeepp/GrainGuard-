@@ -8,7 +8,7 @@ metadata:
   labels:
     environment: dev
 spec:
-  project: default
+  project: grainguard
   source:
     repoURL: https://github.com/pahuldeepp/GrainGuard-.git
     targetRevision: HEAD

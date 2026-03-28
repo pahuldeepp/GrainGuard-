@@ -1,0 +1,69 @@
+{{- range $name, $svc := .Values.services }}
+{{- $networkPolicy := $svc.networkPolicy | default dict }}
+{{- if and $svc.enabled $networkPolicy.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+    helm.sh/chart: {{ $.Chart.Name }}-{{ $.Chart.Version }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+  policyTypes:
+    - Ingress
+  ingress:
+    {{- if $networkPolicy.allowExternal }}
+    - ports:
+        - protocol: TCP
+          port: {{ $svc.port }}
+        {{- if $svc.grpcPort }}
+        - protocol: TCP
+          port: {{ $svc.grpcPort }}
+        {{- end }}
+        {{- if and $svc.healthPort (ne $svc.healthPort $svc.port) }}
+        - protocol: TCP
+          port: {{ $svc.healthPort }}
+        {{- end }}
+    {{- end }}
+    {{- if $networkPolicy.allowFromSameNamespace }}
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: {{ $svc.port }}
+        {{- if $svc.grpcPort }}
+        - protocol: TCP
+          port: {{ $svc.grpcPort }}
+        {{- end }}
+        {{- if and $svc.healthPort (ne $svc.healthPort $svc.port) }}
+        - protocol: TCP
+          port: {{ $svc.healthPort }}
+        {{- end }}
+    {{- end }}
+    {{- range $source := $networkPolicy.allowFromServices }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ $source }}
+              app.kubernetes.io/instance: {{ $.Release.Name }}
+      ports:
+        - protocol: TCP
+          port: {{ $svc.port }}
+        {{- if $svc.grpcPort }}
+        - protocol: TCP
+          port: {{ $svc.grpcPort }}
+        {{- end }}
+        {{- if and $svc.healthPort (ne $svc.healthPort $svc.port) }}
+        - protocol: TCP
+          port: {{ $svc.healthPort }}
+        {{- end }}
+    {{- end }}
+{{- end }}
+{{- end }}
