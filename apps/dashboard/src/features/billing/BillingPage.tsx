@@ -75,7 +75,7 @@ export function BillingPage() {
       // Clear the query param without reloading
       setSearchParams({}, { replace: true });
     }
-  }, [checkoutSuccess]);
+  }, [checkoutSuccess, setSearchParams]);
 
   useEffect(() => {
     (async () => {

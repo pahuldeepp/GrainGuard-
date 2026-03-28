@@ -10,12 +10,15 @@ beforeEach(() => {
   global.URL.createObjectURL = vi.fn(() => "blob:mock-url");
   global.URL.revokeObjectURL = vi.fn();
   vi.spyOn(document.body, "appendChild").mockImplementation(vi.fn());
-  vi.spyOn(document, "createElement").mockReturnValue({
+  const anchor = {
     href: "",
     download: "",
     click: mockClick,
     remove: mockRemove,
-  } as any);
+  } as unknown as HTMLAnchorElement;
+  vi.spyOn(document, "createElement").mockReturnValue({
+    ...anchor,
+  });
 });
 
 const makeDevice = (overrides: Partial<Device> = {}): Device => ({
@@ -39,7 +42,7 @@ function captureCSV(devices: Device[]): string {
       captured = (parts?.[0] as string) ?? "";
       super(parts, options);
     }
-  } as any;
+  } as typeof Blob;
   exportDevicesToCsv(devices);
   global.Blob = OrigBlob;
   return captured;
@@ -118,4 +121,3 @@ describe("buildCsvFilename", () => {
     expect(buildCsvFilename(false, 50)).toMatch(/\.csv$/);
   });
 });
-

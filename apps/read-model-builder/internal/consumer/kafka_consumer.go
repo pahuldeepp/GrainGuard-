@@ -45,16 +45,17 @@ func NewKafkaConsumerFromEnv(topic string, groupID string) *KafkaConsumer {
 			Topic:          topic,
 			GroupID:        groupID,
 			StartOffset:    kafka.LastOffset,
-				MinBytes:       10e3,
+			MinBytes:       10e3,
 			MaxBytes:       10e6,
 			MaxWait:        500 * time.Millisecond,
 			CommitInterval: 0,
 		}),
 
 		dlqWriter: &kafka.Writer{
-			Addr:     kafka.TCP(brokerList...),
-			Topic:    topic + ".dlq",
-			Balancer: &kafka.LeastBytes{},
+			Addr:                   kafka.TCP(brokerList...),
+			Topic:                  topic + ".dlq",
+			Balancer:               &kafka.LeastBytes{},
+			AllowAutoTopicCreation: true,
 		},
 	}
 }

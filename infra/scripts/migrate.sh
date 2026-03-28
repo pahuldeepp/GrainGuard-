@@ -24,13 +24,21 @@ psql() {
   command psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" "$@"
 }
 
-echo "[migrate] Ensuring schema_migrations table exists..."
+echo "[migrate] Ensuring app_migrations table exists..."
 psql -c "
-  CREATE TABLE IF NOT EXISTS schema_migrations (
+  CREATE TABLE IF NOT EXISTS app_migrations (
     version    TEXT        PRIMARY KEY,
     applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 "
+
+# Migrate rows from legacy table if it exists with a TEXT version column
+psql -tAc "
+  INSERT INTO app_migrations (version, applied_at)
+  SELECT version, applied_at FROM schema_migrations
+  WHERE pg_typeof(version) = 'text'::regtype
+  ON CONFLICT DO NOTHING;
+" 2>/dev/null || true
 
 echo "[migrate] Scanning $MIGRATIONS_DIR for pending *.up.sql files..."
 
@@ -44,12 +52,12 @@ for migration_file in "$MIGRATIONS_DIR"/*.up.sql; do
   # Derive version from filename: 000004_foo.up.sql → 000004_foo
   version=$(basename "$migration_file" .up.sql)
 
-  already=$(psql -tAc "SELECT COUNT(*) FROM schema_migrations WHERE version = '$version'")
+  already=$(psql -tAc "SELECT COUNT(*) FROM app_migrations WHERE version = '$version'")
 
   if [ "$already" = "0" ]; then
     echo "[migrate] Applying: $version"
     psql -v ON_ERROR_STOP=1 -f "$migration_file"
-    psql -c "INSERT INTO schema_migrations (version) VALUES ('$version') ON CONFLICT DO NOTHING;"
+    psql -c "INSERT INTO app_migrations (version) VALUES ('$version') ON CONFLICT DO NOTHING;"
     echo "[migrate] OK: $version"
     applied=$((applied + 1))
   else

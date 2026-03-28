@@ -24,6 +24,13 @@ class SearchIndexer:
     def _shutdown(self, s, f):
         self.running = False
 
+    @staticmethod
+    def _safe_deserialize(m):
+        try:
+            return json.loads(m.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return None
+
     def connect_es(self):
         for i in range(10):
             try:
@@ -54,7 +61,7 @@ class SearchIndexer:
                     group_id=GROUP_ID,
                     auto_offset_reset="earliest",
                     enable_auto_commit=False,
-                    value_deserializer=lambda m: json.loads(m.decode("utf-8")),
+                    value_deserializer=self._safe_deserialize,
                     consumer_timeout_ms=1000,
                 )
                 log.info("Connected to Kafka")
@@ -97,6 +104,9 @@ class SearchIndexer:
                 for msg in self.consumer:
                     if not self.running:
                         break
+                    if msg.value is None:
+                        self.consumer.commit()
+                        continue
                     if msg.topic == TELEMETRY_TOPIC:
                         self.index_telemetry(msg.value)
                     elif msg.topic == DEVICE_TOPIC:
