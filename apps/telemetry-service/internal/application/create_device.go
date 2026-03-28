@@ -55,10 +55,12 @@ func (s *CreateDeviceService) Execute(ctx context.Context, tenantID string, seri
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
 
-	if err = txRepo.SaveTx(ctx, tx, device); err != nil {
-		return nil, err
+	if saveErr := txRepo.SaveTx(ctx, tx, device); saveErr != nil {
+		return nil, saveErr
 	}
 
 	payload, err := json.Marshal(map[string]string{
@@ -71,12 +73,12 @@ func (s *CreateDeviceService) Execute(ctx context.Context, tenantID string, seri
 		return nil, err
 	}
 
-	if err = s.outboxRepo.Insert(ctx, tx, "device", device.ID.String(), "device_created_v1", payload, correlationid.FromContext(ctx)); err != nil {
-		return nil, err
+	if insertErr := s.outboxRepo.Insert(ctx, tx, "device", device.ID.String(), "device_created_v1", payload, correlationid.FromContext(ctx)); insertErr != nil {
+		return nil, insertErr
 	}
 
-	if err = tx.Commit(ctx); err != nil {
-		return nil, err
+	if commitErr := tx.Commit(ctx); commitErr != nil {
+		return nil, commitErr
 	}
 
 	return device, nil

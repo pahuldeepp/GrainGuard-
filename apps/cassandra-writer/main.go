@@ -21,10 +21,10 @@ import (
 )
 
 type TelemetryEvent struct {
-	EventID     string    `json:"eventId"`
-	EventType   string    `json:"eventType"`
-	AggregateID string    `json:"aggregateId"`
-	OccurredAt  string    `json:"occurredAt"`
+	EventID     string `json:"eventId"`
+	EventType   string `json:"eventType"`
+	AggregateID string `json:"aggregateId"`
+	OccurredAt  string `json:"occurredAt"`
 	Data        struct {
 		DeviceID    string   `json:"deviceId"`
 		TenantID    string   `json:"tenantId"`
@@ -309,9 +309,11 @@ func main() {
 			}
 
 			var event TelemetryEvent
-			if err := json.Unmarshal(msg.Value, &event); err != nil {
-				log.Printf("Unmarshal error: %v", err)
-				reader.CommitMessages(ctx, msg)
+			if unmarshalErr := json.Unmarshal(msg.Value, &event); unmarshalErr != nil {
+				log.Printf("Unmarshal error: %v", unmarshalErr)
+				if commitErr := reader.CommitMessages(ctx, msg); commitErr != nil {
+					log.Printf("commit error after unmarshal failure: %v", commitErr)
+				}
 				skipped.Add(1)
 				continue
 			}
@@ -319,12 +321,16 @@ func main() {
 			// Validate required fields
 			if event.EventID == "" || event.Data.TenantID == "" || event.Data.DeviceID == "" {
 				skipped.Add(1)
-				reader.CommitMessages(ctx, msg)
+				if commitErr := reader.CommitMessages(ctx, msg); commitErr != nil {
+					log.Printf("commit error after validation failure: %v", commitErr)
+				}
 				continue
 			}
 
 			if event.EventType != "telemetry.recorded" {
-				reader.CommitMessages(ctx, msg)
+				if commitErr := reader.CommitMessages(ctx, msg); commitErr != nil {
+					log.Printf("commit error after skipping event type: %v", commitErr)
+				}
 				continue
 			}
 
@@ -332,14 +338,18 @@ func main() {
 			tenantID, err := gocql.ParseUUID(event.Data.TenantID)
 			if err != nil {
 				skipped.Add(1)
-				reader.CommitMessages(ctx, msg)
+				if commitErr := reader.CommitMessages(ctx, msg); commitErr != nil {
+					log.Printf("commit error after tenant parse failure: %v", commitErr)
+				}
 				continue
 			}
 
 			deviceID, err := gocql.ParseUUID(event.Data.DeviceID)
 			if err != nil {
 				skipped.Add(1)
-				reader.CommitMessages(ctx, msg)
+				if commitErr := reader.CommitMessages(ctx, msg); commitErr != nil {
+					log.Printf("commit error after device parse failure: %v", commitErr)
+				}
 				continue
 			}
 

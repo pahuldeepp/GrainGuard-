@@ -265,7 +265,9 @@ func (w *OutboxWorker) processBatch(ctx context.Context) {
 		log.Println("tx begin error:", err)
 		return
 	}
-	defer tx.Rollback(ctx)
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
 
 	rows, err := tx.Query(ctx, `
 		SELECT id, event_type, payload::text

@@ -70,7 +70,9 @@ func (s *RecordTelemetryService) Execute(
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
 
 	telemetry, err := domain.NewTelemetry(deviceUUID, temp, humidity)
 	if err != nil {

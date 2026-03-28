@@ -46,6 +46,20 @@ func getenvInt(k string, def int) int {
 	return n
 }
 
+func getenvInt32(k string, def int32) int32 {
+	v := os.Getenv(k)
+	if v == "" {
+		return def
+	}
+
+	n, err := strconv.ParseInt(v, 10, 32)
+	if err != nil || n <= 0 {
+		return def
+	}
+
+	return int32(n)
+}
+
 // ── API Key cache ───────────────────────────────────────────────────────────
 
 type apiKeyEntry struct {
@@ -117,7 +131,10 @@ var (
 	ingested   atomic.Int64
 	rejected   atomic.Int64
 	kafkaTopic string
-	bodyPool   = sync.Pool{New: func() any { return make([]byte, 0, 4096) }}
+	bodyPool   = sync.Pool{New: func() any {
+		buf := make([]byte, 0, 4096)
+		return &buf
+	}}
 )
 
 func main() {
@@ -148,7 +165,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("bad DATABASE_URL: %v", err)
 	}
-	poolCfg.MaxConns = int32(getenvInt("DB_MAX_CONNS", 10))
+	poolCfg.MaxConns = getenvInt32("DB_MAX_CONNS", 10)
 	poolCfg.MinConns = 2
 
 	db, err = pgxpool.NewWithConfig(ctx, poolCfg)
@@ -282,8 +299,12 @@ func handleIngest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── Read body ───────────────────────────────────────────────────────────
-	buf := bodyPool.Get().([]byte)
-	defer func() { bodyPool.Put(buf[:0]) }()
+	bufPtr := bodyPool.Get().(*[]byte)
+	buf := *bufPtr
+	defer func() {
+		*bufPtr = buf[:0]
+		bodyPool.Put(bufPtr)
+	}()
 
 	lr := io.LimitReader(r.Body, 4096)
 	n, err := io.ReadFull(lr, buf[:cap(buf)])
@@ -295,7 +316,7 @@ func handleIngest(w http.ResponseWriter, r *http.Request) {
 	body := buf[:n]
 
 	var payload IngestPayload
-	if err := json.Unmarshal(body, &payload); err != nil {
+	if decodeErr := json.Unmarshal(body, &payload); decodeErr != nil {
 		rejected.Add(1)
 		writeJSON(w, 400, `{"error":"invalid_json"}`)
 		return
@@ -342,7 +363,7 @@ func handleIngest(w http.ResponseWriter, r *http.Request) {
 	ingested.Add(1)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(202)
-	fmt.Fprintf(w, `{"accepted":true,"eventId":"%s"}`, eventID)
+	_, _ = fmt.Fprintf(w, `{"accepted":true,"eventId":"%s"}`, eventID)
 }
 
 func handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -384,7 +405,7 @@ func handleReady(w http.ResponseWriter, r *http.Request) {
 	resp, _ := json.Marshal(map[string]any{"status": statusStr, "checks": checks})
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	w.Write(resp)
+	_, _ = w.Write(resp)
 }
 
 // ── API Key resolution (in-memory cache → Redis → Postgres) ─────────────────
@@ -449,5 +470,5 @@ func resolveAPIKey(ctx context.Context, rawKey string) (*apiKeyEntry, error) {
 func writeJSON(w http.ResponseWriter, status int, body string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	w.Write([]byte(body))
+	_, _ = w.Write([]byte(body))
 }
