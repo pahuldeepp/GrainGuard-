@@ -207,13 +207,18 @@ func main() {
 	kafkaTopic = getenv("KAFKA_TOPIC", "telemetry.ingest")
 
 	writer = &kafka.Writer{
-		Addr:         kafka.TCP(brokers...),
-		Topic:        kafkaTopic,
-		Balancer:     &kafka.LeastBytes{},
-		RequiredAcks: kafka.RequireOne,
-		BatchSize:    getenvInt("KAFKA_BATCH_SIZE", 200),
-		BatchTimeout: time.Duration(getenvInt("KAFKA_BATCH_TIMEOUT_MS", 5)) * time.Millisecond,
-		Async:        false, // sync so we can return 500 on failure
+		Addr:            kafka.TCP(brokers...),
+		Topic:           kafkaTopic,
+		Balancer:        &kafka.LeastBytes{},
+		RequiredAcks:    kafka.RequireOne,
+		// Larger batch + longer window: concurrent HTTP handlers naturally
+		// fill batches, amortising the per-batch round-trip across more messages.
+		BatchSize:       getenvInt("KAFKA_BATCH_SIZE", 500),
+		BatchTimeout:    time.Duration(getenvInt("KAFKA_BATCH_TIMEOUT_MS", 10)) * time.Millisecond,
+		WriteBackoffMin: 100 * time.Millisecond,
+		WriteBackoffMax: 1 * time.Second,
+		MaxAttempts:     3,
+		Async:           false, // sync — preserves 500-on-failure semantics
 	}
 	defer writer.Close() //nolint:errcheck
 
@@ -224,8 +229,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("bad DATABASE_URL: %v", err)
 	}
-	poolCfg.MaxConns = getenvInt32("DB_MAX_CONNS", 10)
-	poolCfg.MinConns = 2
+	poolCfg.MaxConns = getenvInt32("DB_MAX_CONNS", 50) // raised; 3-tier key cache means DB hits are rare
+	poolCfg.MinConns = 5
 
 	db, err = pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {

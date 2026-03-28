@@ -1,0 +1,3 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_device_telemetry_tenant_device;
+DROP INDEX CONCURRENTLY IF EXISTS idx_device_projections_tenant_created;
+DROP INDEX CONCURRENTLY IF EXISTS idx_device_projections_device_tenant;

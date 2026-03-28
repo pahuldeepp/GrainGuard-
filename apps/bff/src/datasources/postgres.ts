@@ -95,14 +95,46 @@ export const db = {
     }
   },
 
+  /**
+   * FIX: now includes tenant_id so callers can enforce tenant isolation in a
+   * single query — eliminates the previous double round-trip to device_projections.
+   */
   async getDeviceTelemetry(deviceId: string) {
     const result = await cbQuery(
-      `SELECT device_id, temperature, humidity, recorded_at, updated_at, version
+      `SELECT device_id, tenant_id, temperature, humidity, recorded_at, updated_at, version
        FROM device_telemetry_latest
        WHERE device_id = $1`,
       [deviceId]
     );
     return result.rows[0] || null;
+  },
+
+  /**
+   * FIX (N+1): batch-fetches telemetry for multiple device IDs in a single
+   * query using ANY($1::uuid[]).  Optionally filters by tenant_id so that
+   * tenant isolation is enforced inside the DB rather than in application code.
+   */
+  async getManyDeviceTelemetry(deviceIds: string[], tenantId?: string) {
+    if (deviceIds.length === 0) return [];
+    if (tenantId) {
+      const result = await cbQuery(
+        `SELECT t.device_id, t.tenant_id, t.temperature, t.humidity,
+                t.recorded_at, t.updated_at, t.version
+         FROM device_telemetry_latest t
+         WHERE t.device_id = ANY($1::uuid[])
+           AND t.tenant_id = $2`,
+        [deviceIds, tenantId]
+      );
+      return result.rows;
+    }
+    const result = await cbQuery(
+      `SELECT device_id, tenant_id, temperature, humidity,
+              recorded_at, updated_at, version
+       FROM device_telemetry_latest
+       WHERE device_id = ANY($1::uuid[])`,
+      [deviceIds]
+    );
+    return result.rows;
   },
 
   async getAllTelemetry(limit: number = 20, tenantId?: string) {
@@ -283,16 +315,16 @@ export const db = {
     const hasNextPage = rows.length > first;
     const items = hasNextPage ? rows.slice(0, first) : rows;
 
-    let totalCount = 0;
-    if (tenantId) {
-      const countResult = await cbQuery(
-        "SELECT COUNT(*) FROM device_projections WHERE tenant_id = $1",
-        [tenantId]
-      );
+    // FIX (COUNT*): total count is cached in Redis for 60 s to avoid a full
+    // table scan on every paginated request.  Acceptable staleness for UX.
+    const countKey = `devices:count:${tenantId || "global"}`;
+    let totalCount = await cache.get<number>(countKey);
+    if (totalCount === null) {
+      const countResult = tenantId
+        ? await cbQuery("SELECT COUNT(*) FROM device_projections WHERE tenant_id = $1", [tenantId])
+        : await cbQuery("SELECT COUNT(*) FROM device_projections");
       totalCount = parseInt(countResult.rows[0].count as string, 10);
-    } else {
-      const countResult = await cbQuery("SELECT COUNT(*) FROM device_projections");
-      totalCount = parseInt(countResult.rows[0].count as string, 10);
+      await cache.set(countKey, totalCount, 60);
     }
 
     const edges = items.map((row: Row) => ({
