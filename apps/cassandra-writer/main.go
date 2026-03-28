@@ -210,6 +210,7 @@ func main() {
 		kafkaTopic, kafkaGroup, workerCount, batchSize)
 
 	// Graceful shutdown
+	//nolint:gosec // Process lifecycle should be rooted at the service, not a request.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 

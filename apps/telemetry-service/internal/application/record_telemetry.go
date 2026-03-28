@@ -74,6 +74,7 @@ func (s *RecordTelemetryService) Execute(
 		return err
 	}
 	defer func() {
+		//nolint:gosec // Rollback must complete even if the request context is already canceled.
 		rollbackCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 

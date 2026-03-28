@@ -72,6 +72,7 @@ func main() {
 	// Database
 	dbURL := os.Getenv("WRITE_DB_URL")
 	if dbURL == "" {
+		//nolint:gosec // Local default DSN is for dev bootstrap only.
 		dbURL = "postgres://postgres:postgres@postgres:5432/grainguard?sslmode=disable"
 	}
 

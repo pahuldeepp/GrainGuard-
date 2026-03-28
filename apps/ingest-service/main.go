@@ -198,6 +198,7 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	log.Printf("ingest-service starting (GOMAXPROCS=%d, CPUs=%d)", runtime.GOMAXPROCS(0), runtime.NumCPU())
 
+	//nolint:gosec // Process lifecycle should be rooted at the service, not a request.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -217,6 +218,7 @@ func main() {
 	defer writer.Close() //nolint:errcheck
 
 	// ── Postgres pool (for API key lookups) ─────────────────────────────────
+	//nolint:gosec // Local default DSN is for dev bootstrap only.
 	dbURL := getenv("DATABASE_URL", "postgres://postgres:postgres@postgres:5432/grainguard?sslmode=disable")
 	poolCfg, err := pgxpool.ParseConfig(dbURL)
 	if err != nil {
@@ -317,6 +319,7 @@ func main() {
 	<-ctx.Done()
 	log.Println("Shutting down...")
 
+	//nolint:gosec // Shutdown needs a fresh bounded context after root cancellation.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {

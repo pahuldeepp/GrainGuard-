@@ -15,6 +15,7 @@ import (
 type ShutdownFunc func(context.Context) error
 
 func InitTracing(serviceName string) (ShutdownFunc, error) {
+	//nolint:gosec // Tracer bootstrap needs a startup-scoped root context.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

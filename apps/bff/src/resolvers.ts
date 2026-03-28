@@ -9,9 +9,22 @@ const TELEMETRY_TTL = 30;
 const DEVICE_TTL = 300;
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-function toIsoDate(value: unknown): string {
-  if (value instanceof Date) return value.toISOString();
-  return new Date(value as string | number).toISOString();
+function toIsoDate(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  }
+
+  const date = new Date(value as string | number);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function requireIsoDate(value: unknown, field: string): string {
+  const iso = toIsoDate(value);
+  if (!iso) {
+    throw new Error(`Invalid ${field} value`);
+  }
+  return iso;
 }
 
 /**
@@ -39,11 +52,11 @@ export const resolvers = {
         deviceId:     row.device_id,
         tenantId:     row.tenant_id,
         serialNumber: row.serial_number,
-        createdAt:    toIsoDate(row.created_at),
-        temperature:  row.temperature || null,
-        humidity:     row.humidity || null,
-        recordedAt:   row.recorded_at ? toIsoDate(row.recorded_at) : null,
-        version:      row.version || null,
+        createdAt:    requireIsoDate(row.created_at, "created_at"),
+        temperature:  row.temperature ?? null,
+        humidity:     row.humidity ?? null,
+        recordedAt:   toIsoDate(row.recorded_at),
+        version:      row.version ?? null,
       };
 
       await cache.set(cacheKey, result, DEVICE_TTL);
@@ -64,11 +77,11 @@ export const resolvers = {
         deviceId:     row.device_id,
         tenantId:     row.tenant_id,
         serialNumber: row.serial_number,
-        createdAt:    toIsoDate(row.created_at),
-        temperature:  row.temperature || null,
-        humidity:     row.humidity || null,
-        recordedAt:   row.recorded_at ? toIsoDate(row.recorded_at) : null,
-        version:      row.version || null,
+        createdAt:    requireIsoDate(row.created_at, "created_at"),
+        temperature:  row.temperature ?? null,
+        humidity:     row.humidity ?? null,
+        recordedAt:   toIsoDate(row.recorded_at),
+        version:      row.version ?? null,
       }));
 
       await cache.set(cacheKey, result, DEVICE_TTL);
@@ -100,8 +113,8 @@ export const resolvers = {
 
         const result = {
           deviceId:    row.device_id,
-          temperature: row.temperature,
-          humidity:    row.humidity,
+          temperature: row.temperature ?? null,
+          humidity:    row.humidity ?? null,
           recordedAt:  toIsoDate(row.recorded_at),
           updatedAt:   toIsoDate(row.updated_at),
           version:     row.version,
@@ -134,8 +147,8 @@ export const resolvers = {
 
         const result = rows.map((row: Record<string,unknown>) => ({
           deviceId:    row.device_id,
-          temperature: row.temperature,
-          humidity:    row.humidity,
+          temperature: row.temperature ?? null,
+          humidity:    row.humidity ?? null,
           recordedAt:  toIsoDate(row.recorded_at),
           updatedAt:   toIsoDate(row.updated_at),
           version:     row.version,
@@ -176,8 +189,8 @@ export const resolvers = {
 
           const result = {
             deviceId:    row.device_id,
-            temperature: row.temperature,
-            humidity:    row.humidity,
+            temperature: row.temperature ?? null,
+            humidity:    row.humidity ?? null,
             recordedAt:  toIsoDate(row.recorded_at),
             updatedAt:   toIsoDate(row.updated_at),
             version:     row.version,
@@ -212,10 +225,10 @@ export const resolvers = {
       const tid = tenantFilter(ctx);
       const rows = await db.getTelemetryHistory(args.deviceId, limit, tid);
       return rows.map((row: Record<string,unknown>) => ({
-        deviceId:    row.deviceId,
-        temperature: row.temperature,
-        humidity:    row.humidity,
-        recordedAt:  toIsoDate(row.recordedAt),
+        deviceId:    row.device_id,
+        temperature: row.temperature ?? null,
+        humidity:    row.humidity ?? null,
+        recordedAt:  requireIsoDate(row.recorded_at, "recorded_at"),
       }));
     },
     devicesConnection: async (_: unknown, args: { first?: number; after?: string }, ctx: BffContext) => {
@@ -255,4 +268,3 @@ export const resolvers = {
     },
   },
 };
-
