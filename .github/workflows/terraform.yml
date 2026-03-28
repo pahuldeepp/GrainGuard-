@@ -15,14 +15,13 @@ on:
 env:
   TF_VERSION: "1.7.5"
   AWS_REGION: "us-east-1"
-  AWS_TF_ROLE_ARN: ${{ secrets.AWS_TF_ROLE_ARN }}
 
 jobs:
   # ── Plan — runs on every PR that touches terraform/ ────────────────────────
   plan:
     name: Terraform Plan (${{ matrix.env }})
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'pull_request' && env.AWS_TF_ROLE_ARN != '' }}
+    if: ${{ github.event_name == 'pull_request' }}
     strategy:
       matrix:
         env: [dev, prod]
@@ -38,34 +37,54 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check Terraform AWS role
+        id: aws_role
+        run: |
+          if [ -n "${{ secrets.AWS_TF_ROLE_ARN }}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip when Terraform AWS role is not configured
+        if: steps.aws_role.outputs.configured != 'true'
+        run: echo "Skipping Terraform plan because AWS_TF_ROLE_ARN is not configured."
+
       - name: Configure AWS credentials (OIDC)
+        if: steps.aws_role.outputs.configured == 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.AWS_TF_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_TF_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Set up Terraform
+        if: steps.aws_role.outputs.configured == 'true'
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
       - name: Terraform Init
+        if: steps.aws_role.outputs.configured == 'true'
         run: terraform init -input=false
 
       - name: Terraform Format check
+        if: steps.aws_role.outputs.configured == 'true'
         run: terraform fmt -check -recursive ../../
 
       - name: Terraform Validate
+        if: steps.aws_role.outputs.configured == 'true'
         run: terraform validate
 
       - name: Terraform Plan
         id: plan
+        if: steps.aws_role.outputs.configured == 'true'
         env:
           TF_VAR_db_password: ${{ secrets.TF_VAR_DB_PASSWORD }}
         run: terraform plan -input=false -no-color -out=tfplan 2>&1 | tee plan.txt
         continue-on-error: true   # we post the plan even if it fails
 
       - name: Post plan as PR comment
+        if: steps.aws_role.outputs.configured == 'true'
         uses: actions/github-script@v7
         with:
           script: |
@@ -80,14 +99,14 @@ jobs:
             });
 
       - name: Fail if plan errored
-        if: steps.plan.outcome == 'failure'
+        if: steps.aws_role.outputs.configured == 'true' && steps.plan.outcome == 'failure'
         run: exit 1
 
   # ── Apply — runs only on push to master (after PR merged) ──────────────────
   apply:
     name: Terraform Apply (dev)
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' && env.AWS_TF_ROLE_ARN != '' }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
     environment: dev               # requires manual approval in GitHub Environments
     defaults:
       run:
@@ -100,21 +119,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check Terraform AWS role
+        id: aws_role
+        run: |
+          if [ -n "${{ secrets.AWS_TF_ROLE_ARN }}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip when Terraform AWS role is not configured
+        if: steps.aws_role.outputs.configured != 'true'
+        run: echo "Skipping Terraform apply because AWS_TF_ROLE_ARN is not configured."
+
       - name: Configure AWS credentials (OIDC)
+        if: steps.aws_role.outputs.configured == 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.AWS_TF_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_TF_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Set up Terraform
+        if: steps.aws_role.outputs.configured == 'true'
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
       - name: Terraform Init
+        if: steps.aws_role.outputs.configured == 'true'
         run: terraform init -input=false
 
       - name: Terraform Apply
+        if: steps.aws_role.outputs.configured == 'true'
         env:
           TF_VAR_db_password: ${{ secrets.TF_VAR_DB_PASSWORD }}
         run: terraform apply -input=false -auto-approve
