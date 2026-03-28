@@ -6,6 +6,19 @@ export const es = new Client({ node: ES_URL });
 
 const DEVICE_INDEX = "grainguard-devices";
 
+interface ESHit {
+  _source: {
+    device_id: string;
+    tenant_id: string;
+    serial_number: string;
+    temperature?: number;
+    humidity?: number;
+    recorded_at?: string;
+    status?: string;
+  };
+  _score: number;
+}
+
 export const search = {
   async searchDevices(query: string, tenantId: string, limit = 20) {
     try {
@@ -31,11 +44,9 @@ export const search = {
           },
         },
       };
-      console.log("[ES] searching:", JSON.stringify(params));
-      const result = await (es.search as any)(params);
-      console.log("[ES] hits:", result.hits.total);
+      const result = await (es.search as (p: typeof params) => Promise<{ hits: { total: unknown; hits: ESHit[] } }>)(params);
 
-      return result.hits.hits.map((hit: any) => ({
+      return result.hits.hits.map((hit: ESHit) => ({
         deviceId:     hit._source.device_id,
         tenantId:     hit._source.tenant_id,
         serialNumber: hit._source.serial_number,
@@ -45,10 +56,10 @@ export const search = {
         status:       hit._source.status ?? null,
         score:        hit._score,
       }));
-    } catch (err: any) {
-      console.error("[ES] error:", err?.meta?.body?.error || err?.message || err);
+    } catch (err: unknown) {
+      const e = err as { meta?: { body?: { error?: unknown } }; message?: string };
+      console.error("[ES] error:", e?.meta?.body?.error || e?.message || err);
       return [];
     }
   },
 };
-
