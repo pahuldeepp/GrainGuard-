@@ -72,8 +72,10 @@ jobs:
           NODE_ENV: test
           AUTH_ENABLED: "false"
           DATABASE_URL: postgres://grainguard:grainguard@localhost:5432/grainguard
+          WRITE_DATABASE_URL: postgres://grainguard:grainguard@localhost:5432/grainguard
           READ_DATABASE_URL: postgres://grainguard:grainguard@localhost:5432/grainguard
-          REDIS_URL: redis://localhost:6379
+          REDIS_HOST: localhost
+          REDIS_PORT: "6379"
           JWKS_URL: https://example.com/.well-known/jwks.json
           JWT_ISSUER: https://example.com/
           JWT_AUDIENCE: grainguard

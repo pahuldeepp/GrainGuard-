@@ -10,7 +10,7 @@ import fs from "fs";
 
 const protoPath = path.resolve(
   __dirname,
-  "../../libs/proto/device.proto"
+  "../../../../libs/proto/device.proto"
 );
 
 const packageDefinition = protoLoader.loadSync(protoPath, {
