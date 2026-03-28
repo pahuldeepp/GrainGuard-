@@ -1,4 +1,4 @@
-﻿package consumer
+package consumer
 
 import (
 	"context"
@@ -206,6 +206,7 @@ func (c *KafkaConsumer) Start(ctx context.Context, handler func(context.Context,
 
 	commitWG.Add(1)
 
+	//nolint:gosec // Commit worker needs fresh bounded contexts after worker cancellation.
 	go func() {
 
 		defer commitWG.Done()
@@ -262,12 +263,7 @@ func (c *KafkaConsumer) Start(ctx context.Context, handler func(context.Context,
 
 	}()
 
-	for {
-
-		if ctx.Err() != nil {
-			break
-		}
-
+	for ctx.Err() == nil {
 		msg, err := c.reader.FetchMessage(ctx)
 
 		if err != nil {
@@ -290,7 +286,11 @@ func (c *KafkaConsumer) Start(ctx context.Context, handler func(context.Context,
 		case jobs <- job{msg: msg}:
 
 		case <-ctx.Done():
-			break
+			close(jobs)
+			workersWG.Wait()
+			close(results)
+			commitWG.Wait()
+			return
 		}
 	}
 

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"github.com/segmentio/kafka-go"
@@ -46,6 +48,20 @@ func getenvInt(k string, def int) int {
 	return n
 }
 
+func getenvInt32(k string, def int32) int32 {
+	v := os.Getenv(k)
+	if v == "" {
+		return def
+	}
+
+	n, err := strconv.ParseInt(v, 10, 32)
+	if err != nil || n <= 0 {
+		return def
+	}
+
+	return int32(n)
+}
+
 // ── API Key cache ───────────────────────────────────────────────────────────
 
 type apiKeyEntry struct {
@@ -58,6 +74,55 @@ type apiKeyCache struct {
 	mu      sync.RWMutex
 	entries map[string]*apiKeyEntry // key_hash → entry
 	ttl     time.Duration
+}
+
+type deviceLookupEntry struct {
+	DeviceID string
+	Disabled bool
+	CachedAt time.Time
+}
+
+type deviceLookupCache struct {
+	mu      sync.RWMutex
+	entries map[string]*deviceLookupEntry
+	ttl     time.Duration
+}
+
+func newDeviceLookupCache(ttl time.Duration) *deviceLookupCache {
+	return &deviceLookupCache{
+		entries: make(map[string]*deviceLookupEntry, 2048),
+		ttl:     ttl,
+	}
+}
+
+func (c *deviceLookupCache) get(cacheKey string) (*deviceLookupEntry, bool) {
+	c.mu.RLock()
+	entry, ok := c.entries[cacheKey]
+	c.mu.RUnlock()
+	if !ok {
+		return nil, false
+	}
+	if time.Since(entry.CachedAt) > c.ttl {
+		c.mu.Lock()
+		entry, ok = c.entries[cacheKey]
+		if ok && time.Since(entry.CachedAt) > c.ttl {
+			delete(c.entries, cacheKey)
+			c.mu.Unlock()
+			return nil, false
+		}
+		c.mu.Unlock()
+		if ok {
+			return entry, true
+		}
+		return nil, false
+	}
+	return entry, true
+}
+
+func (c *deviceLookupCache) set(cacheKey string, entry *deviceLookupEntry) {
+	c.mu.Lock()
+	c.entries[cacheKey] = entry
+	c.mu.Unlock()
 }
 
 func newAPIKeyCache(ttl time.Duration) *apiKeyCache {
@@ -110,20 +175,30 @@ type IngestPayload struct {
 // ── Globals ─────────────────────────────────────────────────────────────────
 
 var (
-	writer     *kafka.Writer
-	db         *pgxpool.Pool
-	rdb        redis.UniversalClient // supports both single-node and cluster
-	cache      *apiKeyCache
-	ingested   atomic.Int64
-	rejected   atomic.Int64
-	kafkaTopic string
-	bodyPool   = sync.Pool{New: func() any { return make([]byte, 0, 4096) }}
+	writer      *kafka.Writer
+	db          *pgxpool.Pool
+	rdb         redis.UniversalClient // supports both single-node and cluster
+	cache       *apiKeyCache
+	deviceCache *deviceLookupCache
+	ingested    atomic.Int64
+	rejected    atomic.Int64
+	kafkaTopic  string
+	bodyPool    = sync.Pool{New: func() any {
+		buf := make([]byte, 0, 4096)
+		return &buf
+	}}
+)
+
+var (
+	errDeviceNotFound = errors.New("device not found")
+	errDeviceDisabled = errors.New("device disabled")
 )
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	log.Printf("ingest-service starting (GOMAXPROCS=%d, CPUs=%d)", runtime.GOMAXPROCS(0), runtime.NumCPU())
 
+	//nolint:gosec // Process lifecycle should be rooted at the service, not a request.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -132,24 +207,30 @@ func main() {
 	kafkaTopic = getenv("KAFKA_TOPIC", "telemetry.ingest")
 
 	writer = &kafka.Writer{
-		Addr:         kafka.TCP(brokers...),
-		Topic:        kafkaTopic,
-		Balancer:     &kafka.LeastBytes{},
-		RequiredAcks: kafka.RequireOne,
-		BatchSize:    getenvInt("KAFKA_BATCH_SIZE", 200),
-		BatchTimeout: time.Duration(getenvInt("KAFKA_BATCH_TIMEOUT_MS", 5)) * time.Millisecond,
-		Async:        false, // sync so we can return 500 on failure
+		Addr:            kafka.TCP(brokers...),
+		Topic:           kafkaTopic,
+		Balancer:        &kafka.LeastBytes{},
+		RequiredAcks:    kafka.RequireOne,
+		// Larger batch + longer window: concurrent HTTP handlers naturally
+		// fill batches, amortising the per-batch round-trip across more messages.
+		BatchSize:       getenvInt("KAFKA_BATCH_SIZE", 500),
+		BatchTimeout:    time.Duration(getenvInt("KAFKA_BATCH_TIMEOUT_MS", 10)) * time.Millisecond,
+		WriteBackoffMin: 100 * time.Millisecond,
+		WriteBackoffMax: 1 * time.Second,
+		MaxAttempts:     3,
+		Async:           false, // sync — preserves 500-on-failure semantics
 	}
-	defer writer.Close()
+	defer writer.Close() //nolint:errcheck
 
 	// ── Postgres pool (for API key lookups) ─────────────────────────────────
+	//nolint:gosec // Local default DSN is for dev bootstrap only.
 	dbURL := getenv("DATABASE_URL", "postgres://postgres:postgres@postgres:5432/grainguard?sslmode=disable")
 	poolCfg, err := pgxpool.ParseConfig(dbURL)
 	if err != nil {
 		log.Fatalf("bad DATABASE_URL: %v", err)
 	}
-	poolCfg.MaxConns = int32(getenvInt("DB_MAX_CONNS", 10))
-	poolCfg.MinConns = 2
+	poolCfg.MaxConns = getenvInt32("DB_MAX_CONNS", 50) // raised; 3-tier key cache means DB hits are rare
+	poolCfg.MinConns = 5
 
 	db, err = pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
@@ -186,7 +267,7 @@ func main() {
 		WriteTimeout:   2 * time.Second,
 		RouteByLatency: len(addrs) > 1, // only relevant for cluster
 	})
-	defer rdb.Close()
+	defer rdb.Close() //nolint:errcheck
 
 	if err := rdb.Ping(ctx).Err(); err != nil {
 		log.Printf("Redis not available (continuing without cache): %v", err)
@@ -198,6 +279,7 @@ func main() {
 	// ── In-memory API key cache ─────────────────────────────────────────────
 	cacheTTL := time.Duration(getenvInt("API_KEY_CACHE_TTL_SECONDS", 300)) * time.Second
 	cache = newAPIKeyCache(cacheTTL)
+	deviceCache = newDeviceLookupCache(time.Duration(getenvInt("DEVICE_LOOKUP_CACHE_TTL_SECONDS", 60)) * time.Second)
 
 	// ── HTTP server ─────────────────────────────────────────────────────────
 	mux := http.NewServeMux()
@@ -242,6 +324,7 @@ func main() {
 	<-ctx.Done()
 	log.Println("Shutting down...")
 
+	//nolint:gosec // Shutdown needs a fresh bounded context after root cancellation.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
@@ -282,8 +365,12 @@ func handleIngest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── Read body ───────────────────────────────────────────────────────────
-	buf := bodyPool.Get().([]byte)
-	defer func() { bodyPool.Put(buf[:0]) }()
+	bufPtr := bodyPool.Get().(*[]byte)
+	buf := *bufPtr
+	defer func() {
+		*bufPtr = buf[:0]
+		bodyPool.Put(bufPtr)
+	}()
 
 	lr := io.LimitReader(r.Body, 4096)
 	n, err := io.ReadFull(lr, buf[:cap(buf)])
@@ -295,7 +382,7 @@ func handleIngest(w http.ResponseWriter, r *http.Request) {
 	body := buf[:n]
 
 	var payload IngestPayload
-	if err := json.Unmarshal(body, &payload); err != nil {
+	if decodeErr := json.Unmarshal(body, &payload); decodeErr != nil {
 		rejected.Add(1)
 		writeJSON(w, 400, `{"error":"invalid_json"}`)
 		return
@@ -304,6 +391,27 @@ func handleIngest(w http.ResponseWriter, r *http.Request) {
 	if payload.SerialNumber == "" {
 		rejected.Add(1)
 		writeJSON(w, 400, `{"error":"missing_serialNumber"}`)
+		return
+	}
+	payload.SerialNumber = strings.TrimSpace(payload.SerialNumber)
+	if payload.SerialNumber == "" {
+		rejected.Add(1)
+		writeJSON(w, 400, `{"error":"missing_serialNumber"}`)
+		return
+	}
+
+	device, err := resolveDeviceID(r.Context(), entry.TenantID, payload.SerialNumber)
+	if err != nil {
+		rejected.Add(1)
+		switch {
+		case errors.Is(err, errDeviceNotFound):
+			writeJSON(w, 404, `{"error":"unknown_device"}`)
+		case errors.Is(err, errDeviceDisabled):
+			writeJSON(w, 403, `{"error":"device_disabled"}`)
+		default:
+			log.Printf("[ingest] device lookup error: %v", err)
+			writeJSON(w, 500, `{"error":"internal_error"}`)
+		}
 		return
 	}
 
@@ -317,19 +425,20 @@ func handleIngest(w http.ResponseWriter, r *http.Request) {
 	envelope, _ := json.Marshal(map[string]any{
 		"eventId":     eventID,
 		"eventType":   "telemetry.recorded",
-		"aggregateId": payload.SerialNumber,
+		"aggregateId": device.DeviceID,
 		"occurredAt":  occurredAt,
 		"data": map[string]any{
-			"deviceId":    payload.SerialNumber,
-			"tenantId":    entry.TenantID,
-			"temperature": payload.Temperature,
-			"humidity":    payload.Humidity,
+			"deviceId":     device.DeviceID,
+			"serialNumber": payload.SerialNumber,
+			"tenantId":     entry.TenantID,
+			"temperature":  payload.Temperature,
+			"humidity":     payload.Humidity,
 		},
 	})
 
 	// ── Produce to Kafka ────────────────────────────────────────────────────
 	err = writer.WriteMessages(r.Context(), kafka.Message{
-		Key:   []byte(payload.SerialNumber),
+		Key:   []byte(device.DeviceID),
 		Value: envelope,
 	})
 	if err != nil {
@@ -342,7 +451,7 @@ func handleIngest(w http.ResponseWriter, r *http.Request) {
 	ingested.Add(1)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(202)
-	fmt.Fprintf(w, `{"accepted":true,"eventId":"%s"}`, eventID)
+	_, _ = fmt.Fprintf(w, `{"accepted":true,"eventId":"%s"}`, eventID)
 }
 
 func handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -384,7 +493,7 @@ func handleReady(w http.ResponseWriter, r *http.Request) {
 	resp, _ := json.Marshal(map[string]any{"status": statusStr, "checks": checks})
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	w.Write(resp)
+	_, _ = w.Write(resp)
 }
 
 // ── API Key resolution (in-memory cache → Redis → Postgres) ─────────────────
@@ -446,8 +555,95 @@ func resolveAPIKey(ctx context.Context, rawKey string) (*apiKeyEntry, error) {
 	return entry, nil
 }
 
+func resolveDeviceID(ctx context.Context, tenantID, serialNumber string) (*deviceLookupEntry, error) {
+	cacheKey := tenantID + ":" + serialNumber
+
+	if entry, ok := deviceCache.get(cacheKey); ok {
+		if entry.Disabled {
+			return nil, errDeviceDisabled
+		}
+		return entry, nil
+	}
+
+	if rdb != nil {
+		cached, err := rdb.Get(ctx, "device:"+cacheKey).Result()
+		if err == nil && cached != "" {
+			var entry deviceLookupEntry
+			if json.Unmarshal([]byte(cached), &entry) == nil {
+				entry.CachedAt = time.Now()
+				deviceCache.set(cacheKey, &entry)
+				if entry.Disabled {
+					return nil, errDeviceDisabled
+				}
+				return &entry, nil
+			}
+		}
+	}
+
+	entry, err := fetchDeviceLookup(ctx, tenantID, serialNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	deviceCache.set(cacheKey, entry)
+	if rdb != nil {
+		data, _ := json.Marshal(entry)
+		_ = rdb.Set(ctx, "device:"+cacheKey, data, time.Minute).Err()
+	}
+
+	if entry.Disabled {
+		return nil, errDeviceDisabled
+	}
+	return entry, nil
+}
+
+func fetchDeviceLookup(ctx context.Context, tenantID, serialNumber string) (*deviceLookupEntry, error) {
+	var entry deviceLookupEntry
+	err := db.QueryRow(ctx,
+		`SELECT id, disabled
+		   FROM devices
+		  WHERE tenant_id = $1
+		    AND serial_number = $2
+		  LIMIT 1`,
+		tenantID,
+		serialNumber,
+	).Scan(&entry.DeviceID, &entry.Disabled)
+
+	if err == nil {
+		entry.CachedAt = time.Now()
+		return &entry, nil
+	}
+
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("device query by serial: %w", err)
+	}
+
+	if _, parseErr := uuid.Parse(serialNumber); parseErr != nil {
+		return nil, errDeviceNotFound
+	}
+
+	err = db.QueryRow(ctx,
+		`SELECT id, disabled
+		   FROM devices
+		  WHERE tenant_id = $1
+		    AND id = $2
+		  LIMIT 1`,
+		tenantID,
+		serialNumber,
+	).Scan(&entry.DeviceID, &entry.Disabled)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errDeviceNotFound
+		}
+		return nil, fmt.Errorf("device query by id: %w", err)
+	}
+
+	entry.CachedAt = time.Now()
+	return &entry, nil
+}
+
 func writeJSON(w http.ResponseWriter, status int, body string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	w.Write([]byte(body))
+	_, _ = w.Write([]byte(body))
 }

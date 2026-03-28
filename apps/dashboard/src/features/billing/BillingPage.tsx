@@ -1,9 +1,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
-import { getAccessTokenSilently } from "../../lib/auth0";
+import { apiFetch } from "../../lib/apiFetch";
 import toast from "react-hot-toast";
-
-const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL || "http://localhost:3000";
 
 type Plan = {
   key: string;
@@ -77,16 +75,13 @@ export function BillingPage() {
       // Clear the query param without reloading
       setSearchParams({}, { replace: true });
     }
-  }, [checkoutSuccess]);
+  }, [checkoutSuccess, setSearchParams]);
 
   useEffect(() => {
     (async () => {
       try {
-        const token = await getAccessTokenSilently();
-        const res   = await fetch(`${GATEWAY_URL}/billing/subscription`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) setSubscription(await res.json());
+        const data = await apiFetch("/billing/subscription");
+        setSubscription(data as Subscription);
       } catch {
         // Non-fatal — page still usable without subscription info
       } finally {
@@ -102,14 +97,10 @@ export function BillingPage() {
     }
     setLoading(plan);
     try {
-      const token = await getAccessTokenSilently();
-      const res   = await fetch(`${GATEWAY_URL}/billing/checkout`, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body:    JSON.stringify({ plan }),
-      });
-      if (!res.ok) throw new Error("Failed to create checkout session");
-      const { url } = await res.json();
+      const { url } = await apiFetch("/billing/checkout", {
+        method: "POST",
+        body:   JSON.stringify({ plan }),
+      }) as { url: string };
       window.location.href = url;
     } catch {
       toast.error("Failed to start checkout. Please try again.");
@@ -120,13 +111,7 @@ export function BillingPage() {
 
   const handleManageBilling = async () => {
     try {
-      const token = await getAccessTokenSilently();
-      const res   = await fetch(`${GATEWAY_URL}/billing/portal`, {
-        method:  "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error();
-      const { url } = await res.json();
+      const { url } = await apiFetch("/billing/portal", { method: "POST" }) as { url: string };
       window.location.href = url;
     } catch {
       toast.error("Could not open billing portal. Please try again.");

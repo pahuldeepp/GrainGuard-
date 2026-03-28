@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -9,7 +10,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/rs/zerolog/log"
 
 	"github.com/pahuldeepp/grainguard/apps/saga-orchestrator/internal/consumer"
 	"github.com/pahuldeepp/grainguard/apps/saga-orchestrator/internal/orchestrator"
@@ -18,7 +18,6 @@ import (
 	"github.com/pahuldeepp/grainguard/apps/saga-orchestrator/internal/repository"
 	"github.com/pahuldeepp/grainguard/apps/saga-orchestrator/migrations"
 	"github.com/pahuldeepp/grainguard/libs/health"
-	"github.com/pahuldeepp/grainguard/libs/logger"
 	libmigrate "github.com/pahuldeepp/grainguard/libs/migrate"
 )
 
@@ -31,42 +30,43 @@ func mustEnv(key, fallback string) string {
 }
 
 func main() {
-	logger.Init("saga-orchestrator")
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
 	defer stop()
 
-	dbURL := mustEnv("SAGA_DB_URL", "postgres://postgres:postgres@localhost:5432/grainguard?sslmode=disable")
+	dbURL := mustEnv(
+		"SAGA_DB_URL",
+		"postgres://postgres:postgres@localhost:5432/grainguard?sslmode=disable",
+	)
 
 	pool, err := pgxpool.New(ctx, dbURL)
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to connect to db")
+		log.Fatal("failed to connect to db:", err)
 	}
 	defer pool.Close()
 
-	if err := libmigrate.Up(dbURL, migrations.FS, "grainguard"); err != nil {
-		log.Fatal().Err(err).Msg("migration failed")
+	if err := libmigrate.Up(dbURL, migrations.FS, "saga_orchestrator"); err != nil {
+		log.Fatalf("migration failed: %v", err)
 	}
 
-	eventsTopic   := mustEnv("SAGA_EVENTS_TOPIC", "device.events")
-	groupID       := mustEnv("SAGA_CONSUMER_GROUP", "saga-orchestrator")
+	eventsTopic := mustEnv("SAGA_EVENTS_TOPIC", "device.events")
+	groupID := mustEnv("SAGA_CONSUMER_GROUP", "saga-orchestrator")
 	commandsTopic := mustEnv("SAGA_COMMANDS_TOPIC", "device.commands")
-	kafkaBrokers  := mustEnv("KAFKA_BROKERS", "kafka:9092")
 
 	kafkaConsumer := consumer.NewKafkaConsumerFromEnv(eventsTopic, groupID)
-	cmdProducer   := producer.NewProducerFromEnv(commandsTopic)
-	defer cmdProducer.Close()
+	cmdProducer := producer.NewProducerFromEnv(commandsTopic)
+	defer cmdProducer.Close() //nolint:errcheck
 
-	repo      := repository.NewPostgresSagaRepository(pool)
+	repo := repository.NewPostgresSagaRepository(pool)
 	provision := orchestrator.NewProvisionSaga(repo, cmdProducer)
 
 	recoveryWorker := recovery.NewRecoveryWorker(pool, cmdProducer)
 	go recoveryWorker.Start(ctx)
 
-	log.Info().
-		Str("topic", eventsTopic).
-		Str("group_id", groupID).
-		Msg("saga-orchestrator starting")
+	log.Println("saga-orchestrator starting... topic:", eventsTopic)
 
 	go kafkaConsumer.Start(ctx, func(handlerCtx context.Context, b []byte) error {
 		return provision.HandleEvent(handlerCtx, b)
@@ -74,27 +74,26 @@ func main() {
 
 	healthHandler := health.NewHandler(
 		health.NewPostgresChecker(pool),
-		health.NewKafkaChecker(kafkaBrokers),
+		health.NewKafkaChecker(mustEnv("KAFKA_BROKERS", "kafka:9092")),
 	)
 	healthSrv := health.NewServer(":8081", healthHandler)
-
 	go func() {
-		log.Info().Str("addr", ":8081").Msg("health server listening")
+		log.Println("health server listening on :8081")
 		if err := healthSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Error().Err(err).Msg("health server error")
+			log.Printf("health server error: %v", err)
 		}
 	}()
 
 	<-ctx.Done()
-	log.Info().Msg("shutting down gracefully")
+	log.Println("shutting down gracefully...")
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
 	if err := healthSrv.Shutdown(shutdownCtx); err != nil {
-		log.Error().Err(err).Msg("health server shutdown error")
+		log.Printf("health server shutdown error: %v", err)
 	}
+	log.Println("health server stopped")
 
-	log.Info().Msg("saga-orchestrator stopped")
+	time.Sleep(300 * time.Millisecond)
+	log.Println("saga-orchestrator stopped")
 }
-

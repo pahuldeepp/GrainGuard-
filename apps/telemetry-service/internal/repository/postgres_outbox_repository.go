@@ -22,6 +22,7 @@ func (r *PostgresOutboxRepository) Insert(
 	aggregateID,
 	eventType string,
 	payload []byte,
+	_ string,
 ) error {
 
 	id, err := uuid.NewV7()
@@ -42,4 +43,3 @@ func (r *PostgresOutboxRepository) Insert(
 
 	return err
 }
-

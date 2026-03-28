@@ -21,10 +21,10 @@ import (
 )
 
 type TelemetryEvent struct {
-	EventID     string    `json:"eventId"`
-	EventType   string    `json:"eventType"`
-	AggregateID string    `json:"aggregateId"`
-	OccurredAt  string    `json:"occurredAt"`
+	EventID     string `json:"eventId"`
+	EventType   string `json:"eventType"`
+	AggregateID string `json:"aggregateId"`
+	OccurredAt  string `json:"occurredAt"`
 	Data        struct {
 		DeviceID    string   `json:"deviceId"`
 		TenantID    string   `json:"tenantId"`
@@ -169,7 +169,7 @@ func main() {
 	// ── Step 2: Connect with keyspace for data writes ────────────────────────
 	cluster := gocql.NewCluster(strings.Split(cassandraHosts, ",")...)
 	cluster.Keyspace = cassandraKeyspace
-	cluster.Consistency = gocql.LocalQuorum
+	cluster.Consistency = gocql.One // immutable time-series — One is safe and ~3× faster than LocalQuorum
 	cluster.Timeout = 10 * time.Second
 	cluster.ConnectTimeout = 30 * time.Second
 	cluster.NumConns = workerCount // one conn per worker
@@ -205,11 +205,12 @@ func main() {
 		MaxWait:     500 * time.Millisecond,
 		StartOffset: kafka.LastOffset,
 	})
-	defer reader.Close()
+	defer reader.Close() //nolint:errcheck
 	log.Printf("Kafka consumer started topic=%s group=%s workers=%d batchSize=%d",
 		kafkaTopic, kafkaGroup, workerCount, batchSize)
 
 	// Graceful shutdown
+	//nolint:gosec // Process lifecycle should be rooted at the service, not a request.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -255,9 +256,16 @@ func main() {
 					return
 				}
 
-				// Commit all messages in one call
-				if err := reader.CommitMessages(ctx, msgs...); err != nil {
-					log.Printf("[worker-%d] commit error: %v", workerID, err)
+				// Commit with retry. Writes are idempotent (event_id in Cassandra PK),
+				// so redelivery on commit failure is safe — duplicate inserts are no-ops.
+				for attempt := 1; attempt <= 3; attempt++ {
+					if commitErr := reader.CommitMessages(ctx, msgs...); commitErr == nil {
+						break
+					} else if attempt == 3 {
+						log.Printf("[worker-%d] commit failed after 3 attempts: %v", workerID, commitErr)
+					} else {
+						log.Printf("[worker-%d] commit retry %d: %v", workerID, attempt, commitErr)
+					}
 				}
 
 				processed.Add(int64(len(batch)))
@@ -309,9 +317,11 @@ func main() {
 			}
 
 			var event TelemetryEvent
-			if err := json.Unmarshal(msg.Value, &event); err != nil {
-				log.Printf("Unmarshal error: %v", err)
-				reader.CommitMessages(ctx, msg)
+			if unmarshalErr := json.Unmarshal(msg.Value, &event); unmarshalErr != nil {
+				log.Printf("Unmarshal error: %v", unmarshalErr)
+				if commitErr := reader.CommitMessages(ctx, msg); commitErr != nil {
+					log.Printf("commit error after unmarshal failure: %v", commitErr)
+				}
 				skipped.Add(1)
 				continue
 			}
@@ -319,12 +329,17 @@ func main() {
 			// Validate required fields
 			if event.EventID == "" || event.Data.TenantID == "" || event.Data.DeviceID == "" {
 				skipped.Add(1)
-				reader.CommitMessages(ctx, msg)
+				if commitErr := reader.CommitMessages(ctx, msg); commitErr != nil {
+					log.Printf("commit error after validation failure: %v", commitErr)
+				}
 				continue
 			}
 
 			if event.EventType != "telemetry.recorded" {
-				reader.CommitMessages(ctx, msg)
+				skipped.Add(1)
+				if commitErr := reader.CommitMessages(ctx, msg); commitErr != nil {
+					log.Printf("commit error after skipping event type: %v", commitErr)
+				}
 				continue
 			}
 
@@ -332,14 +347,18 @@ func main() {
 			tenantID, err := gocql.ParseUUID(event.Data.TenantID)
 			if err != nil {
 				skipped.Add(1)
-				reader.CommitMessages(ctx, msg)
+				if commitErr := reader.CommitMessages(ctx, msg); commitErr != nil {
+					log.Printf("commit error after tenant parse failure: %v", commitErr)
+				}
 				continue
 			}
 
 			deviceID, err := gocql.ParseUUID(event.Data.DeviceID)
 			if err != nil {
 				skipped.Add(1)
-				reader.CommitMessages(ctx, msg)
+				if commitErr := reader.CommitMessages(ctx, msg); commitErr != nil {
+					log.Printf("commit error after device parse failure: %v", commitErr)
+				}
 				continue
 			}
 

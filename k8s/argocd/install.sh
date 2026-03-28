@@ -14,6 +14,9 @@ kubectl apply -n "${ARGOCD_NAMESPACE}" \
 echo "==> Waiting for ArgoCD to be ready..."
 kubectl rollout status deployment/argocd-server -n "${ARGOCD_NAMESPACE}" --timeout=120s
 
+echo "==> Applying GrainGuard ArgoCD project..."
+kubectl apply -f k8s/argocd/project.yaml
+
 echo "==> Applying App of Apps..."
 kubectl apply -f k8s/argocd/app-of-apps.yaml
 

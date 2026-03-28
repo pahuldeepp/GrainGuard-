@@ -2,13 +2,15 @@ import { useState } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
-import { useTenantContext } from "../tenancy/TenantContext";
+import { useTenantContext } from "../tenancy/useTenantContext";
 import { useEffect } from "react";
+import { BrandLogo } from "../../shared/components/BrandLogo";
+import { getAccessTokenSilently, loginWithRedirect } from "../../lib/auth0";
 
 const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL || "http://localhost:3000";
 
 export function OnboardingPage() {
-  const { user, getAccessTokenSilently, loginWithRedirect } = useAuth0();
+  const { user } = useAuth0();
   const navigate = useNavigate();
   const { activeTenantId, setActiveTenant } = useTenantContext();
   const [orgName, setOrgName] = useState("");
@@ -67,12 +69,11 @@ export function OnboardingPage() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center px-4">
       <div className="w-full max-w-md">
-        <div className="flex items-center gap-2 justify-center mb-8">
-          <div className="w-10 h-10 bg-green-600 rounded-xl flex items-center justify-center">
-            <span className="text-white font-bold text-lg">G</span>
-          </div>
-          <span className="text-2xl font-bold text-gray-900 dark:text-white">GrainGuard</span>
-        </div>
+        <BrandLogo
+          className="flex items-center justify-center gap-3 mb-8"
+          markClassName="h-10 w-10"
+          wordmarkClassName="text-2xl font-bold text-gray-900 dark:text-white"
+        />
 
         <div className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-8">
           <h1 className="text-xl font-semibold text-gray-900 dark:text-white mb-1">
@@ -97,6 +98,7 @@ export function OnboardingPage() {
               placeholder="e.g. Prairie Gold Grain Co."
               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500 mb-4"
               disabled={loading}
+              autoComplete="off"
               autoFocus
             />
 

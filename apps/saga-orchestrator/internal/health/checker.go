@@ -43,6 +43,6 @@ func (c *tcpChecker) Check(ctx context.Context) error {
     if err != nil {
         return fmt.Errorf("dial %s: %w", c.address, err)
     }
-    conn.Close()
+    _ = conn.Close()
     return nil
 }

@@ -1,5 +1,5 @@
 ﻿import { useState, useRef, useEffect } from "react";
-import { useTenantContext } from "../TenantContext";
+import { useTenantContext } from "../useTenantContext";
 
 export function TenantSwitcher() {
   const { activeTenantId, availableTenants, setActiveTenant } = useTenantContext();

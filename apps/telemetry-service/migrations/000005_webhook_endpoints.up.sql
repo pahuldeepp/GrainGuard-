@@ -1,6 +1,19 @@
 -- 000005_webhook_endpoints.up.sql
 -- Webhook endpoint registration for tenant-controlled event delivery.
 
+-- Required extensions
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- Trigger helper function (safe if already exists)
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Webhook endpoints table
 CREATE TABLE IF NOT EXISTS webhook_endpoints (
   id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id   UUID        NOT NULL REFERENCES tenants (id) ON DELETE CASCADE,
@@ -17,13 +30,19 @@ CREATE TABLE IF NOT EXISTS webhook_endpoints (
   UNIQUE (tenant_id, url)
 );
 
-CREATE INDEX IF NOT EXISTS idx_webhook_endpoints_tenant ON webhook_endpoints (tenant_id);
-CREATE INDEX IF NOT EXISTS idx_webhook_endpoints_enabled ON webhook_endpoints (tenant_id, enabled);
+CREATE INDEX IF NOT EXISTS idx_webhook_endpoints_tenant 
+  ON webhook_endpoints (tenant_id);
 
-DROP TRIGGER IF EXISTS webhook_endpoints_set_updated_at ON webhook_endpoints;
+CREATE INDEX IF NOT EXISTS idx_webhook_endpoints_enabled 
+  ON webhook_endpoints (tenant_id, enabled);
+
+DROP TRIGGER IF EXISTS webhook_endpoints_set_updated_at 
+  ON webhook_endpoints;
+
 CREATE TRIGGER webhook_endpoints_set_updated_at
   BEFORE UPDATE ON webhook_endpoints
-  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+  FOR EACH ROW
+  EXECUTE FUNCTION set_updated_at();
 
 -- Webhook delivery log — append-only record of every delivery attempt
 CREATE TABLE IF NOT EXISTS webhook_deliveries (
@@ -40,5 +59,8 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_endpoint ON webhook_deliveries (endpoint_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_tenant   ON webhook_deliveries (tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_endpoint 
+  ON webhook_deliveries (endpoint_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_tenant   
+  ON webhook_deliveries (tenant_id, created_at DESC);

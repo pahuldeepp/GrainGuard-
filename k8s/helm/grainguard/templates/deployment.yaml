@@ -1,5 +1,6 @@
 {{- range $name, $svc := .Values.services }}
 {{- if $svc.enabled }}
+{{- $rollingUpdate := $svc.rollingUpdate | default dict }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -12,6 +13,11 @@ metadata:
     helm.sh/chart: {{ $.Chart.Name }}-{{ $.Chart.Version }}
 spec:
   replicas: {{ $svc.replicaCount | default 1 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: {{ $rollingUpdate.maxUnavailable | default 0 }}
+      maxSurge: {{ $rollingUpdate.maxSurge | default 1 }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ $name }}

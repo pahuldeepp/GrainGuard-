@@ -1,58 +1,120 @@
-let _getToken: ((options?: any) => Promise<string>) | null = null;
-let _loginWithRedirect: ((options?: any) => Promise<void>) | null = null;
+type AuthorizationParams = Record<string, unknown> & {
+  audience?: string;
+  scope?: string;
+};
 
-export function setGetAccessTokenSilently(fn: (options?: any) => Promise<string>) {
-  _getToken = fn;
-}
+type AppState = Record<string, unknown> & {
+  returnTo?: string;
+};
 
-/**
- * Register the Auth0 loginWithRedirect function so that
- * getAccessTokenSilently() can trigger re-login when the
- * refresh token has expired or been revoked.
- */
-export function setLoginWithRedirect(fn: (options?: any) => Promise<void>) {
-  _loginWithRedirect = fn;
-}
+type Auth0Options = Record<string, unknown> & {
+  authorizationParams?: AuthorizationParams;
+  appState?: AppState;
+};
 
-/**
- * Get a valid access token.
- * Automatically redirects to Auth0 login when the refresh token has
- * expired (login_required / invalid_grant / consent_required errors)
- * instead of silently breaking.
- */
-export async function getAccessTokenSilently(options?: any): Promise<string> {
-  if (!_getToken) throw new Error("Auth0 not initialized");
-
-  try {
-    return await _getToken(options);
-  } catch (err: any) {
-    const code: string = err?.error ?? err?.code ?? "";
-    const msg: string  = err?.message ?? "";
-
-    const isSessionExpired =
-      code === "login_required" ||
-      code === "invalid_grant" ||
-      code === "consent_required" ||
-      msg.includes("Missing Refresh Token") ||
-      msg.includes("expired");
-
-    if (isSessionExpired) {
-      console.warn("[auth] Session expired — redirecting to login");
-      if (_loginWithRedirect) {
-        // Preserve the current page so Auth0 returns here after login
-        await _loginWithRedirect({
-          appState: { returnTo: window.location.pathname + window.location.search },
-        });
-      } else {
-        // Fallback: hard reload to root triggers ProtectedRoute → Auth0 redirect
-        window.location.replace("/");
-      }
-    }
-
-    throw err;
+declare global {
+  interface Window {
+    __getToken?: typeof getAccessTokenSilently;
   }
 }
 
-// ⚠️  window.__getToken intentionally removed — it exposed the token
-// getter as a global in dev builds, allowing any script on the page to
-// silently acquire bearer tokens.  Use getAccessTokenSilently() directly.
+const AUTH_AUDIENCE = import.meta.env.VITE_AUTH0_AUDIENCE;
+const AUTH_SCOPE =
+  import.meta.env.VITE_AUTH0_SCOPE ?? "openid profile email offline_access";
+
+let _getToken: ((options?: Auth0Options) => Promise<string>) | null = null;
+let _loginWithRedirect: ((options?: Auth0Options) => Promise<void>) | null = null;
+let authRecoveryStarted = false;
+
+function withDefaultAuthParams(options: Auth0Options = {}): Auth0Options {
+  return {
+    ...options,
+    authorizationParams: {
+      ...options.authorizationParams,
+      ...(AUTH_AUDIENCE ? { audience: AUTH_AUDIENCE } : {}),
+      scope:
+        typeof options.authorizationParams?.scope === "string"
+          ? options.authorizationParams.scope
+          : AUTH_SCOPE,
+    },
+  };
+}
+
+function withReturnTo(options: Auth0Options = {}): Auth0Options {
+  const returnTo =
+    options.appState?.returnTo ??
+    `${window.location.pathname}${window.location.search}${window.location.hash}`;
+
+  return {
+    ...withDefaultAuthParams(options),
+    appState: {
+      ...options.appState,
+      returnTo,
+    },
+  };
+}
+
+function shouldRecoverAuthSession(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("missing refresh token") ||
+    message.includes("missing_refresh_token") ||
+    message.includes("login_required") ||
+    message.includes("consent_required")
+  );
+}
+
+function waitForRedirect(): Promise<never> {
+  return new Promise<never>(() => undefined);
+}
+
+function startAuthRecovery(): Promise<never> {
+  if (!_loginWithRedirect) {
+    throw new Error("Auth0 login not initialized");
+  }
+
+  if (!authRecoveryStarted) {
+    authRecoveryStarted = true;
+    void _loginWithRedirect(withReturnTo()).catch(() => {
+      authRecoveryStarted = false;
+    });
+  }
+
+  return waitForRedirect();
+}
+
+export function setGetAccessTokenSilently(
+  fn: (options?: Auth0Options) => Promise<string>
+) {
+  _getToken = fn;
+}
+
+export function setLoginWithRedirect(
+  fn: (options?: Auth0Options) => Promise<void>
+) {
+  _loginWithRedirect = fn;
+}
+
+export async function getAccessTokenSilently(
+  options?: Auth0Options
+): Promise<string> {
+  if (!_getToken) throw new Error("Auth0 not initialized");
+
+  try {
+    return await _getToken(withDefaultAuthParams(options));
+  } catch (error) {
+    if (shouldRecoverAuthSession(error)) {
+      return startAuthRecovery();
+    }
+    throw error;
+  }
+}
+
+export async function loginWithRedirect(options?: Auth0Options): Promise<void> {
+  if (!_loginWithRedirect) throw new Error("Auth0 login not initialized");
+  return _loginWithRedirect(withReturnTo(options));
+}
+
+window.__getToken = getAccessTokenSilently;

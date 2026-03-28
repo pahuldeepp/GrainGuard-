@@ -25,6 +25,8 @@ function mockFetch(body: unknown, status = 200) {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  document.cookie = "_csrf=test-token";
 });
 
 const RULE = {
@@ -55,13 +57,13 @@ describe("AlertRulesPage", () => {
     expect(screen.getByText(/no alert rules/i)).toBeInTheDocument();
   });
 
-  it("opens form on 'Add Rule' click", async () => {
+  it("opens form on 'New Rule' click", async () => {
     mockFetch([]);
     render(<AlertRulesPage />);
     await waitFor(() => expect(screen.queryByText(/loading/i)).not.toBeInTheDocument());
 
-    await userEvent.click(screen.getByRole("button", { name: /add rule/i }));
-    expect(screen.getByRole("form")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /\+ new rule/i }));
+    expect(screen.getByRole("button", { name: /create rule/i })).toBeInTheDocument();
   });
 
   it("creates a new rule and appends to list", async () => {
@@ -75,11 +77,16 @@ describe("AlertRulesPage", () => {
     render(<AlertRulesPage />);
     await waitFor(() => expect(screen.queryByText(/loading/i)).not.toBeInTheDocument());
 
-    await userEvent.click(screen.getByRole("button", { name: /add rule/i }));
-    const form = screen.getByRole("form");
+    await userEvent.click(screen.getByRole("button", { name: /\+ new rule/i }));
+    const form = screen.getByRole("button", { name: /create rule/i }).closest("form") as HTMLFormElement;
 
-    await userEvent.clear(within(form).getByRole("textbox", { name: /name/i }));
-    await userEvent.type(within(form).getByRole("textbox", { name: /name/i }), "Low Battery");
+    const nameInput = within(form).getByPlaceholderText(/high temperature alert/i);
+    const thresholdInput = within(form).getByPlaceholderText(/e\.g\. 35/i);
+
+    await userEvent.clear(nameInput);
+    await userEvent.type(nameInput, "Low Battery");
+    await userEvent.clear(thresholdInput);
+    await userEvent.type(thresholdInput, "10");
 
     await userEvent.click(within(form).getByRole("button", { name: /save|create/i }));
 
@@ -99,7 +106,7 @@ describe("AlertRulesPage", () => {
     const deleteBtn = screen.getByRole("button", { name: /delete/i });
     await userEvent.click(deleteBtn);
 
-    await waitFor(() => expect(screen.queryByText("High Temp")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryAllByText("High Temp")).toHaveLength(0));
   });
 
   it("shows toast error when fetch fails", async () => {

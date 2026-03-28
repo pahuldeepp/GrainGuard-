@@ -40,11 +40,11 @@ export const cache = {
     if (keys.length === 0) return [];
     const pipeline = client.multi();
     keys.forEach(key => pipeline.get(key));
-    const results = await pipeline.exec();
-    return results.map((r: any) => r ? JSON.parse(r) : null);
+    const results = await pipeline.exec() as (string | null)[];
+    return results.map((r) => (r ? JSON.parse(r) as T : null));
   },
 
-  async set(key: string, value: any, ttlSeconds: number): Promise<void> {
+  async set(key: string, value: unknown, ttlSeconds: number): Promise<void> {
     await client.set(key, JSON.stringify(value), { EX: ttlSeconds });
   },
 

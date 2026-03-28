@@ -1,26 +1,10 @@
 import { useEffect, useState } from "react";
+import { apiFetch } from "../../lib/apiFetch";
 import { getAccessTokenSilently } from "../../lib/auth0";
 import { useAuth } from "../../hooks/useAuth";
 import toast from "react-hot-toast";
 
 const GW = import.meta.env.VITE_GATEWAY_URL ?? "";
-
-async function apiFetch(path: string, options: RequestInit = {}) {
-  const token = await getAccessTokenSilently();
-  const res = await fetch(`${GW}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-      ...options.headers,
-    },
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `HTTP ${res.status}`);
-  }
-  return res.json();
-}
 
 interface AccountInfo {
   user: { id: string; email: string; role: string; created_at: string } | null;
@@ -35,6 +19,26 @@ interface NotifPrefs {
   webhook_alerts:      boolean;
   alert_levels:        string[];
 }
+
+type TogglePrefKey = "email_alerts" | "email_weekly_digest" | "webhook_alerts";
+
+const TOGGLE_PREFS: Array<{ key: TogglePrefKey; label: string; desc: string }> = [
+  {
+    key: "email_alerts",
+    label: "Email alerts",
+    desc: "Receive an email when a device triggers a warning or critical alert.",
+  },
+  {
+    key: "email_weekly_digest",
+    label: "Weekly digest email",
+    desc: "Weekly summary of device health and alert activity.",
+  },
+  {
+    key: "webhook_alerts",
+    label: "Webhook alerts",
+    desc: "POST alert events to your registered webhook endpoints.",
+  },
+];
 
 export function SettingsPage() {
   const { user: authUser, signOut } = useAuth();
@@ -56,18 +60,7 @@ export function SettingsPage() {
       ]);
       setAccount(acct);
       setNotifPrefs(prefs);
-    } catch (e) {
-      toast.error("Failed to load account info");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function loadAccount() {
-    try {
-      const data = await apiFetch("/account/me");
-      setAccount(data);
-    } catch (e) {
+    } catch {
       toast.error("Failed to load account info");
     } finally {
       setLoading(false);
@@ -97,6 +90,11 @@ export function SettingsPage() {
     } finally {
       setSavingPrefs(false);
     }
+  }
+
+  function handleTogglePref(key: TogglePrefKey) {
+    if (!notifPrefs) return;
+    handleSavePrefs({ [key]: !notifPrefs[key] } as Pick<NotifPrefs, TogglePrefKey>);
   }
 
   async function handleExport() {
@@ -230,11 +228,7 @@ export function SettingsPage() {
           </h2>
           <div className="space-y-4">
             {/* Email toggles */}
-            {[
-              { key: "email_alerts",        label: "Email alerts",          desc: "Receive an email when a device triggers a warning or critical alert." },
-              { key: "email_weekly_digest", label: "Weekly digest email",   desc: "Weekly summary of device health and alert activity." },
-              { key: "webhook_alerts",      label: "Webhook alerts",        desc: "POST alert events to your registered webhook endpoints." },
-            ].map(({ key, label, desc }) => (
+            {TOGGLE_PREFS.map(({ key, label, desc }) => (
               <div key={key} className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-sm font-medium text-gray-900 dark:text-white">{label}</p>
@@ -242,16 +236,16 @@ export function SettingsPage() {
                 </div>
                 <button
                   disabled={savingPrefs}
-                  onClick={() => handleSavePrefs({ [key]: !notifPrefs[key as keyof NotifPrefs] } as any)}
+                  onClick={() => handleTogglePref(key)}
                   className={`relative shrink-0 w-11 h-6 rounded-full transition-colors ${
-                    notifPrefs[key as keyof NotifPrefs]
+                    notifPrefs[key]
                       ? "bg-green-600"
                       : "bg-gray-300 dark:bg-gray-600"
                   }`}
                 >
                   <span
                     className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-                      notifPrefs[key as keyof NotifPrefs] ? "translate-x-5" : "translate-x-0"
+                      notifPrefs[key] ? "translate-x-5" : "translate-x-0"
                     }`}
                   />
                 </button>

@@ -1,6 +1,9 @@
 import request from "supertest";
 import express from "express";
 
+process.env.STRIPE_PRICE_STARTER = "price_starter_test";
+process.env.STRIPE_PRICE_PROFESSIONAL = "price_pro_test";
+
 jest.mock("../../lib/db", () => ({
   pool:      { query: jest.fn() },
   writePool: { query: jest.fn() },
@@ -49,13 +52,13 @@ jest.mock("stripe", () => {
 });
 
 import { billingRouter } from "../billing";
-import { pool } from "../../lib/db";
+import { writePool } from "../../lib/db";
 
 const app = express();
 app.use(express.json());
 app.use(billingRouter);
 
-const mockPool = pool as jest.Mocked<typeof pool>;
+const mockPool = writePool as unknown as { query: jest.Mock };
 
 describe("GET /billing/subscription", () => {
   it("returns free plan when no billing record exists", async () => {

@@ -144,20 +144,24 @@ async function processAlert(job: AlertJob, channel: Channel): Promise<void> {
       continue;
     }
 
+    const unit      = job.alertType === "temperature" ? "°C" : "%";
+    const valueStr  = job.value     != null ? `${job.value}${unit}` : "N/A";
+    const threshStr = job.threshold != null ? `${job.threshold}${unit}` : "N/A";
+    const display   = job.serialNumber !== job.deviceId ? job.serialNumber : job.deviceId;
+
     const emailJob: EmailJob = {
-      to: recipient,
-      type: "alert",
-      subject: `GrainGuard Alert: ${job.alertType} threshold exceeded on ${job.serialNumber}`,
+      to:      recipient,
+      type:    "alert",
+      subject: `GrainGuard ${alertLevel.toUpperCase()} Alert: ${job.alertType} on device ${display}`,
       body: `
-        <h2>Alert: ${job.alertType} threshold exceeded</h2>
-        <p><strong>Device:</strong> ${job.serialNumber}</p>
-        <p><strong>Current value:</strong> ${job.value}</p>
-        <p><strong>Threshold:</strong> ${job.threshold}</p>
-        <p><strong>Severity:</strong> ${alertLevel}</p>
+        <h2>${alertLevel === "critical" ? "🚨" : "⚠️"} ${job.alertType.charAt(0).toUpperCase() + job.alertType.slice(1)} Alert — ${alertLevel.toUpperCase()}</h2>
+        <p><strong>Device:</strong> ${display}</p>
+        <p><strong>Reading:</strong> ${valueStr}${job.threshold != null ? ` (threshold: ${threshStr})` : ""}</p>
+        <p><strong>Risk score:</strong> ${job.score != null ? (job.score * 100).toFixed(0) + "%" : "N/A"}</p>
         <p><strong>Time:</strong> ${new Date().toISOString()}</p>
         <hr/>
         <p style="color:#888;font-size:12px">
-          You can manage alert preferences in your
+          Manage alert preferences in your
           <a href="${process.env.DASHBOARD_URL || "https://app.grainguard.com"}/settings">Settings</a>.
         </p>
       `.trim(),

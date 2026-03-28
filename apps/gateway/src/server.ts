@@ -3,7 +3,6 @@ import express, { Request, Response, NextFunction } from "express";
 import http from "http";
 import helmet from "helmet";
 import cors from "cors";
-import cookieParser from "cookie-parser";
 import { createDevice } from "./services/device";
 import { getDeviceLatestTelemetry } from "./services/device-query";
 import { redis } from "./cache/redis";
@@ -13,67 +12,20 @@ import { writeAuditLog as logAuditEvent } from "./lib/audit";
 import { metricsHandler, requestLatency } from "./observability/metrics";
 import { requestIdMiddleware } from "./middleware/requestId";
 import { authMiddleware } from "./middleware/auth";
-// apiKeyMiddleware removed — device ingest moved to Go ingest-service
 import { apiRateLimiter } from "./middleware/rateLimiting";
-import { validate, createDeviceSchema, deviceIdParamSchema } from "./middleware/validation";
-import { apiVersionMiddleware } from "./middleware/apiVersion";
-import { securityHeaders, permissionsPolicy } from "./middleware/securityHeaders";
-import { csrfProtection } from "./middleware/csrf";
-import { billingRouter } from "./routes/billing";
 import { tenantsRouter } from "./routes/tenants";
-import { ssoRouter } from "./routes/sso";
-import { devicesImportRouter } from "./routes/devicesImport";
-import { alertRulesRouter } from "./routes/alertRules";
-import { auditLogRouter } from "./routes/auditLog";
-import { teamRouter } from "./routes/teamMembers";
-import { apiKeysRouter } from "./routes/apiKeys";
-import { devicesRouter } from "./routes/devices";
-import { accountRouter } from "./routes/account";
+import { billingRouter, stripeWebhookHandler } from "./routes/billing";
 import { webhooksRouter } from "./routes/webhooks";
+import { apiKeysRouter } from "./routes/apiKeys";
 import { notificationPrefsRouter } from "./routes/notificationPreferences";
+import { teamRouter } from "./routes/teamMembers";
+import { ssoRouter } from "./routes/sso";
+import { alertRulesRouter } from "./routes/alertRules";
+import { devicesRouter } from "./routes/devices";
+import { devicesImportRouter } from "./routes/devicesImport";
+import { accountRouter } from "./routes/account";
+import { auditLogRouter } from "./routes/auditLog";
 import { adminRouter } from "./routes/admin";
-
-// ── Startup environment validation ────────────────────────────────────────
-(function validateEnv() {
-  if (
-    !process.env.STRIPE_SECRET_KEY ||
-    process.env.STRIPE_SECRET_KEY === "sk_test_placeholder"
-  ) {
-    console.warn(
-      "[startup] ⚠  STRIPE_SECRET_KEY is missing or placeholder — " +
-      "billing routes will not work. Set STRIPE_SECRET_KEY in your .env."
-    );
-  }
-
-  if (
-    !process.env.AUTH0_MANAGEMENT_CLIENT_ID ||
-    process.env.AUTH0_MANAGEMENT_CLIENT_ID === ""
-  ) {
-    console.warn(
-      "[startup] ⚠  AUTH0_MANAGEMENT_CLIENT_ID not set — " +
-      "SSO configuration and team invite emails via Auth0 will fail."
-    );
-  }
-
-  if (
-    !process.env.AUTH0_MANAGEMENT_CLIENT_SECRET ||
-    process.env.AUTH0_MANAGEMENT_CLIENT_SECRET === ""
-  ) {
-    console.warn(
-      "[startup] ⚠  AUTH0_MANAGEMENT_CLIENT_SECRET not set — " +
-      "SSO configuration and team invite emails via Auth0 will fail."
-    );
-  }
-
-  if (!process.env.JWKS_URL) {
-    if (process.env.NODE_ENV === "production") {
-      console.error("[startup] ✗  JWKS_URL is required in production. Exiting.");
-      process.exit(1);
-    } else {
-      console.warn("[startup] ⚠  JWKS_URL not set — JWT verification will fail unless AUTH_ENABLED=false.");
-    }
-  }
-})();
 
 const app = express();
 
@@ -88,35 +40,27 @@ const BFF_HOST = "grainguard-bff";
 const BFF_PORT = 4000;
 
 /**
- * Security headers — replaces the old inline helmet() call with our
- * hardened securityHeaders() + permissionsPolicy() middleware pair.
- * securityHeaders() pins CSP, HSTS, noSniff, referrerPolicy, etc.
- * permissionsPolicy() disables camera/mic/GPS/payment/USB browser APIs.
+ * Helmet
  */
-app.use(securityHeaders());
-app.use(permissionsPolicy());
-app.use(cookieParser()); // required for req.cookies used by csrfProtection()
-
-/**
- * Stripe webhook — MUST receive the raw Buffer body so that
- * stripe.webhooks.constructEvent() can verify the HMAC signature.
- * Mount BEFORE express.json() so this route is not body-parsed as JSON.
- */
-app.post(
-  "/billing/webhook",
-  express.raw({ type: "application/json" }), // raw Buffer — not parsed
-  (req, res, next) => {
-    // Forward raw body to the billing router
-    next();
-  }
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:"],
+        connectSrc: [
+          "'self'",
+          "http://localhost:5173",
+          "http://localhost:8086",
+          "ws://localhost:8086",
+        ],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+  })
 );
-
-/**
- * CSRF protection — applies to all mutating routes (POST/PUT/PATCH/DELETE)
- * except the Stripe webhook (webhook caller is Stripe, not a browser).
- * GET/HEAD/OPTIONS are safe by definition and just issue a fresh token.
- */
-app.use(csrfProtection());
 
 /**
  * CORS
@@ -133,7 +77,6 @@ app.use(
 );
 
 app.use(requestIdMiddleware);
-app.use(apiVersionMiddleware);
 
 /**
  * Latency metric
@@ -171,6 +114,8 @@ app.use("/graphql", (req: Request, res: Response) => {
     if (val !== undefined) headers[key] = val;
   }
   headers["host"] = `${BFF_HOST}:${BFF_PORT}`;
+  // Ensure correlation ID is always forwarded even if not set by client
+  if (req.requestId) headers["x-request-id"] = req.requestId;
 
   const options: http.RequestOptions = {
     hostname: BFF_HOST,
@@ -195,50 +140,35 @@ app.use("/graphql", (req: Request, res: Response) => {
   req.pipe(proxyReq, { end: true });
 });
 
-/**
- * Billing + Tenant REST routes
- * billingRouter handles /billing/checkout, /billing/subscription, /billing/webhook
- * tenantsRouter handles /tenants/me and /tenants/me/users
- * express.json() is scoped to these routers only — the webhook uses raw body above
- */
-app.use(express.json({ limit: "64kb" }));
+app.post(
+  "/billing/webhook",
+  express.raw({ type: "application/json" }),
+  stripeWebhookHandler
+);
 
-// Public routes — rate-limited by IP (no JWT required)
+app.use(express.json({ limit: "1mb" }));
+
 app.use(tenantsRouter);
-
-// Authenticated routers — each router applies its own rate limiter internally
-// so that billing/bulk/api limiters don't bleed across route boundaries.
 app.use(billingRouter);
-app.use(devicesImportRouter);
-app.use(alertRulesRouter);
-app.use(auditLogRouter);
-app.use(ssoRouter);
-app.use(teamRouter);
-app.use(apiKeysRouter);
-app.use(devicesRouter);
-app.use(accountRouter);
 app.use(webhooksRouter);
+app.use(apiKeysRouter);
 app.use(notificationPrefsRouter);
+app.use(teamRouter);
+app.use(ssoRouter);
+app.use(alertRulesRouter);
+app.use(devicesRouter);
+app.use(devicesImportRouter);
+app.use(accountRouter);
+app.use(auditLogRouter);
 app.use(adminRouter);
 
 /**
- * Telemetry ingest — DEPRECATED on Gateway.
- * Devices should POST to the dedicated Go ingest-service (:3001/ingest) directly.
- * This stub returns a 308 redirect hint for any device still pointing here.
+ * REST routes — express.json() applied only here
  */
-app.post("/ingest", (_req: Request, res: Response) => {
-  res.status(308).json({
-    error: "moved_permanently",
-    message: "Device ingest has moved to the dedicated ingest service on port 3001",
-    location: "/ingest on ingest-service:3001",
-  });
-});
-
 app.post(
   "/devices",
-  authMiddleware,    // auth first → req.user.tenantId is set for the rate limiter
   apiRateLimiter,
-  validate(createDeviceSchema, "body"),
+  authMiddleware,
   async (req: Request, res: Response) => {
     try {
       const { serialNumber } = req.body;
@@ -248,19 +178,6 @@ app.post(
       const tenantId = req.user!.tenantId;
       const userId = req.user!.sub;
       const requestId = String(req.requestId);
-
-      // ── Plan enforcement: check device quota ──────────────────────────
-      const { checkDeviceQuota } = await import("./services/planEnforcement");
-      const quotaCheck = await checkDeviceQuota(tenantId);
-      if (!quotaCheck.allowed) {
-        return res.status(403).json({
-          error: "device_limit_reached",
-          message: quotaCheck.message,
-          currentCount: quotaCheck.currentCount,
-          maxDevices: quotaCheck.maxDevices,
-          plan: quotaCheck.plan,
-        });
-      }
 
       const authHeader = Array.isArray(req.headers.authorization)
         ? req.headers.authorization[0]
@@ -300,9 +217,8 @@ app.post(
 
 app.get(
   "/devices/:deviceId/latest",
-  authMiddleware,    // auth first → tenant-scoped rate limit
   apiRateLimiter,
-  validate(deviceIdParamSchema, "params"),
+  authMiddleware,
   async (req: Request, res: Response) => {
     try {
       const data = await getDeviceLatestTelemetry(req.params.deviceId);
@@ -315,28 +231,8 @@ app.get(
   }
 );
 
-// Liveness probe — always 200 if the process is running
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok", uptime: process.uptime() });
-});
-
-// Readiness probe — checks DB + Redis connectivity
-app.get("/health/ready", async (_req, res) => {
-  const checks: Record<string, string> = {};
-  try {
-    await pool.query("SELECT 1");
-    checks.postgres = "ok";
-  } catch {
-    checks.postgres = "error";
-  }
-  try {
-    await redis.ping();
-    checks.redis = "ok";
-  } catch {
-    checks.redis = "error";
-  }
-  const allOk = Object.values(checks).every((v) => v === "ok");
-  return res.status(allOk ? 200 : 503).json({ status: allOk ? "ok" : "degraded", checks });
+  res.json({ status: "ok" });
 });
 
 app.get("/metrics", metricsHandler());
@@ -344,7 +240,6 @@ app.get("/metrics", metricsHandler());
 process.on("SIGTERM", async () => {
   await redis.quit();
   await pool.end();
-  
   process.exit(0);
 });
 
@@ -384,15 +279,4 @@ server.on("upgrade", (req, socket, head) => {
 
 server.listen(PORT, () => {
   console.log(`Gateway running on ${PORT}`);
-});
-// Centralized error handler
-app.use((err: Error, req: import("express").Request, res: import("express").Response, next: import("express").NextFunction) => {
-  const requestId = (req.headers["x-request-id"] as string) ?? "unknown";
-  console.error({ requestId, error: err.message, stack: err.stack });
-  if (res.headersSent) return next(err);
-  res.status(500).json({
-    error: "internal_server_error",
-    message: err.message,
-    requestId,
-  });
 });

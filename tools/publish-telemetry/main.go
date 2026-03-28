@@ -33,7 +33,7 @@ func main() {
 		Topic:    "telemetry.events",
 		Balancer: &kafka.LeastBytes{},
 	}
-	defer w.Close()
+	defer w.Close() //nolint:errcheck
 
 	deviceID := "4f740e87-c3bc-454c-9b13-6f56101ff73a" // bench-device-138
 	tenantID := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
@@ -53,6 +53,7 @@ func main() {
 		}
 
 		payload, _ := json.Marshal(event)
+		//nolint:gosec // CLI publisher intentionally uses a detached background context.
 		err := w.WriteMessages(context.Background(), kafka.Message{
 			Key:   []byte(deviceID),
 			Value: payload,

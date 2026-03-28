@@ -50,23 +50,24 @@ accountRouter.delete(
   async (req: Request, res: Response) => {
     const tenantId = req.user!.tenantId;
     const userId = req.user!.sub;
+    const client = await pool.connect();
 
     try {
-      await pool.query("BEGIN");
+      await client.query("BEGIN");
 
       // Check if user is the last admin
-      const { rows: admins } = await pool.query(
+      const { rows: admins } = await client.query(
         "SELECT id FROM tenant_users WHERE tenant_id = $1 AND role = 'admin'",
         [tenantId]
       );
 
-      const { rows: userRows } = await pool.query(
+      const { rows: userRows } = await client.query(
         "SELECT id, role FROM tenant_users WHERE tenant_id = $1 AND auth_user_id = $2",
         [tenantId, userId]
       );
 
       if (userRows.length === 0) {
-        await pool.query("ROLLBACK");
+        await client.query("ROLLBACK");
         return res.status(404).json({ error: "user_not_found" });
       }
 
@@ -76,30 +77,32 @@ accountRouter.delete(
 
       if (isLastAdmin) {
         // Delete the entire tenant and all associated data
-        await pool.query("DELETE FROM tenant_invites WHERE tenant_id = $1", [tenantId]);
-        await pool.query("DELETE FROM api_keys WHERE tenant_id = $1", [tenantId]);
-        await pool.query("DELETE FROM alert_rules WHERE tenant_id = $1", [tenantId]);
-        await pool.query("DELETE FROM audit_events WHERE tenant_id = $1", [tenantId]);
-        await pool.query("DELETE FROM devices WHERE tenant_id = $1", [tenantId]);
-        await pool.query("DELETE FROM tenant_users WHERE tenant_id = $1", [tenantId]);
-        await pool.query("DELETE FROM tenants WHERE id = $1", [tenantId]);
+        await client.query("DELETE FROM tenant_invites WHERE tenant_id = $1", [tenantId]);
+        await client.query("DELETE FROM api_keys WHERE tenant_id = $1", [tenantId]);
+        await client.query("DELETE FROM alert_rules WHERE tenant_id = $1", [tenantId]);
+        await client.query("DELETE FROM audit_events WHERE tenant_id = $1", [tenantId]);
+        await client.query("DELETE FROM devices WHERE tenant_id = $1", [tenantId]);
+        await client.query("DELETE FROM tenant_users WHERE tenant_id = $1", [tenantId]);
+        await client.query("DELETE FROM tenants WHERE id = $1", [tenantId]);
 
-        await pool.query("COMMIT");
+        await client.query("COMMIT");
         return res.json({ deleted: true, scope: "tenant", message: "Tenant and all data deleted" });
       }
 
       // Just remove this user from the tenant
-      await pool.query(
+      await client.query(
         "DELETE FROM tenant_users WHERE tenant_id = $1 AND auth_user_id = $2",
         [tenantId, userId]
       );
 
-      await pool.query("COMMIT");
+      await client.query("COMMIT");
       return res.json({ deleted: true, scope: "user", message: "Your account has been removed from this organisation" });
     } catch (err) {
-      await pool.query("ROLLBACK");
+      await client.query("ROLLBACK").catch(() => {});
       console.error("[account] delete error:", err);
       return res.status(500).json({ error: "internal_error" });
+    } finally {
+      client.release();
     }
   }
 );

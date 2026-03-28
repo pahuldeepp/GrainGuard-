@@ -16,22 +16,41 @@ const pool = new Pool({
   max: 50,
 });
 
+type Row = Record<string, unknown>;
+type QueryResult = import("pg").QueryResult<Row>;
+
 // Circuit-breaker-wrapped query helper
-async function cbQuery(text: string, values?: any[]): Promise<import("pg").QueryResult<any>> {
-  return postgresCircuitBreaker.execute(() => pool.query(text, values));
+async function cbQuery(text: string, values?: unknown[]): Promise<QueryResult> {
+  return postgresCircuitBreaker.execute(() => pool.query(text, values as unknown[]));
 }
 
 // Tenant-scoped query — sets app.current_tenant_id for RLS enforcement
 export async function tenantQuery(
   tenantId: string,
   text: string,
-  values?: any[]
-): Promise<import("pg").QueryResult<any>> {
+  values?: unknown[]
+): Promise<QueryResult> {
   return postgresCircuitBreaker.execute(async () => {
     const client = await pool.connect();
     try {
-      await client.query('SET LOCAL app.current_tenant_id = $1', [tenantId]);
-      return await client.query(text, values);
+      await client.query("BEGIN");
+      await client.query(
+        "SELECT set_config('app.current_tenant_id', $1, true)",
+        [tenantId]
+      );
+      const result = await client.query(
+        text,
+        values as unknown[] | undefined
+      ) as QueryResult;
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // Release the client even if rollback fails.
+      }
+      throw error;
     } finally {
       client.release();
     }
@@ -52,13 +71,13 @@ export const db = {
 
   async getAllDevices(limit: number = 20) {
     const cacheKey = `devices:all:${limit}`;
-    const cached = await cache.get<any[]>(cacheKey);
+    const cached = await cache.get<Row[]>(cacheKey);
     if (cached) return cached;
 
     const locked = await cache.acquireLock(cacheKey, 5);
     if (!locked) {
       await new Promise(r => setTimeout(r, 100));
-      return await cache.get<any[]>(cacheKey) || [];
+      return await cache.get<Row[]>(cacheKey) || [];
     }
 
     try {
@@ -76,9 +95,13 @@ export const db = {
     }
   },
 
+  /**
+   * FIX: now includes tenant_id so callers can enforce tenant isolation in a
+   * single query — eliminates the previous double round-trip to device_projections.
+   */
   async getDeviceTelemetry(deviceId: string) {
     const result = await cbQuery(
-      `SELECT device_id, temperature, humidity, recorded_at, updated_at, version
+      `SELECT device_id, tenant_id, temperature, humidity, recorded_at, updated_at, version
        FROM device_telemetry_latest
        WHERE device_id = $1`,
       [deviceId]
@@ -86,15 +109,43 @@ export const db = {
     return result.rows[0] || null;
   },
 
+  /**
+   * FIX (N+1): batch-fetches telemetry for multiple device IDs in a single
+   * query using ANY($1::uuid[]).  Optionally filters by tenant_id so that
+   * tenant isolation is enforced inside the DB rather than in application code.
+   */
+  async getManyDeviceTelemetry(deviceIds: string[], tenantId?: string) {
+    if (deviceIds.length === 0) return [];
+    if (tenantId) {
+      const result = await cbQuery(
+        `SELECT t.device_id, t.tenant_id, t.temperature, t.humidity,
+                t.recorded_at, t.updated_at, t.version
+         FROM device_telemetry_latest t
+         WHERE t.device_id = ANY($1::uuid[])
+           AND t.tenant_id = $2`,
+        [deviceIds, tenantId]
+      );
+      return result.rows;
+    }
+    const result = await cbQuery(
+      `SELECT device_id, tenant_id, temperature, humidity,
+              recorded_at, updated_at, version
+       FROM device_telemetry_latest
+       WHERE device_id = ANY($1::uuid[])`,
+      [deviceIds]
+    );
+    return result.rows;
+  },
+
   async getAllTelemetry(limit: number = 20, tenantId?: string) {
     const cacheKey = `telemetry:all:${tenantId || "global"}:${limit}`;
-    const cached = await cache.get<any[]>(cacheKey);
+    const cached = await cache.get<Row[]>(cacheKey);
     if (cached) return cached;
 
     const locked = await cache.acquireLock(cacheKey, 5);
     if (!locked) {
       await new Promise(r => setTimeout(r, 100));
-      return await cache.get<any[]>(cacheKey) || [];
+      return await cache.get<Row[]>(cacheKey) || [];
     }
 
     try {
@@ -148,7 +199,7 @@ export const db = {
 
   async getTelemetryHistory(deviceId: string, limit = 50, tenantId?: string) {
     const queryFn = tenantId
-      ? (text: string, values: any[]) => tenantQuery(tenantId, text, values)
+      ? (text: string, values: unknown[]) => tenantQuery(tenantId, text, values)
       : cbQuery;
     const result = await queryFn(
       `SELECT device_id, temperature, humidity, recorded_at
@@ -158,7 +209,7 @@ export const db = {
        LIMIT $2`,
       [deviceId, limit]
     );
-    return result.rows.map((r: any) => ({
+    return result.rows.map((r: Row) => ({
       deviceId:    r.device_id,
       temperature: r.temperature,
       humidity:    r.humidity,
@@ -168,13 +219,13 @@ export const db = {
 
   async getAllDevicesWithTelemetry(limit: number = 20, tenantId?: string) {
     const cacheKey = `devices:telemetry:${tenantId || "global"}:${limit}`;
-    const cached = await cache.get<any[]>(cacheKey);
+    const cached = await cache.get<Row[]>(cacheKey);
     if (cached) return cached;
 
     const locked = await cache.acquireLock(cacheKey, 5);
     if (!locked) {
       await new Promise(r => setTimeout(r, 100));
-      return await cache.get<any[]>(cacheKey) || [];
+      return await cache.get<Row[]>(cacheKey) || [];
     }
 
     try {
@@ -222,7 +273,7 @@ export const db = {
     }
 
     const fetchLimit = first + 1;
-    let rows: any[];
+    let rows: Row[];
 
     if (tenantId && afterTimestamp) {
       const result = await cbQuery(
@@ -264,28 +315,28 @@ export const db = {
     const hasNextPage = rows.length > first;
     const items = hasNextPage ? rows.slice(0, first) : rows;
 
-    let totalCount = 0;
-    if (tenantId) {
-      const countResult = await cbQuery(
-        "SELECT COUNT(*) FROM device_projections WHERE tenant_id = $1",
-        [tenantId]
-      );
-      totalCount = parseInt(countResult.rows[0].count, 10);
-    } else {
-      const countResult = await cbQuery("SELECT COUNT(*) FROM device_projections");
-      totalCount = parseInt(countResult.rows[0].count, 10);
+    // FIX (COUNT*): total count is cached in Redis for 60 s to avoid a full
+    // table scan on every paginated request.  Acceptable staleness for UX.
+    const countKey = `devices:count:${tenantId || "global"}`;
+    let totalCount = await cache.get<number>(countKey);
+    if (totalCount === null) {
+      const countResult = tenantId
+        ? await cbQuery("SELECT COUNT(*) FROM device_projections WHERE tenant_id = $1", [tenantId])
+        : await cbQuery("SELECT COUNT(*) FROM device_projections");
+      totalCount = parseInt(countResult.rows[0].count as string, 10);
+      await cache.set(countKey, totalCount, 60);
     }
 
-    const edges = items.map((row: any) => ({
-      cursor: Buffer.from(row.created_at.toISOString()).toString("base64"),
+    const edges = items.map((row: Row) => ({
+      cursor: Buffer.from((row.created_at as Date).toISOString()).toString("base64"),
       node: {
         deviceId:     row.device_id,
         tenantId:     row.tenant_id,
         serialNumber: row.serial_number,
-        createdAt:    new Date(row.created_at).toISOString(),
+        createdAt:    (row.created_at as Date).toISOString(),
         temperature:  row.temperature ?? null,
         humidity:     row.humidity ?? null,
-        recordedAt:   row.recorded_at ? new Date(row.recorded_at).toISOString() : null,
+        recordedAt:   row.recorded_at ? (row.recorded_at as Date).toISOString() : null,
         version:      row.version ?? null,
       },
     }));
@@ -301,6 +352,7 @@ export const db = {
       },
     };
   },
+
   async createDevice(input: { serialNumber: string; tenantId: string }) {
     const result = await cbQuery(
       `INSERT INTO device_projections (device_id, tenant_id, serial_number, created_at)
@@ -312,7 +364,7 @@ export const db = {
       deviceId:     result.rows[0].device_id,
       tenantId:     result.rows[0].tenant_id,
       serialNumber: result.rows[0].serial_number,
-      createdAt:    new Date(result.rows[0].created_at).toISOString(),
+      createdAt:    (result.rows[0].created_at as Date).toISOString(),
     };
   },
 
@@ -328,7 +380,7 @@ export const db = {
       deviceId:     result.rows[0].device_id,
       tenantId:     result.rows[0].tenant_id,
       serialNumber: result.rows[0].serial_number,
-      createdAt:    new Date(result.rows[0].created_at).toISOString(),
+      createdAt:    (result.rows[0].created_at as Date).toISOString(),
     };
   },
 
@@ -340,4 +392,3 @@ export const db = {
   },
 
 };
-

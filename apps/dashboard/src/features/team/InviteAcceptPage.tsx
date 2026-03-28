@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import { useAuth0 } from "@auth0/auth0-react";
-import { getAccessTokenSilently } from "../../lib/auth0";
+import { getAccessTokenSilently, loginWithRedirect } from "../../lib/auth0";
+import { BrandLogo } from "../../shared/components/BrandLogo";
 
 const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL || "http://localhost:3000";
 
@@ -10,20 +11,18 @@ type Stage = "loading" | "unauthenticated" | "ready" | "accepting" | "success" |
 export function InviteAcceptPage() {
   const [searchParams]             = useSearchParams();
   const token                      = searchParams.get("token") ?? "";
-  const { isAuthenticated, isLoading, loginWithRedirect } = useAuth0();
+  const { isAuthenticated, isLoading } = useAuth0();
 
-  const [stage,      setStage]      = useState<Stage>("loading");
-  const [errorMsg,   setErrorMsg]   = useState<string>("");
+  const [stage,      setStage]      = useState<Stage>(() => (token ? "loading" : "error"));
+  const [errorMsg,   setErrorMsg]   = useState<string>(() =>
+    token ? "" : "No invite token in the URL."
+  );
   const [tenantName, setTenantName] = useState<string>("");
   const [role,       setRole]       = useState<string>("");
 
   // Step 1: Fetch invite info (public endpoint — no auth needed)
   useEffect(() => {
-    if (!token) {
-      setStage("error");
-      setErrorMsg("No invite token in the URL.");
-      return;
-    }
+    if (!token) return;
     if (isLoading) return; // Wait for Auth0 to resolve
 
     (async () => {
@@ -96,11 +95,11 @@ export function InviteAcceptPage() {
       <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-700 p-8 shadow-sm text-center">
 
         {/* Brand mark */}
-        <div className="flex justify-center mb-6">
-          <div className="w-12 h-12 bg-green-600 rounded-xl flex items-center justify-center">
-            <span className="text-white text-xl font-bold">G</span>
-          </div>
-        </div>
+        <BrandLogo
+          showWordmark={false}
+          className="flex justify-center mb-6"
+          markClassName="h-12 w-12"
+        />
 
         {(stage === "loading" || isLoading) && (
           <p className="text-gray-500 dark:text-gray-400">Checking invite…</p>

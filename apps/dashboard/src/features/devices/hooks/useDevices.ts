@@ -1,10 +1,22 @@
 ﻿import { useQuery } from "@apollo/client/react";
-import { GET_DEVICES, GET_DEVICE, GET_DEVICE_TELEMETRY_HISTORY, SEARCH_DEVICES } from "../queries/devices.graphql";
+import { GET_DEVICES, GET_DEVICE, GET_DEVICE_TELEMETRY_HISTORY } from "../queries/devices.graphql";
 import type { Device, DeviceTelemetryHistory } from "../types";
 export type { Device, DeviceTelemetryHistory };
 
+interface DevicesQueryData {
+    devices: Device[];
+}
+
+interface DeviceQueryData {
+    device: Device | null;
+}
+
+interface DeviceTelemetryHistoryQueryData {
+    deviceTelemetryHistory: DeviceTelemetryHistory[];
+}
+
 export function useDeviceTelemetryHistory(deviceId: string, limit: number = 50) {
-    const { data, loading, error } = useQuery(GET_DEVICE_TELEMETRY_HISTORY, {
+    const { data, loading, error } = useQuery<DeviceTelemetryHistoryQueryData>(GET_DEVICE_TELEMETRY_HISTORY, {
         variables: { deviceId, limit },
         skip: !deviceId,
         pollInterval: 30000,
@@ -17,7 +29,7 @@ export function useDeviceTelemetryHistory(deviceId: string, limit: number = 50) 
 }
 
 export function useDevices(limit = 50) {
-    const { data, loading, error, refetch } = useQuery(GET_DEVICES, {
+    const { data, loading, error, refetch } = useQuery<DevicesQueryData>(GET_DEVICES, {
         variables: { limit },
     });
     return {
@@ -29,7 +41,7 @@ export function useDevices(limit = 50) {
 }
 
 export function useDevice(deviceId: string) {
-    const { data, loading, error } = useQuery(GET_DEVICE, {
+    const { data, loading, error } = useQuery<DeviceQueryData>(GET_DEVICE, {
         variables: { deviceId },
         skip: !deviceId,
     });
@@ -40,15 +52,16 @@ export function useDevice(deviceId: string) {
     };
 }
 
-export function useSearchDevices(query: string, limit = 20) {
-    const { data, loading, error } = useQuery(SEARCH_DEVICES, {
-        variables: { query, limit },
-        skip: query.trim().length < 2,
-    });
-    return {
-        results: (data?.searchDevices || []) as Device[],
-        loading,
-        error,
-    };
-}
+export function useSearchDevices(search: string, limit = 500) {
+    const { devices, loading, error } = useDevices(limit);
+    const needle = search.trim().toLowerCase();
 
+    const results = needle.length < 2
+        ? devices
+        : devices.filter((device) =>
+            device.serialNumber.toLowerCase().includes(needle) ||
+            device.deviceId.toLowerCase().includes(needle)
+        );
+
+    return { results, loading, error };
+}

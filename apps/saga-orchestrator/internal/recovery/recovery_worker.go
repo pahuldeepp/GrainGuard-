@@ -119,6 +119,8 @@ func (w *RecoveryWorker) retryOrCompensate(ctx context.Context, sagaID string, s
 	correlationID := saga.CorrelationID
 
 	switch saga.Status {
+	case domain.StatusStarted, domain.StatusCompleted, domain.StatusFailed:
+		return
 
 	case domain.StatusInProgress:
 		// Retry the last command based on current step

@@ -24,13 +24,13 @@ jest.mock("../../lib/auth", () => ({
 }));
 
 import { webhooksRouter } from "../webhooks";
-import { pool } from "../../lib/db";
+import { writePool } from "../../lib/db";
 
 const app = express();
 app.use(express.json());
 app.use(webhooksRouter);
 
-const mockPool = pool as jest.Mocked<typeof pool>;
+const mockPool = writePool as unknown as { query: jest.Mock };
 
 describe("GET /webhooks", () => {
   it("lists endpoints without exposing secrets", async () => {

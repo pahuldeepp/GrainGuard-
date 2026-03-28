@@ -20,7 +20,7 @@ const app = express();
 app.use(express.json());
 app.use(apiKeysRouter);
 
-const mockPool = pool as jest.Mocked<typeof pool>;
+const mockPool = pool as unknown as { query: jest.Mock };
 
 describe("GET /api-keys", () => {
   it("lists active keys for the tenant", async () => {

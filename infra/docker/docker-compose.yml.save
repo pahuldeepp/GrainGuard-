@@ -1,0 +1,1029 @@
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: grainguard-postgres
+    restart: unless-stopped
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_replication_slots=10
+      - -c
+      - max_wal_senders=10
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: grainguard
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../../apps/telemetry-service/migrations:/docker-entrypoint-initdb.d
+    networks:
+      - grainguard-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d grainguard"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  postgres-read:
+    image: postgres:16-alpine
+    container_name: grainguard-postgres-read
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: grainguard_read
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata_read:/var/lib/postgresql/data
+      - ../../apps/read-model-builder/migrations:/docker-entrypoint-initdb.d
+    networks:
+      - grainguard-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d grainguard_read"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: grainguard-kafka
+    restart: unless-stopped
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9094
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:9093,CONTROLLER://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - grainguard-net
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9093"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  kafka-connect:
+    image: debezium/connect:2.5
+    container_name: grainguard-kafka-connect
+    restart: unless-stopped
+    ports:
+      - "8083:8083"
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: grainguard-connect
+      CONFIG_STORAGE_TOPIC: grainguard_connect_configs
+      OFFSET_STORAGE_TOPIC: grainguard_connect_offsets
+      STATUS_STORAGE_TOPIC: grainguard_connect_status
+      CONFIG_STORAGE_REPLICATION_FACTOR: "1"
+      OFFSET_STORAGE_REPLICATION_FACTOR: "1"
+      STATUS_STORAGE_REPLICATION_FACTOR: "1"
+      KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      REST_ADVERTISED_HOST_NAME: kafka-connect
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - grainguard-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8083/connectors || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # db-migrate: applies all pending *.up.sql migrations on every startup.
+  # Idempotent — uses a schema_migrations table to skip already-applied files.
+  db-migrate:
+    image: postgres:16-alpine
+    container_name: grainguard-db-migrate
+    restart: "no"
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: grainguard
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      MIGRATIONS_DIR: /migrations
+    volumes:
+      - ../../apps/telemetry-service/migrations:/migrations:ro
+      - ../../infra/scripts/migrate.sh:/migrate.sh:ro
+    entrypoint: ["sh", "/migrate.sh"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - grainguard-net
+
+  # Bootstraps the Debezium Postgres CDC connector on first start.
+  # Runs once, exits 0 on success (or if connector already registered).
+  connector-init:
+    image: curlimages/curl:8.7.1.5.0
+    container_name: grainguard-connector-init
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "[connector-init] waiting for Kafka Connect REST API..."
+        until curl -sf http://kafka-connect:8083/connectors > /dev/null; do
+          sleep 3
+        done
+        echo "[connector-init] registering grainguard-postgres-cdc connector..."
+        curl -sf -X POST http://kafka-connect:8083/connectors \
+          -H 'Content-Type: application/json' \
+          -d '{
+            "name": "grainguard-postgres-cdc",
+            "config": {
+              "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+              "tasks.max": "1",
+              "database.hostname": "postgres",
+              "database.port": "5432",
+              "database.user": "postgres",
+              "database.password": "postgres",
+              "database.dbname": "grainguard",
+              "topic.prefix": "grainguard",
+              "plugin.name": "pgoutput",
+              "table.include.list": "public.devices,public.tenants,public.tenant_users,public.telemetry_readings",
+              "publication.autocreate.mode": "filtered",
+              "slot.name": "grainguard_debezium"
+            }
+          }' \
+          && echo "[connector-init] connector registered successfully" \
+          || echo "[connector-init] connector already exists or registration failed (non-fatal)"
+    depends_on:
+      kafka-connect:
+        condition: service_healthy
+    networks:
+      - grainguard-net
+
+  # ── PgBouncer Write Pool ─────────────────────────────────────────────
+  # All write services connect to pgbouncer-write:5432 instead of postgres:5432
+  pgbouncer-write:
+    image: edoburu/pgbouncer:1.22.0
+    container_name: grainguard-pgbouncer-write
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/grainguard
+      POOL_MODE: transaction
+      DEFAULT_POOL_SIZE: "50"
+      MIN_POOL_SIZE: "10"
+      RESERVE_POOL_SIZE: "10"
+      MAX_CLIENT_CONN: "1000"
+      MAX_DB_CONNECTIONS: "60"
+      SERVER_IDLE_TIMEOUT: "300"
+      QUERY_TIMEOUT: "30"
+      AUTH_TYPE: md5
+    ports:
+      - "6432:6432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - grainguard-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── PgBouncer Read Pool ─────────────────────────────────────────────
+  pgbouncer-read:
+    image: edoburu/pgbouncer:1.22.0
+    container_name: grainguard-pgbouncer-read
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres-read:5432/grainguard_read
+      POOL_MODE: transaction
+      DEFAULT_POOL_SIZE: "80"
+      MIN_POOL_SIZE: "15"
+      RESERVE_POOL_SIZE: "15"
+      MAX_CLIENT_CONN: "1500"
+      MAX_DB_CONNECTIONS: "100"
+      SERVER_IDLE_TIMEOUT: "300"
+      QUERY_TIMEOUT: "15"
+      AUTH_TYPE: md5
+    ports:
+      - "6433:6432"
+    depends_on:
+      postgres-read:
+        condition: service_healthy
+    networks:
+      - grainguard-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis Cluster (6 nodes: 3 masters + 3 replicas) ────────────────
+  redis-node-1:
+    image: redis:7
+    container_name: grainguard-redis-1
+    restart: unless-stopped
+    command: >
+      redis-server
+      --port 6379
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-node-1:/data
+    networks:
+      - grainguard-net
+
+  redis-node-2:
+    image: redis:7
+    container_name: grainguard-redis-2
+    restart: unless-stopped
+    command: >
+      redis-server
+      --port 6379
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-node-2:/data
+    networks:
+      - grainguard-net
+
+  redis-node-3:
+    image: redis:7
+    container_name: grainguard-redis-3
+    restart: unless-stopped
+    command: >
+      redis-server
+      --port 6379
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-node-3:/data
+    networks:
+      - grainguard-net
+
+  redis-node-4:
+    image: redis:7
+    container_name: grainguard-redis-4
+    restart: unless-stopped
+    command: >
+      redis-server
+      --port 6379
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-node-4:/data
+    networks:
+      - grainguard-net
+
+  redis-node-5:
+    image: redis:7
+    container_name: grainguard-redis-5
+    restart: unless-stopped
+    command: >
+      redis-server
+      --port 6379
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-node-5:/data
+    networks:
+      - grainguard-net
+
+  redis-node-6:
+    image: redis:7
+    container_name: grainguard-redis-6
+    restart: unless-stopped
+    command: >
+      redis-server
+      --port 6379
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-node-6:/data
+    networks:
+      - grainguard-net
+
+  # Initialize the Redis cluster after all nodes are up
+  redis-cluster-init:
+    image: redis:7
+    container_name: grainguard-redis-cluster-init
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting for Redis nodes..."
+        sleep 10
+        redis-cli --cluster create \
+          redis-node-1:6379 redis-node-2:6379 redis-node-3:6379 \
+          redis-node-4:6379 redis-node-5:6379 redis-node-6:6379 \
+          --cluster-replicas 1 --cluster-yes \
+          || echo "Cluster already initialized"
+    depends_on:
+      - redis-node-1
+      - redis-node-2
+      - redis-node-3
+      - redis-node-4
+      - redis-node-5
+      - redis-node-6
+    networks:
+      - grainguard-net
+
+  # Keep single-node Redis for local dev simplicity (apps default to this)
+  redis:
+    image: redis:7
+    container_name: grainguard-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - grainguard-net
+
+  # ── Redis Cluster (3 masters + 3 replicas) ────────────────────────────────
+  # Use for staging/prod. Local dev can still use single-node redis above.
+  redis-node-1:
+    image: redis:7-alpine
+    container_name: grainguard-redis-1
+    restart: unless-stopped
+    command: >
+      redis-server --port 6379 --cluster-enabled yes
+      --cluster-config-file nodes.conf --cluster-node-timeout 5000
+      --cluster-announce-hostname redis-node-1
+      --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes: [redis-node-1:/data]
+    networks: [grainguard-net]
+
+  redis-node-2:
+    image: redis:7-alpine
+    container_name: grainguard-redis-2
+    restart: unless-stopped
+    command: >
+      redis-server --port 6379 --cluster-enabled yes
+      --cluster-config-file nodes.conf --cluster-node-timeout 5000
+      --cluster-announce-hostname redis-node-2
+      --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes: [redis-node-2:/data]
+    networks: [grainguard-net]
+
+  redis-node-3:
+    image: redis:7-alpine
+    container_name: grainguard-redis-3
+    restart: unless-stopped
+    command: >
+      redis-server --port 6379 --cluster-enabled yes
+      --cluster-config-file nodes.conf --cluster-node-timeout 5000
+      --cluster-announce-hostname redis-node-3
+      --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes: [redis-node-3:/data]
+    networks: [grainguard-net]
+
+  redis-node-4:
+    image: redis:7-alpine
+    container_name: grainguard-redis-4
+    restart: unless-stopped
+    command: >
+      redis-server --port 6379 --cluster-enabled yes
+      --cluster-config-file nodes.conf --cluster-node-timeout 5000
+      --cluster-announce-hostname redis-node-4
+      --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes: [redis-node-4:/data]
+    networks: [grainguard-net]
+
+  redis-node-5:
+    image: redis:7-alpine
+    container_name: grainguard-redis-5
+    restart: unless-stopped
+    command: >
+      redis-server --port 6379 --cluster-enabled yes
+      --cluster-config-file nodes.conf --cluster-node-timeout 5000
+      --cluster-announce-hostname redis-node-5
+      --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes: [redis-node-5:/data]
+    networks: [grainguard-net]
+
+  redis-node-6:
+    image: redis:7-alpine
+    container_name: grainguard-redis-6
+    restart: unless-stopped
+    command: >
+      redis-server --port 6379 --cluster-enabled yes
+      --cluster-config-file nodes.conf --cluster-node-timeout 5000
+      --cluster-announce-hostname redis-node-6
+      --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes: [redis-node-6:/data]
+    networks: [grainguard-net]
+
+  redis-cluster-init:
+    image: redis:7-alpine
+    container_name: grainguard-redis-cluster-init
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting for all Redis nodes..."
+        for node in redis-node-1 redis-node-2 redis-node-3 redis-node-4 redis-node-5 redis-node-6; do
+          until redis-cli -h $$node ping 2>/dev/null | grep -q PONG; do
+            echo "Waiting for $$node..."; sleep 2
+          done
+          echo "$$node is ready"
+        done
+        echo "Creating Redis cluster..."
+        redis-cli --cluster create \
+          redis-node-1:6379 redis-node-2:6379 redis-node-3:6379 \
+          redis-node-4:6379 redis-node-5:6379 redis-node-6:6379 \
+          --cluster-replicas 1 --cluster-yes \
+          && echo "Redis cluster created" \
+          || echo "Redis cluster already initialized"
+    depends_on:
+      - redis-node-1
+      - redis-node-2
+      - redis-node-3
+      - redis-node-4
+      - redis-node-5
+      - redis-node-6
+    networks: [grainguard-net]
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.6.1
+    container_name: grainguard-schema-registry
+    restart: unless-stopped
+    ports:
+      - "8082:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - grainguard-net
+
+  telemetry-service:
+    build:
+      context: ../..
+      dockerfile: apps/telemetry-service/Dockerfile
+    container_name: grainguard-telemetry
+    restart: unless-stopped
+    ports:
+      - "50051:50051"
+    volumes:
+      - ../certs:/certs
+    environment:
+      WRITE_DB_URL: postgres://postgres:postgres@pgbouncer-write:5432/grainguard?sslmode=disable
+      KAFKA_BROKERS: kafka:9092
+      JWKS_URL: https://dev-dz6bl3nngdeib7ro.us.auth0.com/.well-known/jwks.json
+      JWT_ISSUER: https://dev-dz6bl3nngdeib7ro.us.auth0.com/
+      JWT_AUDIENCE: https://api.grainguard.com
+      AUTH_ENABLED: "false"
+      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
+    depends_on:
+      pgbouncer-write:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - grainguard-net
+
+  cdc-transformer:
+    build:
+      context: ../..
+      dockerfile: apps/cdc-transformer/Dockerfile
+    container_name: grainguard-cdc-transformer
+    restart: unless-stopped
+    ports:
+      - "2113:2112"
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      CDC_SOURCE_TOPIC: grainguard.public.telemetry_readings
+      TARGET_TOPIC: telemetry.events
+      KAFKA_GROUP_ID: cdc-transformer
+      JOB_QUEUE_SIZE: "4096"
+      PUBLISH_QUEUE_SIZE: "4096"
+      COMMIT_QUEUE_SIZE: "4096"
+      WORKER_COUNT: "24"
+      PUBLISHER_COUNT: "8"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - grainguard-net
+
+  read-model-builder:
+    build:
+      context: ../..
+      dockerfile: apps/read-model-builder/Dockerfile
+    container_name: grainguard-read-model-builder
+    restart: unless-stopped
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_TOPIC: telemetry.events
+      KAFKA_GROUP_ID: read-model-builder-v2
+      READ_DB_URL: postgres://postgres:postgres@pgbouncer-read:6432/grainguard_read?sslmode=disable
+      REDIS_ADDR: redis:6379
+      WORKER_COUNT: 12
+      METRICS_PORT: "2112"
+      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres-read:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    expose:
+      - "2112"
+    networks:
+      - grainguard-net
+
+  dlq-reprocessor:
+    build:
+      context: ../..
+      dockerfile: apps/dlq-reprocessor/Dockerfile
+    container_name: grainguard-dlq-reprocessor
+    restart: unless-stopped
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      DLQ_TOPIC: telemetry.events.dlq
+      TARGET_TOPIC: telemetry.events
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - grainguard-net
+
+  saga-orchestrator:
+    build:
+      context: ../..
+      dockerfile: apps/saga-orchestrator/Dockerfile
+    container_name: grainguard-saga-orchestrator
+    restart: unless-stopped
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      SAGA_DB_URL: postgres://postgres:postgres@pgbouncer-write:5432/grainguard?sslmode=disable
+      SAGA_EVENTS_TOPIC: device.events
+      SAGA_COMMANDS_TOPIC: device.commands
+      SAGA_CONSUMER_GROUP: saga-orchestrator
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - grainguard-net
+
+  bff:
+    build:
+      context: ../..
+      dockerfile: apps/bff/Dockerfile
+    container_name: grainguard-bff
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      - READ_DATABASE_URL=postgres://postgres:postgres@pgbouncer-read:6432/grainguard_read
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - PORT=4000
+      - JWKS_URL=https://dev-dz6bl3nngdeib7ro.us.auth0.com/.well-known/jwks.json
+      - JWT_ISSUER=https://dev-dz6bl3nngdeib7ro.us.auth0.com/
+      - JWT_AUDIENCE=https://api.grainguard.com
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - CASSANDRA_HOSTS=cassandra
+      - CASSANDRA_KEYSPACE=grainguard_telemetry
+      - NODE_ENV=development
+      - AUTH_ENABLED=false
+    depends_on:
+      - postgres-read
+      - redis
+      - elasticsearch
+    networks:
+      - grainguard-net
+
+  gateway:
+    build:
+      context: ../..
+      dockerfile: apps/gateway/Dockerfile
+    container_name: grainguard-gateway
+    restart: unless-stopped
+    volumes:
+      - ../certs:/certs
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      READ_DATABASE_URL: postgres://postgres:postgres@pgbouncer-read:6432/grainguard_read?sslmode=disable
+      GRPC_TARGET: dns:///telemetry-service:50051
+      JWKS_URL: https://dev-dz6bl3nngdeib7ro.us.auth0.com/.well-known/jwks.json
+      JWT_ISSUER: https://dev-dz6bl3nngdeib7ro.us.auth0.com/
+      JWT_AUDIENCE: https://api.grainguard.com
+      AUTH_ENABLED: "false"
+      NODE_ENV: development
+      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
+      ALLOWED_ORIGINS: "http://localhost:5173,http://localhost:5174"
+      DASHBOARD_URL: "http://localhost:5173"
+      # Write DB (Postgres primary)
+      WRITE_DB_HOST: pgbouncer-write
+      WRITE_DB_PORT: "6432"
+      WRITE_DB_NAME: grainguard
+      WRITE_DB_USER: postgres
+      WRITE_DB_PASSWORD: postgres
+      # Stripe — override via root .env
+      STRIPE_SECRET_KEY: "${STRIPE_SECRET_KEY:-sk_test_placeholder}"
+      STRIPE_WEBHOOK_SECRET: "${STRIPE_WEBHOOK_SECRET:-whsec_placeholder}"
+      STRIPE_PRICE_STARTER: "${STRIPE_PRICE_STARTER:-price_starter_placeholder}"
+      STRIPE_PRICE_PROFESSIONAL: "${STRIPE_PRICE_PROFESSIONAL:-price_pro_placeholder}"
+      STRIPE_PRICE_ENTERPRISE: "${STRIPE_PRICE_ENTERPRISE:-price_enterprise_placeholder}"
+      # Auth0 M2M — override via root .env
+      AUTH0_DOMAIN: "${AUTH0_DOMAIN:-dev-dz6bl3nngdeib7ro.us.auth0.com}"
+      AUTH0_MANAGEMENT_CLIENT_ID: "${AUTH0_MANAGEMENT_CLIENT_ID:-}"
+      AUTH0_MANAGEMENT_CLIENT_SECRET: "${AUTH0_MANAGEMENT_CLIENT_SECRET:-}"
+      AUTH0_M2M_AUDIENCE: "${AUTH0_MANAGEMENT_AUDIENCE:-https://dev-dz6bl3nngdeib7ro.us.auth0.com/api/v2/}"
+    depends_on:
+      redis:
+        condition: service_started
+      pgbouncer-read:
+        condition: service_healthy
+      pgbouncer-write:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      telemetry-service:
+        condition: service_started
+    ports:
+      - "8086:3000"
+    networks:
+      - grainguard-net
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: grainguard-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - grainguard-net
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grainguard-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_UNIFIED_ALERTING_ENABLED=true
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK}
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+    networks:
+      - grainguard-net
+
+  tempo:
+    image: grafana/tempo:latest
+    container_name: grainguard-tempo
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml
+    ports:
+      - "3200:3200"
+    networks:
+      - grainguard-net
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: grainguard-otel
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    depends_on:
+      - tempo
+    networks:
+      - grainguard-net
+
+  # keycloak: removed — the app uses Auth0 exclusively.
+  #   Keeping this service running added 60+ s to startup and consumed
+  #   significant RAM for zero functional benefit.
+  #   Re-add if multi-IdP support is required in the future.
+
+  elasticsearch:
+    image: elasticsearch:8.13.0
+    container_name: grainguard-elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    networks:
+      - grainguard-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  kibana:
+    image: kibana:8.13.0
+    container_name: grainguard-kibana
+    restart: unless-stopped
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - grainguard-net
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: grainguard-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: grainguard
+      RABBITMQ_DEFAULT_PASS: grainguard
+      RABBITMQ_DEFAULT_VHOST: grainguard
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - grainguard-net
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: grainguard-loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - grainguard-net
+
+  # memcached: removed — no application code connects to it.
+  #   Redis handles all caching.  Re-add if a dedicated session cache
+  #   with different eviction semantics is needed.
+
+  search-indexer:
+    build:
+      context: ../..
+      dockerfile: apps/search-indexer/Dockerfile
+    container_name: grainguard-search-indexer
+    restart: unless-stopped
+    environment:
+x
+exit
+      KAFKA_BROKERS: kafka:9092
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      TELEMETRY_TOPIC: telemetry.events
+      DEVICE_TOPIC: device.events
+      KAFKA_GROUP_ID: search-indexer
+    depends_on:
+      kafka:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - grainguard-net
+
+
+  jobs-worker:
+    build:
+      context: ../..
+      dockerfile: apps/jobs-worker/Dockerfile
+    container_name: grainguard-jobs-worker
+    restart: unless-stopped
+    environment:
+      RABBITMQ_URL: amqp://grainguard:grainguard@rabbitmq:5672/grainguard
+      DATABASE_URL: postgres://postgres:postgres@pgbouncer-write:5432/grainguard?sslmode=disable
+      # Set RESEND_API_KEY and EMAIL_FROM via root .env to enable real email delivery
+      RESEND_API_KEY: "${RESEND_API_KEY:-}"
+      EMAIL_FROM: "${EMAIL_FROM:-GrainGuard <noreply@grainguard.com>}"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - grainguard-net
+
+
+
+  cassandra:
+    image: cassandra:4.1
+    container_name: grainguard-cassandra
+    ports:
+      - '9042:9042'
+    environment:
+      CASSANDRA_CLUSTER_NAME: grainguard
+      CASSANDRA_DC: dc1
+      CASSANDRA_RACK: rack1
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+      MAX_HEAP_SIZE: 512M
+      HEAP_NEWSIZE: 128M
+    volumes:
+      - cassandra-data:/var/lib/cassandra
+    healthcheck:
+      test: ["CMD", "cqlsh", "-e", "describe keyspaces"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    networks:
+      - grainguard-net
+
+  cassandra-writer:
+    build:
+      context: ../../
+      dockerfile: apps/cassandra-writer/Dockerfile
+    container_name: grainguard-cassandra-writer
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_TOPIC: telemetry.events
+      KAFKA_GROUP_ID: cassandra-writer
+      CASSANDRA_HOSTS: cassandra
+      CASSANDRA_KEYSPACE: grainguard_telemetry
+    depends_on:
+      kafka:
+        condition: service_healthy
+      cassandra:
+        condition: service_healthy
+    networks:
+      - grainguard-net
+    restart: unless-stopped
+  risk-engine:
+    build:
+      context: ../..
+      dockerfile: apps/risk-engine/Dockerfile
+    container_name: grainguard-risk-engine
+    restart: unless-stopped
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      TELEMETRY_TOPIC: telemetry.events
+      RISK_SCORES_TOPIC: risk.scores
+      KAFKA_GROUP_ID: risk-engine
+      RABBITMQ_URL: amqp://grainguard:grainguard@rabbitmq:5672/grainguard
+    depends_on:
+      kafka:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - grainguard-net
+  ingest-service:
+    build:
+      context: ../../
+      dockerfile: apps/ingest-service/Dockerfile
+    container_name: grainguard-ingest-service
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_TOPIC: telemetry.events
+      KAFKA_BATCH_SIZE: "200"
+      KAFKA_BATCH_TIMEOUT_MS: "5"
+      DATABASE_URL: postgres://postgres:postgres@pgbouncer-write:5432/grainguard?sslmode=disable
+      REDIS_ADDR: redis:6379
+      DB_MAX_CONNS: "10"
+      REDIS_POOL_SIZE: "20"
+      API_KEY_CACHE_TTL_SECONDS: "300"
+      PORT: "3001"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      pgbouncer-write:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - grainguard-net
+
+  workflow-alerts:
+    build:
+      context: ../..
+      dockerfile: apps/workflow-alerts/Dockerfile
+    container_name: grainguard-workflow-alerts
+    restart: unless-stopped
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      RISK_SCORES_TOPIC: risk.scores
+      KAFKA_GROUP_ID: workflow-alerts
+      RABBITMQ_URL: amqp://grainguard:grainguard@rabbitmq:5672/grainguard
+    depends_on:
+      kafka:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - grainguard-net
+
+  asset-registry:
+    build:
+      context: ../..
+      dockerfile: apps/asset-registry/Dockerfile
+    container_name: grainguard-asset-registry
+    restart: unless-stopped
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      COMMANDS_TOPIC: device.commands
+      EVENTS_TOPIC: device.events
+      KAFKA_GROUP_ID: asset-registry
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - grainguard-net
+
+
+volumes:
+  pgdata:
+  pgdata_read:
+  kafka-data:
+  grafana-data:
+  esdata:
+  rabbitmq-data:
+  cassandra-data:
+  redis-data:      # Single-node Redis (local dev default)
+  redis-node-1:   # Redis cluster nodes (staging/prod)
+  redis-node-2:
+  redis-node-3:
+  redis-node-4:
+  redis-node-5:
+  redis-node-6:
+
+
+networks:
+  grainguard-net:
+    driver: bridge

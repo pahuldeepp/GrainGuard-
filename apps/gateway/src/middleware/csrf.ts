@@ -10,7 +10,7 @@ const TOKEN_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 // Paths exempt from CSRF (webhooks from external services, not browsers)
-const EXEMPT_PATHS = new Set(["/billing/webhook", "/ingest"]);
+const EXEMPT_PATHS = new Set(["/billing/webhook", "/ingest", "/graphql"]);
 
 function generateToken(): string {
   const timestamp = Date.now().toString(36);

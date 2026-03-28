@@ -11,21 +11,27 @@ interface Props {
 const SERIAL_REGEX = /^[A-Za-z0-9\-_]{3,64}$/;
 
 export function RegisterDeviceModal({ open, onClose, onRegistered }: Props) {
+  if (!open) return null;
+
+  return (
+    <RegisterDeviceModalContent
+      onClose={onClose}
+      onRegistered={onRegistered}
+    />
+  );
+}
+
+function RegisterDeviceModalContent({ onClose, onRegistered }: Omit<Props, "open">) {
   const [serial, setSerial] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { register, loading, error, reset } = useRegisterDevice();
 
   useEffect(() => {
-    if (open) {
-      setSerial("");
-      setValidationError(null);
-      reset();
-      setTimeout(() => inputRef.current?.focus(), 50);
-    }
-  }, [open]);
-
-  if (!open) return null;
+    reset();
+    const focusTimer = window.setTimeout(() => inputRef.current?.focus(), 50);
+    return () => window.clearTimeout(focusTimer);
+  }, [reset]);
 
   const validate = (value: string): string | null => {
     if (!value.trim()) return "Serial number is required";

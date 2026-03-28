@@ -24,6 +24,23 @@ class SearchIndexer:
     def _shutdown(self, s, f):
         self.running = False
 
+    @staticmethod
+    def _safe_deserialize(m):
+        try:
+            return json.loads(m.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return None
+
+    @staticmethod
+    def _first(mapping, *keys):
+        if not isinstance(mapping, dict):
+            return None
+        for key in keys:
+            value = mapping.get(key)
+            if value not in (None, ""):
+                return value
+        return None
+
     def connect_es(self):
         for i in range(10):
             try:
@@ -54,7 +71,6 @@ class SearchIndexer:
                     group_id=GROUP_ID,
                     auto_offset_reset="earliest",
                     enable_auto_commit=False,
-                    value_deserializer=lambda m: json.loads(m.decode("utf-8")),
                     consumer_timeout_ms=1000,
                 )
                 log.info("Connected to Kafka")
@@ -66,11 +82,12 @@ class SearchIndexer:
 
     def index_telemetry(self, event):
         try:
-            payload = event.get("payload", {})
-            device_id = event.get("aggregate_id") or payload.get("device_id")
-            tenant_id = event.get("tenant_id")
+            payload = event.get("data") or event.get("payload") or {}
+            device_id = self._first(payload, "deviceId", "device_id") or self._first(event, "aggregateId", "aggregate_id")
+            tenant_id = self._first(payload, "tenantId", "tenant_id") or self._first(event, "tenantId", "tenant_id")
             if not device_id or not tenant_id:
                 return
+            recorded_at = self._first(payload, "recordedAt", "recorded_at") or self._first(event, "occurredAt", "occurred_at")
 
             # Update current device state in device index
             self.es.update(
@@ -82,7 +99,7 @@ class SearchIndexer:
                         "tenant_id": tenant_id,
                         "temperature": payload.get("temperature"),
                         "humidity": payload.get("humidity"),
-                        "recorded_at": payload.get("recorded_at"),
+                        "recorded_at": recorded_at,
                         "status": "active",
                     },
                     "doc_as_upsert": True,
@@ -91,7 +108,7 @@ class SearchIndexer:
 
             # Write time-series entry to telemetry index
             # Use composite key so concurrent writes don't create duplicates
-            doc_id = f"{device_id}:{payload.get('recorded_at', '')}"
+            doc_id = f"{device_id}:{recorded_at or ''}"
             self.es.update(
                 index=TELEMETRY_INDEX,
                 id=doc_id,
@@ -101,7 +118,7 @@ class SearchIndexer:
                         "tenant_id": tenant_id,
                         "temperature": payload.get("temperature"),
                         "humidity": payload.get("humidity"),
-                        "recorded_at": payload.get("recorded_at"),
+                        "recorded_at": recorded_at,
                     },
                     "doc_as_upsert": True,
                 },
@@ -111,12 +128,13 @@ class SearchIndexer:
 
     def index_device(self, event):
         try:
-            payload = event.get("payload", {})
-            device_id = event.get("aggregate_id") or payload.get("device_id")
-            tenant_id = event.get("tenant_id")
+            payload = event.get("data") or event.get("payload") or {}
+            device_id = self._first(payload, "deviceId", "device_id") or self._first(event, "aggregateId", "aggregate_id")
+            tenant_id = self._first(payload, "tenantId", "tenant_id") or self._first(event, "tenantId", "tenant_id")
             if not device_id:
                 return
-            self.es.update(index=DEVICE_INDEX, id=device_id, body={"doc":{"device_id":device_id,"tenant_id":tenant_id,"serial_number":payload.get("serial_number"),"status":"registered"},"doc_as_upsert":True})
+            serial_number = self._first(payload, "serialNumber", "serial_number")
+            self.es.update(index=DEVICE_INDEX, id=device_id, body={"doc":{"device_id":device_id,"tenant_id":tenant_id,"serial_number":serial_number,"status":"registered"},"doc_as_upsert":True})
             log.info(f"Indexed device: {device_id}")
         except Exception as e:
             log.error(f"Device index error: {e}")
@@ -131,10 +149,15 @@ class SearchIndexer:
                 for msg in self.consumer:
                     if not self.running:
                         break
+                    event = self._safe_deserialize(msg.value)
+                    if event is None:
+                        log.warning("Skipping unreadable message topic=%s partition=%s offset=%s", msg.topic, msg.partition, msg.offset)
+                        self.consumer.commit()
+                        continue
                     if msg.topic == TELEMETRY_TOPIC:
-                        self.index_telemetry(msg.value)
+                        self.index_telemetry(event)
                     elif msg.topic == DEVICE_TOPIC:
-                        self.index_device(msg.value)
+                        self.index_device(event)
                     self.consumer.commit()
             except StopIteration:
                 pass

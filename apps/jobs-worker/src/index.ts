@@ -5,6 +5,7 @@ import { startWebhookWorker } from "./handlers/webhook";
 import { startExportWorker } from "./handlers/export";
 import { startAlertWorker } from "./handlers/alert";
 import { startDigestScheduler } from "./handlers/digest";
+import { startStripeWorker } from "./handlers/stripe";
 import { db } from "./db";
 
 async function main() {
@@ -18,6 +19,7 @@ async function main() {
   startExportWorker(channel);
   startAlertWorker(channel);
   startDigestScheduler(channel);
+  startStripeWorker(channel);
 
   console.log("[jobs-worker] all workers running");
 

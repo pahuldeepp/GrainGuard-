@@ -27,9 +27,9 @@ export function TelemetryChart({ history, loading }: Props) {
   }
 
   const data = history.map((p) => ({
-    time: new Date(p.recordedAt).toLocaleTimeString(),
-    temperature: parseFloat(p.temperature.toFixed(1)),
-    humidity: parseFloat(p.humidity.toFixed(1)),
+    time: p.recordedAt ? new Date(p.recordedAt).toLocaleTimeString() : "-",
+    temperature: p.temperature !== null ? parseFloat(p.temperature.toFixed(1)) : null,
+    humidity: p.humidity !== null ? parseFloat(p.humidity.toFixed(1)) : null,
   }));
 
   return (
@@ -40,7 +40,7 @@ export function TelemetryChart({ history, loading }: Props) {
         <YAxis tick={{ fontSize: 11 }} />
         <Tooltip />
         <Legend />
-        <Line type="monotone" dataKey="temperature" stroke="#ef4444" strokeWidth={2} dot={false} name="Temp (Â°C)" />
+        <Line type="monotone" dataKey="temperature" stroke="#ef4444" strokeWidth={2} dot={false} name="Temp (C)" />
         <Line type="monotone" dataKey="humidity" stroke="#3b82f6" strokeWidth={2} dot={false} name="Humidity (%)" />
       </LineChart>
     </ResponsiveContainer>

@@ -102,7 +102,7 @@ func main() {
 		WriteTimeout:   2 * time.Second,
 		RouteByLatency: len(addrs) > 1,
 	})
-	defer redisClient.Close()
+	defer redisClient.Close() //nolint:errcheck
 
 	if err := redisClient.Ping(ctx).Err(); err != nil {
 		log.Warn().Err(err).Msg("redis ping failed (cache best-effort)")
@@ -142,7 +142,7 @@ func main() {
 	defer pool.Close()
 
 	// Migrations
-	if err := libmigrate.Up(dbURL, migrations.FS, "grainguard_read"); err != nil {
+	if err := libmigrate.Up(dbURL, migrations.FS, "read_model_builder"); err != nil {
 		log.Fatal().Err(err).Msg("migration failed")
 	}
 

@@ -27,7 +27,7 @@ const app = express();
 app.use(express.json());
 app.use(ssoRouter);
 
-const mockPool = pool as jest.Mocked<typeof pool>;
+const mockPool = pool as unknown as { query: jest.Mock };
 
 describe("GET /tenants/me/sso", () => {
   it("returns unconfigured state when no org exists", async () => {

@@ -19,8 +19,8 @@ type Checker interface {
 }
 type postgresChecker struct{ pool *pgxpool.Pool }
 
-func NewPostgresChecker(pool *pgxpool.Pool) Checker { return &postgresChecker{pool} }
-func (c *postgresChecker) Name() string             { return "postgres" }
+func NewPostgresChecker(pool *pgxpool.Pool) Checker        { return &postgresChecker{pool} }
+func (c *postgresChecker) Name() string                    { return "postgres" }
 func (c *postgresChecker) Check(ctx context.Context) error { return c.pool.Ping(ctx) }
 type redisChecker struct{ client redis.UniversalClient }
 
@@ -44,15 +44,15 @@ func (c *kafkaChecker) Check(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("dial kafka %s: %w", c.addr, err)
 	}
-	conn.Close()
+	_ = conn.Close()
 	return nil
 }
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 type response struct {
-	Status string            `json:"status"`         // "ok" or "degraded"
-	Checks map[string]string `json:"checks"`         // dep name → "ok" or error msg
+	Status string            `json:"status"` // "ok" or "degraded"
+	Checks map[string]string `json:"checks"` // dep name → "ok" or error msg
 }
 
 type Handler struct{ checkers []Checker }
@@ -63,7 +63,7 @@ func NewHandler(checkers ...Checker) *Handler {
 func (h *Handler) Live(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status":"ok"}`))
+	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
 
 // Ready → /healthz/ready
@@ -113,7 +113,7 @@ func (h *Handler) Ready(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // NewServer builds a ready-to-run HTTP server on the given addr (e.g. ":8081").
@@ -122,5 +122,12 @@ func NewServer(addr string, h *Handler) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz/live", h.Live)
 	mux.HandleFunc("/healthz/ready", h.Ready)
-	return &http.Server{Addr: addr, Handler: mux}
+	return &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       5 * time.Second,
+		WriteTimeout:      5 * time.Second,
+		IdleTimeout:       30 * time.Second,
+	}
 }

@@ -46,7 +46,7 @@ func TestCreateDeviceService_Success(t *testing.T) {
 		},
 	}
 
-	svc := application.NewCreateDeviceService(repo)
+	svc := application.NewCreateDeviceService(nil, repo, nil)
 	device, err := svc.Execute(context.Background(), tenantID, serial)
 
 	if err != nil {
@@ -70,7 +70,7 @@ func TestCreateDeviceService_Success(t *testing.T) {
 }
 
 func TestCreateDeviceService_InvalidTenantID(t *testing.T) {
-	svc := application.NewCreateDeviceService(&mockDeviceRepo{})
+	svc := application.NewCreateDeviceService(nil, &mockDeviceRepo{}, nil)
 	_, err := svc.Execute(context.Background(), "not-a-uuid", "SN-0001")
 	if err == nil {
 		t.Fatal("expected error for invalid tenantID, got nil")
@@ -87,7 +87,7 @@ func TestCreateDeviceService_RepoError(t *testing.T) {
 		},
 	}
 
-	svc := application.NewCreateDeviceService(repo)
+	svc := application.NewCreateDeviceService(nil, repo, nil)
 	_, err := svc.Execute(context.Background(), tenantID, "SN-0001")
 
 	if !errors.Is(err, want) {
@@ -130,4 +130,3 @@ func TestNewDevice_SetsFields(t *testing.T) {
 		t.Errorf("CreatedAt %v not in range [%v, %v]", device.CreatedAt, before, after)
 	}
 }
-

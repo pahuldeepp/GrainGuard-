@@ -3,13 +3,14 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
 	"os"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/segmentio/kafka-go"
 	"google.golang.org/protobuf/proto"
@@ -18,23 +19,59 @@ import (
 )
 
 type OutboxWorker struct {
-	pool         *pgxpool.Pool
-	writer       *kafka.Writer
-	pollInterval time.Duration
-	batchLimit   int
-	publishConc  int
+	pool    *pgxpool.Pool
+	writers map[string]*kafka.Writer
 }
 
-func getenvInt(k string, def int) int {
-	v := os.Getenv(k)
-	if v == "" {
-		return def
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil || n <= 0 {
-		return def
-	}
-	return n
+type legacyDeviceCreatedPayload struct {
+	DeviceID  string `json:"device_id"`
+	TenantID  string `json:"tenant_id"`
+	Serial    string `json:"serial"`
+	CreatedAt string `json:"created_at"`
+}
+
+type legacyTelemetryPayload struct {
+	ID          string  `json:"id"`
+	DeviceID    string  `json:"device_id"`
+	DeviceIDAlt string  `json:"deviceId"`
+	TenantID    string  `json:"tenant_id"`
+	TenantIDAlt string  `json:"tenantId"`
+	Temperature float64 `json:"temperature"`
+	Humidity    float64 `json:"humidity"`
+	RecordedAt  string  `json:"recorded_at"`
+	RecordedAlt string  `json:"recordedAt"`
+}
+
+type legacyTelemetryEnvelope struct {
+	EventID        string                 `json:"event_id"`
+	EventIDAlt     string                 `json:"eventId"`
+	EventType      string                 `json:"event_type"`
+	EventTypeAlt   string                 `json:"eventType"`
+	AggregateID    string                 `json:"aggregate_id"`
+	AggregateIDAlt string                 `json:"aggregateId"`
+	TenantID       string                 `json:"tenant_id"`
+	TenantIDAlt    string                 `json:"tenantId"`
+	OccurredAt     string                 `json:"occurred_at"`
+	OccurredAtAlt  string                 `json:"occurredAt"`
+	Data           legacyTelemetryPayload `json:"data"`
+	Payload        legacyTelemetryPayload `json:"payload"`
+}
+
+type kafkaTelemetryEvent struct {
+	EventID     string         `json:"eventId"`
+	EventType   string         `json:"eventType"`
+	AggregateID string         `json:"aggregateId"`
+	OccurredAt  string         `json:"occurredAt"`
+	Data        map[string]any `json:"data"`
+}
+
+type kafkaDeviceEvent struct {
+	EventID          string         `json:"event_id"`
+	EventType        string         `json:"event_type"`
+	AggregateID      string         `json:"aggregate_id"`
+	TenantID         string         `json:"tenant_id"`
+	OccurredAtUnixMs int64          `json:"occurred_at_unix_ms"`
+	Payload          map[string]any `json:"payload"`
 }
 
 func NewOutboxWorker(pool *pgxpool.Pool) *OutboxWorker {
@@ -45,29 +82,173 @@ func NewOutboxWorker(pool *pgxpool.Pool) *OutboxWorker {
 
 	brokerList := strings.Split(brokers, ",")
 
-	writer := &kafka.Writer{
-		Addr:         kafka.TCP(brokerList...),
-		Topic:        "device.events",
-		Balancer:     &kafka.LeastBytes{},
-		RequiredAcks: kafka.RequireAll,
-		BatchSize:    100,
-		BatchTimeout: 10 * time.Millisecond,
+	newWriter := func(topic string) *kafka.Writer {
+		return &kafka.Writer{
+			Addr:     kafka.TCP(brokerList...),
+			Topic:    topic,
+			Balancer: &kafka.LeastBytes{},
+		}
 	}
 
 	return &OutboxWorker{
-		pool:         pool,
-		writer:       writer,
-		pollInterval: time.Duration(getenvInt("OUTBOX_POLL_MS", 200)) * time.Millisecond,
-		batchLimit:   getenvInt("OUTBOX_BATCH_LIMIT", 500),
-		publishConc:  getenvInt("OUTBOX_PUBLISH_CONCURRENCY", 20),
+		pool: pool,
+		writers: map[string]*kafka.Writer{
+			"telemetry.recorded": newWriter("telemetry.events"),
+			"device_created_v1":  newWriter("device.events"),
+		},
+	}
+}
+
+func (w *OutboxWorker) writerForEvent(eventType string) *kafka.Writer {
+	if writer, ok := w.writers[eventType]; ok {
+		return writer
+	}
+	return w.writers["telemetry.recorded"]
+}
+
+func decodeEnvelope(eventID string, eventType string, payload []byte) (*eventspb.EventEnvelope, error) {
+	var env eventspb.EventEnvelope
+	if err := proto.Unmarshal(payload, &env); err == nil {
+		return &env, nil
+	}
+
+	if eventType == "telemetry.recorded" {
+		var legacy legacyTelemetryEnvelope
+		if err := json.Unmarshal(payload, &legacy); err != nil {
+			return nil, err
+		}
+
+		data := legacy.Data
+		if data == (legacyTelemetryPayload{}) {
+			data = legacy.Payload
+		}
+
+		aggregateID := firstNonEmpty(legacy.AggregateIDAlt, legacy.AggregateID, data.DeviceIDAlt, data.DeviceID)
+		tenantID := firstNonEmpty(data.TenantIDAlt, data.TenantID, legacy.TenantIDAlt, legacy.TenantID)
+		recordedAt := firstNonEmpty(data.RecordedAlt, data.RecordedAt)
+		occurredAt := firstNonEmpty(legacy.OccurredAtAlt, legacy.OccurredAt, recordedAt)
+
+		occurredAtUnixMs := time.Now().UTC().UnixMilli()
+		if occurredAt != "" {
+			if parsed, err := time.Parse(time.RFC3339Nano, occurredAt); err == nil {
+				occurredAtUnixMs = parsed.UTC().UnixMilli()
+			} else if parsed, err := time.Parse(time.RFC3339, occurredAt); err == nil {
+				occurredAtUnixMs = parsed.UTC().UnixMilli()
+			}
+		}
+
+		return &eventspb.EventEnvelope{
+			EventId:          firstNonEmpty(legacy.EventIDAlt, legacy.EventID, eventID),
+			EventType:        "telemetry.recorded",
+			SchemaVersion:    1,
+			OccurredAtUnixMs: occurredAtUnixMs,
+			TenantId:         tenantID,
+			AggregateId:      aggregateID,
+			Payload: &eventspb.EventEnvelope_TelemetryRecordedV1{
+				TelemetryRecordedV1: &eventspb.TelemetryRecordedV1{
+					Id:          data.ID,
+					DeviceId:    firstNonEmpty(data.DeviceIDAlt, data.DeviceID, aggregateID),
+					Temperature: data.Temperature,
+					Humidity:    data.Humidity,
+					RecordedAt:  recordedAt,
+				},
+			},
+		}, nil
+	}
+
+	if eventType == "device_created_v1" {
+		var legacy legacyDeviceCreatedPayload
+		if err := json.Unmarshal(payload, &legacy); err != nil {
+			return nil, err
+		}
+
+		return &eventspb.EventEnvelope{
+			EventId:          eventID,
+			EventType:        "device_created_v1",
+			SchemaVersion:    1,
+			OccurredAtUnixMs: time.Now().UTC().UnixMilli(),
+			TenantId:         legacy.TenantID,
+			AggregateId:      legacy.DeviceID,
+			Payload: &eventspb.EventEnvelope_DeviceCreatedV1{
+				DeviceCreatedV1: &eventspb.DeviceCreatedV1{
+					DeviceId:  legacy.DeviceID,
+					TenantId:  legacy.TenantID,
+					Serial:    legacy.Serial,
+					CreatedAt: legacy.CreatedAt,
+				},
+			},
+		}, nil
+	}
+
+	return nil, fmt.Errorf("unsupported outbox event type %q", eventType)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func occurredAtRFC3339(unixMs int64) string {
+	if unixMs <= 0 {
+		return time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	return time.UnixMilli(unixMs).UTC().Format(time.RFC3339Nano)
+}
+
+func marshalForKafka(eventType string, env *eventspb.EventEnvelope) ([]byte, error) {
+	switch eventType {
+	case "telemetry.recorded":
+		telemetry := env.GetTelemetryRecordedV1()
+		if telemetry == nil {
+			return nil, fmt.Errorf("missing telemetry payload for event %s", env.GetEventId())
+		}
+
+		return json.Marshal(kafkaTelemetryEvent{
+			EventID:     env.GetEventId(),
+			EventType:   env.GetEventType(),
+			AggregateID: env.GetAggregateId(),
+			OccurredAt:  occurredAtRFC3339(env.GetOccurredAtUnixMs()),
+			Data: map[string]any{
+				"id":          telemetry.GetId(),
+				"deviceId":    telemetry.GetDeviceId(),
+				"tenantId":    env.GetTenantId(),
+				"temperature": telemetry.GetTemperature(),
+				"humidity":    telemetry.GetHumidity(),
+				"recordedAt":  telemetry.GetRecordedAt(),
+			},
+		})
+
+	case "device_created_v1":
+		device := env.GetDeviceCreatedV1()
+		if device == nil {
+			return nil, fmt.Errorf("missing device payload for event %s", env.GetEventId())
+		}
+
+		return json.Marshal(kafkaDeviceEvent{
+			EventID:          env.GetEventId(),
+			EventType:        env.GetEventType(),
+			AggregateID:      env.GetAggregateId(),
+			TenantID:         env.GetTenantId(),
+			OccurredAtUnixMs: env.GetOccurredAtUnixMs(),
+			Payload: map[string]any{
+				"device_id":     device.GetDeviceId(),
+				"tenant_id":     device.GetTenantId(),
+				"serial":        device.GetSerial(),
+				"serial_number": device.GetSerial(),
+				"created_at":    device.GetCreatedAt(),
+			},
+		})
+	default:
+		return nil, fmt.Errorf("unsupported outbox event type %q", eventType)
 	}
 }
 
 func (w *OutboxWorker) Start(ctx context.Context) {
-	log.Printf("[outbox] worker started — poll=%s batch=%d concurrency=%d",
-		w.pollInterval, w.batchLimit, w.publishConc)
-
-	ticker := time.NewTicker(w.pollInterval)
+	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -83,20 +264,28 @@ func (w *OutboxWorker) Start(ctx context.Context) {
 func (w *OutboxWorker) processBatch(ctx context.Context) {
 	tx, err := w.pool.Begin(ctx)
 	if err != nil {
-		log.Println("[outbox] tx begin error:", err)
+		log.Println("tx begin error:", err)
 		return
 	}
-	defer tx.Rollback(ctx)
+	defer func() {
+		//nolint:gosec // Rollback must complete even if the worker context is already canceled.
+		rollbackCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if rollbackErr := tx.Rollback(rollbackCtx); rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+			log.Printf("outbox worker rollback failed: %v", rollbackErr)
+		}
+	}()
 
 	rows, err := tx.Query(ctx, `
-		SELECT id, event_type, payload
+		SELECT id, event_type, payload::text
 		FROM outbox_events
 		WHERE published_at IS NULL
 		ORDER BY created_at
 		FOR UPDATE SKIP LOCKED
-		LIMIT $1`, w.batchLimit)
+		LIMIT 10`)
 	if err != nil {
-		log.Println("[outbox] query error:", err)
+		log.Println("query error:", err)
 		return
 	}
 	defer rows.Close()
@@ -110,12 +299,11 @@ func (w *OutboxWorker) processBatch(ctx context.Context) {
 	var events []event
 
 	for rows.Next() {
-		var id string
-		var eventType string
+		var id, eventType string
 		var payload []byte
 
 		if err := rows.Scan(&id, &eventType, &payload); err != nil {
-			log.Println("[outbox] scan error:", err)
+			log.Println("scan error:", err)
 			continue
 		}
 
@@ -127,7 +315,7 @@ func (w *OutboxWorker) processBatch(ctx context.Context) {
 	}
 
 	if err := rows.Err(); err != nil {
-		log.Println("[outbox] rows iteration error:", err)
+		log.Println("rows iteration error:", err)
 		return
 	}
 
@@ -135,119 +323,50 @@ func (w *OutboxWorker) processBatch(ctx context.Context) {
 		return
 	}
 
-	log.Printf("[outbox] processing %d events", len(events))
+	for _, e := range events {
+		env, err := decodeEnvelope(e.id, e.eventType, e.payload)
+		if err != nil {
+			log.Println("protobuf unmarshal error:", err)
+			continue
+		}
 
-	// ── Parallel publish with semaphore ──────────────────────────────────
-	type result struct {
-		idx     int
-		id      string
-		success bool
-	}
+		marshaledPayload, err := marshalForKafka(e.eventType, env)
+		if err != nil {
+			log.Println("kafka payload normalize error:", err)
+			continue
+		}
 
-	results := make([]result, len(events))
-	sem := make(chan struct{}, w.publishConc)
-	var wg sync.WaitGroup
+		key := []byte(env.AggregateId)
 
-	for i, e := range events {
-		wg.Add(1)
-		go func(idx int, evt event) {
-			defer wg.Done()
-			sem <- struct{}{}        // acquire
-			defer func() { <-sem }() // release
+		headers := []kafka.Header{
+			{Key: "event_type", Value: []byte(e.eventType)},
+			{Key: "schema_version", Value: []byte("1")},
+		}
 
-			protoBytes, err := buildEnvelope(evt.id, evt.eventType, evt.payload)
-			if err != nil {
-				log.Printf("[outbox] build envelope error (id=%s type=%s): %v", evt.id, evt.eventType, err)
-				results[idx] = result{idx: idx, id: evt.id, success: false}
-				return
-			}
-			if protoBytes == nil {
-				// unknown event type — mark published to avoid reprocessing
-				results[idx] = result{idx: idx, id: evt.id, success: true}
-				return
-			}
+		err = w.writerForEvent(e.eventType).WriteMessages(ctx,
+			kafka.Message{
+				Key:     key,
+				Value:   marshaledPayload,
+				Headers: headers,
+			},
+		)
+		if err != nil {
+			log.Println("kafka publish error:", err)
+			return
+		}
 
-			err = w.writer.WriteMessages(ctx,
-				kafka.Message{
-					Key:   []byte(evt.id),
-					Value: protoBytes,
-					Headers: []kafka.Header{
-						{Key: "event_type", Value: []byte(evt.eventType)},
-						{Key: "schema_version", Value: []byte("1")},
-					},
-				},
-			)
-			if err != nil {
-				log.Printf("[outbox] kafka publish error (id=%s): %v", evt.id, err)
-				results[idx] = result{idx: idx, id: evt.id, success: false}
-				return
-			}
-
-			results[idx] = result{idx: idx, id: evt.id, success: true}
-		}(i, e)
-	}
-
-	wg.Wait()
-
-	// ── Mark published in batch ──────────────────────────────────────────
-	published := 0
-	for _, r := range results {
-		if r.success {
-			_, err = tx.Exec(ctx,
-				`UPDATE outbox_events SET published_at = NOW() WHERE id = $1`,
-				r.id)
-			if err != nil {
-				log.Printf("[outbox] update error (id=%s): %v", r.id, err)
-				continue
-			}
-			published++
+		_, err = tx.Exec(ctx,
+			`UPDATE outbox_events
+			 SET published_at = NOW()
+			 WHERE id = $1`,
+			e.id)
+		if err != nil {
+			log.Println("update error:", err)
+			return
 		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		log.Println("[outbox] commit error:", err)
-		return
-	}
-
-	if published > 0 {
-		log.Printf("[outbox] published %d/%d events", published, len(events))
-	}
-}
-
-// buildEnvelope converts a JSON outbox payload into a serialized protobuf EventEnvelope.
-// Returns nil bytes (no error) for unknown event types.
-func buildEnvelope(eventID, eventType string, jsonPayload []byte) ([]byte, error) {
-	switch eventType {
-	case "device_created_v1":
-		var p struct {
-			DeviceID  string `json:"device_id"`
-			TenantID  string `json:"tenant_id"`
-			Serial    string `json:"serial"`
-			CreatedAt string `json:"created_at"`
-		}
-		if err := json.Unmarshal(jsonPayload, &p); err != nil {
-			return nil, err
-		}
-
-		env := &eventspb.EventEnvelope{
-			EventId:          eventID,
-			EventType:        eventType,
-			SchemaVersion:    1,
-			OccurredAtUnixMs: time.Now().UnixMilli(),
-			TenantId:         p.TenantID,
-			AggregateId:      p.DeviceID,
-			Payload: &eventspb.EventEnvelope_DeviceCreatedV1{
-				DeviceCreatedV1: &eventspb.DeviceCreatedV1{
-					DeviceId:  p.DeviceID,
-					TenantId:  p.TenantID,
-					Serial:    p.Serial,
-					CreatedAt: p.CreatedAt,
-				},
-			},
-		}
-		return proto.Marshal(env)
-
-	default:
-		return nil, nil
+		log.Println("commit error:", err)
 	}
 }

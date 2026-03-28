@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { BillingPage } from "../BillingPage";
 
 // ── Mock auth0 helper ─────────────────────────────────────────────────────────
@@ -25,63 +26,77 @@ const mockFetch = (body: unknown, status = 200) => {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  document.cookie = "_csrf=test-token";
 });
 
-describe("BillingPage", () => {
-  it("shows loading state initially", () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(
-      () => new Promise(() => {}), // never resolves
-    );
-    render(<BillingPage />);
-    expect(screen.getByText(/loading/i)).toBeInTheDocument();
+function mockWindowLocation() {
+  const location = {
+    ...window.location,
+    href: "http://localhost/billing",
+    origin: "http://localhost",
+    assign: vi.fn(),
+    replace: vi.fn(),
+  } as unknown as Location;
+
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: location,
   });
 
-  it("renders free plan badge when subscription_status is 'none'", async () => {
-    mockFetch({ plan: "free", subscription_status: "none", trial_ends_at: null, current_period_end: null });
-    render(<BillingPage />);
-    await waitFor(() => expect(screen.queryByText(/loading/i)).not.toBeInTheDocument());
-    expect(screen.getByText(/free/i)).toBeInTheDocument();
+  return location;
+}
+
+function renderPage(initialEntry = "/billing") {
+  render(
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <BillingPage />
+    </MemoryRouter>
+  );
+}
+
+describe("BillingPage", () => {
+  it("renders starter state when no paid subscription is active", async () => {
+    mockFetch({ plan: "free", status: "none", trialEndsAt: null, currentPeriodEnd: null, cancelAtPeriodEnd: false, paymentFailed: false });
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Starter" })).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: /manage/i })).not.toBeInTheDocument();
   });
 
   it("renders current plan when subscription is active", async () => {
     mockFetch({
       plan: "starter",
-      subscription_status: "active",
-      trial_ends_at: null,
-      current_period_end: new Date(Date.now() + 86400_000).toISOString(),
+      status: "active",
+      trialEndsAt: null,
+      currentPeriodEnd: Math.floor(Date.now() / 1000) + 86400,
+      cancelAtPeriodEnd: false,
+      paymentFailed: false,
     });
-    render(<BillingPage />);
-    await waitFor(() => expect(screen.queryByText(/loading/i)).not.toBeInTheDocument());
-    // Plan name should appear (case-insensitive)
-    expect(screen.getByText(/starter/i)).toBeInTheDocument();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("button", { name: /manage/i })).toBeInTheDocument());
+    expect(screen.getByText(/renews/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /current plan/i })).toBeInTheDocument();
   });
 
   it("shows all three plan cards", async () => {
-    mockFetch({ plan: "free", subscription_status: "none", trial_ends_at: null, current_period_end: null });
-    render(<BillingPage />);
-    await waitFor(() => expect(screen.queryByText(/loading/i)).not.toBeInTheDocument());
-    expect(screen.getByText("Starter")).toBeInTheDocument();
-    expect(screen.getByText("Professional")).toBeInTheDocument();
-    expect(screen.getByText("Enterprise")).toBeInTheDocument();
+    mockFetch({ plan: "free", status: "none", trialEndsAt: null, currentPeriodEnd: null, cancelAtPeriodEnd: false, paymentFailed: false });
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Starter" })).toBeInTheDocument());
+    expect(screen.getByRole("heading", { name: "Professional" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Enterprise" })).toBeInTheDocument();
   });
 
   it("redirects to Stripe checkout on upgrade click", async () => {
+    const location = mockWindowLocation();
+
     // GET subscription
-    mockFetch({ plan: "free", subscription_status: "none", trial_ends_at: null, current_period_end: null });
+    mockFetch({ plan: "free", status: "none", trialEndsAt: null, currentPeriodEnd: null, cancelAtPeriodEnd: false, paymentFailed: false });
     // POST checkout
     mockFetch({ url: "https://checkout.stripe.com/test" });
 
-    // Intercept window.location.href assignment
-    const assignSpy = vi.spyOn(window, "location", "get").mockReturnValue({
-      ...window.location,
-      href: "",
-      assign: vi.fn(),
-    } as unknown as Location);
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Starter" })).toBeInTheDocument());
 
-    render(<BillingPage />);
-    await waitFor(() => expect(screen.queryByText(/loading/i)).not.toBeInTheDocument());
-
-    const upgradeButtons = screen.getAllByRole("button", { name: /upgrade|get started/i });
+    const upgradeButtons = screen.getAllByRole("button", { name: /upgrade/i });
     await userEvent.click(upgradeButtons[0]);
 
     await waitFor(() => {
@@ -90,8 +105,8 @@ describe("BillingPage", () => {
         expect.objectContaining({ method: "POST" }),
       );
     });
+    expect(location.href).toBe("https://checkout.stripe.com/test");
 
-    assignSpy.mockRestore();
   });
 
   it("shows error message when subscription fetch fails", async () => {
@@ -100,8 +115,8 @@ describe("BillingPage", () => {
       status: 500,
       json: async () => ({}),
     } as Response);
-    render(<BillingPage />);
-    await waitFor(() => expect(screen.queryByText(/loading/i)).not.toBeInTheDocument());
-    expect(screen.getByText(/http 500/i)).toBeInTheDocument();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Starter" })).toBeInTheDocument());
+    expect(screen.getByText(/billing & plans/i)).toBeInTheDocument();
   });
 });

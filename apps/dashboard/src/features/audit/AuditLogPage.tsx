@@ -1,6 +1,9 @@
 import { useEffect, useState, useCallback } from "react";
+import { apiFetch } from "../../lib/apiFetch";
 import { getAccessTokenSilently } from "../../lib/auth0";
 import toast from "react-hot-toast";
+
+const GW = import.meta.env.VITE_GATEWAY_URL ?? "";
 
 interface AuditEvent {
   id: string;
@@ -16,21 +19,6 @@ interface AuditResponse {
   events: AuditEvent[];
   hasMore: boolean;
   nextCursor: string | null;
-}
-
-const GW = import.meta.env.VITE_GATEWAY_URL ?? "";
-
-async function apiFetch(path: string, options: RequestInit = {}) {
-  const token = await getAccessTokenSilently();
-  const res = await fetch(`${GW}${path}`, {
-    ...options,
-    headers: { Authorization: `Bearer ${token}`, ...options.headers },
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `HTTP ${res.status}`);
-  }
-  return res.json();
 }
 
 const EVENT_TYPES = [

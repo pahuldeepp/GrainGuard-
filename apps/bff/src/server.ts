@@ -1,4 +1,5 @@
-﻿import { ApolloServer } from "@apollo/server";
+﻿import crypto from "crypto";
+import { ApolloServer } from "@apollo/server";
 import depthLimit from "graphql-depth-limit";
 import { expressMiddleware } from "@apollo/server/express4";
 import { ApolloServerPluginDrainHttpServer } from "@apollo/server/plugin/drainHttpServer";
@@ -15,14 +16,13 @@ import { typeDefs } from "./schema";
 import { resolvers } from "./resolvers";
 import { createRemoteJWKSet, jwtVerify, JWTPayload } from "jose";
 import { startTelemetryWatcher } from "./telemetryWatcher";
-import { postgresCircuitBreaker } from "./lib/circuitBreaker";
 
 const JWKS_URL = process.env.JWKS_URL!;
 const ISSUER = process.env.JWT_ISSUER!;
 const AUDIENCE = process.env.JWT_AUDIENCE!;
 const ALLOWED_ORIGINS =
   (process.env.ALLOWED_ORIGINS ||
-    "http://localhost:5173,http://localhost:8086").split(",");
+    "http://localhost:5173,http://localhost:5174,http://localhost:8086").split(",");
 if (!JWKS_URL || !ISSUER || !AUDIENCE) {
   throw new Error("JWKS_URL, JWT_ISSUER, JWT_AUDIENCE must be set");
 }
@@ -42,10 +42,11 @@ async function verifyToken(token: string) {
 }
 
 export interface BffContext {
-  tenantId: string;
-  userId: string;
-  roles: string[];
+  tenantId:  string;
+  userId:    string;
+  roles:     string[];
   isSuperAdmin: boolean;
+  requestId: string;
 }
 
 async function startServer() {
@@ -61,6 +62,8 @@ async function startServer() {
         imgSrc: ["'self'", "data:"],
         connectSrc: [
           "'self'",
+          "http://localhost:4000",
+          "ws://localhost:4000",
           "http://localhost:8086",
           "ws://localhost:8086",
         ],
@@ -83,7 +86,7 @@ async function startServer() {
   const serverCleanup = useServer(
     {
       schema,
-      context: async (ctx: Record<string, any>) => {
+      context: async (ctx: { connectionParams?: Record<string, unknown> }) => {
         const token = ctx.connectionParams?.authorization as string | undefined;
         if (!token?.startsWith("Bearer ")) throw new Error("Missing token");
         const payload = await verifyToken(token.substring("Bearer ".length));
@@ -138,12 +141,14 @@ async function startServer() {
     express.json({ limit: "10kb" }),
     expressMiddleware(server, {
       context: async ({ req }): Promise<BffContext> => {
+        const requestId = (req.headers["x-request-id"] as string) || crypto.randomUUID();
+
         // Dev bypass — AUTH_ENABLED=false skips JWT validation (non-production only)
         if (process.env.AUTH_ENABLED === "false" && process.env.NODE_ENV !== "production") {
           const tenantId =
             (req.headers["x-tenant-id"] as string) ||
             "11111111-1111-1111-1111-111111111111";
-          return { tenantId, userId: "dev-user", roles: ["admin", "member", "superadmin"], isSuperAdmin: true };
+          return { tenantId, userId: "dev-user", roles: ["admin", "member", "superadmin"], isSuperAdmin: true, requestId };
         }
 
         const authHeader = req.headers.authorization;
@@ -160,13 +165,14 @@ async function startServer() {
           const payload = await verifyToken(token);
           // Auth0 Action injects claims under https://grainguard.com/ namespace
           const NS = "https://grainguard.com";
+          const p = payload as Record<string, unknown>;
           const tenantId =
-            (payload as any)[`${NS}/tenant_id`] ??
-            (payload as any)["https://grainguard/tenant_id"];
+            p[`${NS}/tenant_id`] ??
+            p["https://grainguard/tenant_id"];
           const rawRoles =
-            (payload as any)[`${NS}/roles`] ??
-            (payload as any)["https://grainguard/roles"] ??
-            (payload as any).roles;
+            p[`${NS}/roles`] ??
+            p["https://grainguard/roles"] ??
+            p.roles;
           const userId = payload.sub;
 
           if (!tenantId) {
@@ -187,10 +193,11 @@ async function startServer() {
 
           const roles = Array.isArray(rawRoles) ? rawRoles.map(String) : [];
           return {
-            tenantId: String(tenantId),
-            userId: String(userId || ""),
+            tenantId:    String(tenantId),
+            userId:      String(userId || ""),
             roles,
             isSuperAdmin: roles.includes("superadmin"),
+            requestId,
           };
         } catch (err) {
           if (err instanceof GraphQLError) throw err;
