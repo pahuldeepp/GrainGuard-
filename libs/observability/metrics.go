@@ -3,6 +3,7 @@ package observability
 import (
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -166,8 +167,14 @@ func Init() {
 	go func() {
 		log.Println("Prometheus metrics exposed on :2112/metrics")
 
-		err := http.ListenAndServe(":2112", mux)
-		if err != nil {
+		metricsServer := &http.Server{
+			Addr:              ":2112",
+			Handler:           mux,
+			ReadHeaderTimeout: 5 * time.Second,
+		}
+
+		err := metricsServer.ListenAndServe()
+		if err != nil && err != http.ErrServerClosed {
 			log.Fatalf("metrics server failed: %v", err)
 		}
 	}()

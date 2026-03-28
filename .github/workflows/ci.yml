@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [master]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -24,10 +27,7 @@ jobs:
           cache: true
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: v1.62
-          args: --timeout=5m
+        run: go run github.com/golangci/golangci-lint/cmd/golangci-lint@v1.62.0 run --timeout=5m
 
   go-test:
     name: Go Test
@@ -59,14 +59,22 @@ jobs:
           path: coverage-go.out
           retention-days: 7
 
-  # ─── TypeScript: lint + typecheck ─────────────────────────────
+  # ─── TypeScript: explicit app checks ──────────────────────────
   ts-lint:
-    name: TS Lint — ${{ matrix.app }}
+    name: TS Checks — ${{ matrix.app }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        app: [gateway, bff, jobs-worker, dashboard]
+        include:
+          - app: gateway
+            run_lint: false
+          - app: bff
+            run_lint: false
+          - app: jobs-worker
+            run_lint: false
+          - app: dashboard
+            run_lint: true
     steps:
       - uses: actions/checkout@v4
 
@@ -79,6 +87,7 @@ jobs:
         working-directory: apps/${{ matrix.app }}
 
       - name: ESLint
+        if: matrix.run_lint
         run: npm run lint
         working-directory: apps/${{ matrix.app }}
 

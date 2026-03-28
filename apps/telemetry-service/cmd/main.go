@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -81,21 +82,21 @@ func main() {
 	defer pool.Close()
 
 	// Migrations
-	if err := libmigrate.Up(dbURL, migrations.FS, "telemetry_service"); err != nil {
-		log.Fatal().Err(err).Msg("migration failed")
+	if migrateErr := libmigrate.Up(dbURL, migrations.FS, "telemetry_service"); migrateErr != nil {
+		log.Fatal().Err(migrateErr).Msg("migration failed")
 	}
 
 	// Repositories
-	deviceRepo    := repository.NewPostgresDeviceRepository(pool)
+	deviceRepo := repository.NewPostgresDeviceRepository(pool)
 	telemetryRepo := repository.NewPostgresTelemetryRepository(pool)
-	outboxRepo    := repository.NewPostgresOutboxRepository(pool)
+	outboxRepo := repository.NewPostgresOutboxRepository(pool)
 
 	// Outbox relay worker
 	outboxWorker := worker.NewOutboxWorker(pool)
 	go outboxWorker.Start(ctx)
 
 	// Application services
-	createDeviceService    := application.NewCreateDeviceService(pool, deviceRepo, outboxRepo)
+	createDeviceService := application.NewCreateDeviceService(pool, deviceRepo, outboxRepo)
 	recordTelemetryService := application.NewRecordTelemetryService(pool, deviceRepo, telemetryRepo, outboxRepo)
 
 	// Auth
@@ -103,25 +104,26 @@ func main() {
 
 	var jwtVerifier *interceptors.JWTVerifier
 	if authEnabled {
-		jwksURL  := os.Getenv("JWKS_URL")
-		issuer   := os.Getenv("JWT_ISSUER")
+		jwksURL := os.Getenv("JWKS_URL")
+		issuer := os.Getenv("JWT_ISSUER")
 		audience := os.Getenv("JWT_AUDIENCE")
 
 		if jwksURL == "" || issuer == "" || audience == "" {
 			log.Fatal().Msg("AUTH_ENABLED=true but JWKS_URL / JWT_ISSUER / JWT_AUDIENCE not set")
 		}
 
-		v, err := interceptors.NewJWTVerifier(jwksURL, issuer, audience)
-		if err != nil {
-			log.Fatal().Err(err).Msg("failed to initialize JWKS verifier")
+		verifier, verifierErr := interceptors.NewJWTVerifier(jwksURL, issuer, audience)
+		if verifierErr != nil {
+			log.Fatal().Err(verifierErr).Msg("failed to initialize JWKS verifier")
 		}
-		jwtVerifier = v
+		jwtVerifier = verifier
 		log.Info().Msg("authentication ENABLED (JWT + RBAC)")
 	} else {
 		log.Info().Msg("authentication DISABLED (skipping JWKS/JWT/RBAC)")
 	}
 
 	// gRPC server
+	//nolint:gosec // The service must listen on the container interface for cluster-to-cluster traffic.
 	lis, err := net.Listen("tcp", ":50051")
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to listen on :50051")
@@ -210,8 +212,12 @@ func main() {
 	}).Methods("POST")
 
 	log.Info().Str("addr", ":8080").Msg("HTTP server running (DEV ONLY)")
-	if err := http.ListenAndServe(":8080", r); err != nil {
+	devSrv := &http.Server{
+		Addr:              ":8080",
+		Handler:           r,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	if err := devSrv.ListenAndServe(); err != nil {
 		log.Fatal().Err(err).Msg("HTTP server failed")
 	}
 }
-

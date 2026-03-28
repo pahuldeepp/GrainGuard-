@@ -104,7 +104,9 @@ func HandleTelemetry(pool *pgxpool.Pool, redisClient *redis.Client) func([]byte)
 			observability.EventsRetry.Inc()
 			return err
 		}
-		defer tx.Rollback(ctx)
+		defer func() {
+			_ = tx.Rollback(ctx)
+		}()
 
 		var inserted string
 		err = tx.QueryRow(
@@ -164,9 +166,9 @@ func HandleTelemetry(pool *pgxpool.Pool, redisClient *redis.Client) func([]byte)
 			return err
 		}
 
-		if err := tx.Commit(ctx); err != nil {
+		if commitErr := tx.Commit(ctx); commitErr != nil {
 			observability.EventsRetry.Inc()
-			return err
+			return commitErr
 		}
 
 		versionKey := "device:" + deviceID.String()
@@ -277,7 +279,9 @@ func HandleTelemetryBatch(pool *pgxpool.Pool, redisClient *redis.Client) func(co
 			observability.EventsRetry.Inc()
 			return err
 		}
-		defer tx.Rollback(txCtx)
+		defer func() {
+			_ = tx.Rollback(txCtx)
+		}()
 
 		eventIDs := make([]string, len(events))
 		for i, e := range events {
@@ -300,7 +304,7 @@ func HandleTelemetryBatch(pool *pgxpool.Pool, redisClient *redis.Client) func(co
 		newEventIDs := make(map[string]struct{})
 		for rows.Next() {
 			var id string
-			if err := rows.Scan(&id); err == nil {
+			if scanErr := rows.Scan(&id); scanErr == nil {
 				newEventIDs[id] = struct{}{}
 			}
 		}

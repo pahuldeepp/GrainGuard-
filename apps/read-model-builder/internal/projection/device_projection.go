@@ -160,7 +160,9 @@ func HandleDevice(pool *pgxpool.Pool, redisClient *redis.Client) func([]byte) er
 			observability.EventsRetry.Inc()
 			return err
 		}
-		defer tx.Rollback(ctx)
+		defer func() {
+			_ = tx.Rollback(ctx)
+		}()
 
 		var inserted string
 		err = tx.QueryRow(

@@ -31,7 +31,7 @@ func setupTestDB(t *testing.T) *pgxpool.Pool {
 		),
 	)
 	require.NoError(t, err)
-	t.Cleanup(func() { pgContainer.Terminate(ctx) })
+	t.Cleanup(func() { _ = pgContainer.Terminate(ctx) })
 
 	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
 	require.NoError(t, err)
@@ -253,4 +253,3 @@ func TestHandleTelemetryBatch_SkipsInvalidEvents(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, count)
 }
-
