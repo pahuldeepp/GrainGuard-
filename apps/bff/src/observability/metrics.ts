@@ -1,4 +1,5 @@
 import client from "prom-client";
+import type { Request, Response } from "express";
 
 const register = new client.Registry();
 client.collectDefaultMetrics({ register });
@@ -19,7 +20,7 @@ export const graphqlOperations = new client.Counter({
 });
 
 export function metricsHandler() {
-  return async (_req: any, res: any) => {
+  return async (_req: Request, res: Response) => {
     res.setHeader("Content-Type", register.contentType);
     res.end(await register.metrics());
   };

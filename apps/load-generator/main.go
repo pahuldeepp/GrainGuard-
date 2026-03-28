@@ -68,7 +68,7 @@ func main() {
 		RequiredAcks:           kafka.RequireOne,
 		AllowAutoTopicCreation: true,
 	}
-	defer writer.Close()
+	defer writer.Close() //nolint:errcheck
 
 	ctx, cancel := context.WithTimeout(
 		context.Background(),

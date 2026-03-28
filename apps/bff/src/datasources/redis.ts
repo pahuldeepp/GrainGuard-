@@ -27,7 +27,7 @@ export const cache = {
     return results.map((r: any) => r ? JSON.parse(r) : null);
   },
 
-  async set(key: string, value: any, ttlSeconds: number): Promise<void> {
+  async set(key: string, value: unknown, ttlSeconds: number): Promise<void> {
     await client.set(key, JSON.stringify(value), { EX: ttlSeconds });
   },
 

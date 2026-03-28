@@ -27,7 +27,10 @@ jobs:
           cache: true
 
       - name: golangci-lint
-        run: go run github.com/golangci/golangci-lint/cmd/golangci-lint@v1.62.0 run --timeout=5m
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.11.0
+          args: --timeout=5m
 
   go-test:
     name: Go Test

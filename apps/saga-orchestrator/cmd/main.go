@@ -58,7 +58,7 @@ func main() {
 
 	kafkaConsumer := consumer.NewKafkaConsumerFromEnv(eventsTopic, groupID)
 	cmdProducer := producer.NewProducerFromEnv(commandsTopic)
-	defer cmdProducer.Close()
+	defer cmdProducer.Close() //nolint:errcheck
 
 	repo := repository.NewPostgresSagaRepository(pool)
 	provision := orchestrator.NewProvisionSaga(repo, cmdProducer)

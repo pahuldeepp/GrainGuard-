@@ -158,13 +158,17 @@ devicesImportRouter.post(
         } catch (err) {
           errors++;
           done++;
+          const safeMessage =
+            process.env.NODE_ENV !== "production" && err instanceof Error
+              ? err.message
+              : "device_import_failed";
           emit({
             total,
             done,
             errors,
             current: serialNumber,
             status: "error",
-            message: err instanceof Error ? err.message : "unknown_error",
+            message: safeMessage,
           });
         }
       }
