@@ -124,7 +124,7 @@ func main() {
 
 	// gRPC server
 	//nolint:gosec // The service must listen on the container interface for cluster-to-cluster traffic.
-	lis, err := net.Listen("tcp", ":50051")
+	lis, err := new(net.ListenConfig).Listen(context.Background(), "tcp", ":50051")
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to listen on :50051")
 	}
