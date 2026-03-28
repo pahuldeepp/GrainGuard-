@@ -18,13 +18,13 @@ const bffP95       = new Trend("bff_p95_ms", true);
 const errorRate    = new Rate("error_rate");
 const totalErrors  = new Counter("total_errors");
 
-const GATEWAY_URL = __ENV.GATEWAY_URL ?? "http://localhost:3000";
-const BFF_URL = __ENV.BFF_URL ?? "http://localhost:8086";
-const JWT = __ENV.JWT ?? "";
+const GATEWAY_URL = __ENV.GATEWAY_URL || "http://localhost:3000";
+const BFF_URL = __ENV.BFF_URL || "http://localhost:8086";
+const JWT = __ENV.JWT || "";
 const TEST_DEVICE_ID =
-  __ENV.TEST_DEVICE_ID ?? "00000000-0000-0000-0000-000000000001";
-const GATEWAY_AUTH_DISABLED = (__ENV.GATEWAY_AUTH_DISABLED ?? "false") === "true";
-const BFF_AUTH_DISABLED = (__ENV.BFF_AUTH_DISABLED ?? "false") === "true";
+  __ENV.TEST_DEVICE_ID || "00000000-0000-0000-0000-000000000001";
+const GATEWAY_AUTH_DISABLED = (__ENV.GATEWAY_AUTH_DISABLED || "false") === "true";
+const BFF_AUTH_DISABLED = (__ENV.BFF_AUTH_DISABLED || "false") === "true";
 
 // ── Thresholds (performance budget) ──────────────────────────────────────────
 // If any threshold fails, k6 exits with code 99 and CI marks the step as failed.
@@ -144,14 +144,34 @@ export default function () {
 
 // ── Summary output ────────────────────────────────────────────────────────────
 export function handleSummary(data) {
+  const gatewayMetric = data.metrics["gateway_p95_ms"];
+  const bffMetric = data.metrics["bff_p95_ms"];
+  const errorMetric = data.metrics["error_rate"];
+  const gatewayP95Value =
+    gatewayMetric &&
+    gatewayMetric.values &&
+    gatewayMetric.values["p(95)"] !== undefined
+      ? gatewayMetric.values["p(95)"].toFixed(0)
+      : "N/A";
+  const bffP95Value =
+    bffMetric &&
+    bffMetric.values &&
+    bffMetric.values["p(95)"] !== undefined
+      ? bffMetric.values["p(95)"].toFixed(0)
+      : "N/A";
+  const errorRateValue =
+    errorMetric && errorMetric.values && errorMetric.values.rate !== undefined
+      ? (errorMetric.values.rate * 100).toFixed(2)
+      : "0.00";
+
   return {
     // Write JSON summary for CI artifact upload
     "scripts/load-tests/results/performance-budget-summary.json": JSON.stringify(data, null, 2),
     stdout: `
 === Performance Budget Summary ===
-Gateway p95: ${data.metrics["gateway_p95_ms"]?.values?.["p(95)"]?.toFixed(0) ?? "N/A"} ms  (budget: 500ms)
-BFF p95:     ${data.metrics["bff_p95_ms"]?.values?.["p(95)"]?.toFixed(0) ?? "N/A"} ms  (budget: 800ms)
-Error rate:  ${((data.metrics["error_rate"]?.values?.rate ?? 0) * 100).toFixed(2)}%  (budget: <1%)
+Gateway p95: ${gatewayP95Value} ms  (budget: 500ms)
+BFF p95:     ${bffP95Value} ms  (budget: 800ms)
+Error rate:  ${errorRateValue}%  (budget: <1%)
 `,
   };
 }
