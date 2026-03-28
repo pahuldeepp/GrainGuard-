@@ -169,7 +169,7 @@ func main() {
 	// ── Step 2: Connect with keyspace for data writes ────────────────────────
 	cluster := gocql.NewCluster(strings.Split(cassandraHosts, ",")...)
 	cluster.Keyspace = cassandraKeyspace
-	cluster.Consistency = gocql.LocalQuorum
+	cluster.Consistency = gocql.One // immutable time-series — One is safe and ~3× faster than LocalQuorum
 	cluster.Timeout = 10 * time.Second
 	cluster.ConnectTimeout = 30 * time.Second
 	cluster.NumConns = workerCount // one conn per worker
@@ -256,9 +256,16 @@ func main() {
 					return
 				}
 
-				// Commit all messages in one call
-				if err := reader.CommitMessages(ctx, msgs...); err != nil {
-					log.Printf("[worker-%d] commit error: %v", workerID, err)
+				// Commit with retry. Writes are idempotent (event_id in Cassandra PK),
+				// so redelivery on commit failure is safe — duplicate inserts are no-ops.
+				for attempt := 1; attempt <= 3; attempt++ {
+					if commitErr := reader.CommitMessages(ctx, msgs...); commitErr == nil {
+						break
+					} else if attempt == 3 {
+						log.Printf("[worker-%d] commit failed after 3 attempts: %v", workerID, commitErr)
+					} else {
+						log.Printf("[worker-%d] commit retry %d: %v", workerID, attempt, commitErr)
+					}
 				}
 
 				processed.Add(int64(len(batch)))
