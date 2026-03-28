@@ -301,10 +301,10 @@ export const db = {
         deviceId:     row.device_id,
         tenantId:     row.tenant_id,
         serialNumber: row.serial_number,
-        createdAt:    new Date(row.created_at as string).toISOString(),
+        createdAt:    (row.created_at as Date).toISOString(),
         temperature:  row.temperature ?? null,
         humidity:     row.humidity ?? null,
-        recordedAt:   row.recorded_at ? new Date(row.recorded_at as string).toISOString() : null,
+        recordedAt:   row.recorded_at ? (row.recorded_at as Date).toISOString() : null,
         version:      row.version ?? null,
       },
     }));
@@ -332,7 +332,7 @@ export const db = {
       deviceId:     result.rows[0].device_id,
       tenantId:     result.rows[0].tenant_id,
       serialNumber: result.rows[0].serial_number,
-      createdAt:    new Date(result.rows[0].created_at as string).toISOString(),
+      createdAt:    (result.rows[0].created_at as Date).toISOString(),
     };
   },
 
@@ -348,7 +348,7 @@ export const db = {
       deviceId:     result.rows[0].device_id,
       tenantId:     result.rows[0].tenant_id,
       serialNumber: result.rows[0].serial_number,
-      createdAt:    new Date(result.rows[0].created_at as string).toISOString(),
+      createdAt:    (result.rows[0].created_at as Date).toISOString(),
     };
   },
 
