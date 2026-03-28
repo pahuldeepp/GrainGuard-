@@ -11,7 +11,7 @@ const client = (() => {
       return { host, port: parseInt(port || "6379") };
     });
     console.log(`Redis cluster mode: ${nodes.length} nodes`);
-    return createCluster({ nodes });
+    return createCluster({ rootNodes: nodes });
   }
 
   // Single-node (local dev / docker-compose default)
