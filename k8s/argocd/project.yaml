@@ -20,14 +20,3 @@ spec:
   namespaceResourceWhitelist:
     - group: "*"
       kind: "*"
-  roles:
-    - name: dev-deployer
-      description: Can sync dev only
-      policies:
-        - p, proj:grainguard:dev-deployer, applications, sync, grainguard/grainguard-dev, allow
-        - p, proj:grainguard:dev-deployer, applications, get,  grainguard/grainguard-dev, allow
-    - name: prod-deployer
-      description: Can sync prod (humans only, not CI)
-      policies:
-        - p, proj:grainguard:prod-deployer, applications, sync, grainguard/grainguard-prod, allow
-        - p, proj:grainguard:prod-deployer, applications, get,  grainguard/grainguard-prod, allow

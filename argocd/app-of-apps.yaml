@@ -8,9 +8,9 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: default
+  project: grainguard
   source:
-    repoURL: https://github.com/your-org/grainguard
+    repoURL: https://github.com/pahuldeepp/GrainGuard-.git
     targetRevision: HEAD
     path: argocd/environments   # folder containing per-env Application manifests
   destination:
