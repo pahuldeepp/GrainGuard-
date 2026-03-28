@@ -12,7 +12,7 @@ on:
 
 env:
   TF_VERSION: "1.7.5"
-  AWS_REGION:  "us-east-1"
+  AWS_REGION: "us-east-1"
 
 jobs:
   # ── Plan — runs on every PR that touches terraform/ ────────────────────────
@@ -50,7 +50,7 @@ jobs:
         run: terraform init -input=false
 
       - name: Terraform Format check
-        run: terraform fmt -check -recursive
+        run: terraform fmt -check -recursive ../../
 
       - name: Terraform Validate
         run: terraform validate

@@ -5,9 +5,13 @@ on:
   pull_request:
     branches: [master]
 
+permissions:
+  contents: read
+
 jobs:
   e2e:
     name: Playwright E2E
+    if: ${{ secrets.VITE_AUTH0_DOMAIN != '' && secrets.VITE_AUTH0_CLIENT_ID != '' && secrets.VITE_AUTH0_AUDIENCE != '' && secrets.E2E_BFF_URL != '' && secrets.E2E_GATEWAY_URL != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -17,7 +21,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
           cache-dependency-path: apps/dashboard/package-lock.json
 

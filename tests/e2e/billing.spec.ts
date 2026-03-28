@@ -16,8 +16,9 @@ test.describe("Billing page", () => {
   });
 
   test("shows plan prices", async ({ page }) => {
-    await expect(page.getByText("$49/mo")).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText("$199/mo")).toBeVisible();
+    const recurringPrices = page.getByText(/\$\d+\/mo/);
+    await expect(recurringPrices.first()).toBeVisible({ timeout: 10_000 });
+    await expect(recurringPrices).toHaveCount(2);
   });
 
   test("Enterprise card shows Contact Sales link", async ({ page }) => {

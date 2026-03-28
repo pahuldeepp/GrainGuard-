@@ -115,7 +115,8 @@ ci: ## Run full CI locally (lint + test + build)
 	@echo "=== Go vet ==="
 	go vet ./...
 	@echo "=== Go lint ==="
-	golangci-lint run ./... || echo "Install: brew install golangci-lint"
+	command -v golangci-lint >/dev/null || { echo "Install: brew install golangci-lint"; exit 1; }
+	golangci-lint run ./...
 	@echo "=== Go test ==="
 	go test -race -count=1 ./...
 	@echo "=== TS lint ==="

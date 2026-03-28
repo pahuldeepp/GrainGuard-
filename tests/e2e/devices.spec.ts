@@ -29,9 +29,10 @@ test.describe("Devices page", () => {
 
   test("modal closes on backdrop click", async ({ page }) => {
     await page.getByRole("button", { name: "+ Register Device" }).click();
-    await expect(page.getByRole("dialog")).toBeVisible();
-    await page.mouse.click(10, 10);
-    await expect(page.getByRole("dialog")).not.toBeVisible();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.click({ position: { x: 5, y: 5 } });
+    await expect(dialog).not.toBeVisible();
   });
 
   test("serial number input normalises to uppercase", async ({ page }) => {

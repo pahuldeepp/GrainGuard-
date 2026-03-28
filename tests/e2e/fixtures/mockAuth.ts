@@ -67,6 +67,17 @@ const MOCK_SUBSCRIPTION = {
   current_period_end: new Date(Date.now() + 30 * 86400 * 1000).toISOString(),
 };
 
+const MOCK_DEVICES_CONNECTION = {
+  edges: MOCK_DEVICES.map((device) => ({
+    cursor: device.id,
+    node: device,
+  })),
+  pageInfo: {
+    endCursor: MOCK_DEVICES.at(-1)?.id ?? null,
+    hasNextPage: false,
+  },
+};
+
 // ─── injectMockAuth ───────────────────────────────────────────────────────────
 // Call this in beforeEach to set up a fully authenticated test environment.
 
@@ -94,12 +105,46 @@ export async function injectMockAuth(page: Page): Promise<void> {
     const body = route.request().postDataJSON() as { query?: string } | null;
     const query = body?.query ?? "";
 
+    if (query.includes("__typename")) {
+      return route.fulfill({ json: { data: { __typename: "Query" } } });
+    }
+
+    if (query.includes("devicesConnection")) {
+      return route.fulfill({
+        json: {
+          data: {
+            devicesConnection: MOCK_DEVICES_CONNECTION,
+          },
+        },
+      });
+    }
+
     if (query.includes("devices") || query.includes("Devices")) {
       return route.fulfill({
         json: {
           data: {
             devices: MOCK_DEVICES,
             deviceTelemetry: [],
+          },
+        },
+      });
+    }
+
+    if (query.includes("deviceTelemetryHistory")) {
+      return route.fulfill({
+        json: {
+          data: {
+            deviceTelemetryHistory: [],
+          },
+        },
+      });
+    }
+
+    if (query.includes("deviceTelemetry")) {
+      return route.fulfill({
+        json: {
+          data: {
+            deviceTelemetry: null,
           },
         },
       });
@@ -120,8 +165,16 @@ export async function injectMockAuth(page: Page): Promise<void> {
       });
     }
 
-    // Default — empty success
-    return route.fulfill({ json: { data: {} } });
+    return route.fulfill({
+      status: 500,
+      json: {
+        errors: [
+          {
+            message: `Unhandled GraphQL operation in mockAuth: ${query.slice(0, 120) || "<empty>"}`,
+          },
+        ],
+      },
+    });
   });
 
   // 4. Intercept REST billing endpoint

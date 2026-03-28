@@ -19,8 +19,12 @@ const errorRate    = new Rate("error_rate");
 const totalErrors  = new Counter("total_errors");
 
 const GATEWAY_URL = __ENV.GATEWAY_URL ?? "http://localhost:3000";
-const BFF_URL     = __ENV.BFF_URL     ?? "http://localhost:8086";
-const JWT         = __ENV.JWT         ?? "";
+const BFF_URL = __ENV.BFF_URL ?? "http://localhost:8086";
+const JWT = __ENV.JWT ?? "";
+const TEST_DEVICE_ID =
+  __ENV.TEST_DEVICE_ID ?? "00000000-0000-0000-0000-000000000001";
+const GATEWAY_AUTH_DISABLED = (__ENV.GATEWAY_AUTH_DISABLED ?? "false") === "true";
+const BFF_AUTH_DISABLED = (__ENV.BFF_AUTH_DISABLED ?? "false") === "true";
 
 // ── Thresholds (performance budget) ──────────────────────────────────────────
 // If any threshold fails, k6 exits with code 99 and CI marks the step as failed.
@@ -67,48 +71,71 @@ const COMMON_HEADERS = {
   "Content-Type": "application/json",
 };
 
+function recordResult(ok) {
+  errorRate.add(ok ? 0 : 1);
+  if (!ok) {
+    totalErrors.add(1);
+  }
+}
+
+function hasGraphqlErrors(response) {
+  try {
+    const errors = response.json("errors");
+    return Array.isArray(errors) && errors.length > 0;
+  } catch {
+    return true;
+  }
+}
+
 // ── Virtual user script ───────────────────────────────────────────────────────
 export default function () {
   // 1. Gateway: GET /health (cheapest — warms up)
   const healthRes = http.get(`${GATEWAY_URL}/health`, { tags: { endpoint: "gateway" } });
-  check(healthRes, { "gateway /health 200": (r) => r.status === 200 });
+  const healthOk = healthRes.status === 200;
+  check(healthRes, { "gateway /health 200": () => healthOk });
+  recordResult(healthOk);
   gatewayP95.add(healthRes.timings.duration);
 
-  // 2. Gateway: GET /devices/:id/latest (requires JWT)
-  if (JWT) {
+  // 2. Gateway: GET /devices/:id/latest
+  if (JWT || GATEWAY_AUTH_DISABLED) {
+    const gatewayHeaders = JWT ? COMMON_HEADERS : undefined;
     const devRes = http.get(
-      `${GATEWAY_URL}/devices/00000000-0000-0000-0000-000000000001/latest`,
-      { headers: COMMON_HEADERS, tags: { endpoint: "gateway" } }
+      `${GATEWAY_URL}/devices/${TEST_DEVICE_ID}/latest`,
+      { headers: gatewayHeaders, tags: { endpoint: "gateway" } }
     );
-    // 404 is acceptable — device may not exist in test env
     const ok = devRes.status === 200 || devRes.status === 404;
-    if (!ok) {
-      errorRate.add(1);
-      totalErrors.add(1);
-    } else {
-      errorRate.add(0);
-    }
+    recordResult(ok);
     gatewayP95.add(devRes.timings.duration);
   }
 
-  // 3. BFF: GraphQL query for devices
-  if (JWT) {
+  // 3. BFF: GraphQL telemetry query
+  if (JWT || BFF_AUTH_DISABLED) {
+    const graphqlHeaders = JWT
+      ? COMMON_HEADERS
+      : { "Content-Type": "application/json" };
     const gqlRes = http.post(
       `${BFF_URL}/graphql`,
       JSON.stringify({
-        query: `{ devices(first: 10) { edges { node { id serialNumber temperature } } } }`,
+        query: `
+          query($deviceId: String!) {
+            deviceTelemetry(deviceId: $deviceId) {
+              deviceId
+              temperature
+              humidity
+              version
+            }
+          }
+        `,
+        variables: {
+          deviceId: TEST_DEVICE_ID,
+        },
       }),
-      { headers: COMMON_HEADERS, tags: { endpoint: "bff" } }
+      { headers: graphqlHeaders, tags: { endpoint: "bff" } }
     );
 
-    const bffOk = gqlRes.status === 200;
-    check(gqlRes, { "bff graphql 200": () => bffOk });
-    if (!bffOk) {
-      errorRate.add(1);
-      totalErrors.add(1);
-    } else {
-      errorRate.add(0);
-    }
+    const bffOk = gqlRes.status === 200 && !hasGraphqlErrors(gqlRes);
+    check(gqlRes, { "bff graphql ok": () => bffOk });
+    recordResult(bffOk);
     bffP95.add(gqlRes.timings.duration);
   }
 

@@ -1,5 +1,8 @@
 name: Chaos Tests
 
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
     inputs:
@@ -43,9 +46,9 @@ jobs:
 
       - name: Set kubeconfig
         run: |
-          mkdir -p $HOME/.kube
-          echo "${{ secrets.KUBECONFIG_DEV }}" | base64 -d > $HOME/.kube/config
-          chmod 600 $HOME/.kube/config
+          mkdir -p "${HOME}/.kube"
+          echo "${{ secrets.KUBECONFIG_DEV }}" | base64 -d > "${HOME}/.kube/config"
+          chmod 600 "${HOME}/.kube/config"
 
       - name: Install Chaos Toolkit
         run: |

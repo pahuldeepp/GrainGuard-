@@ -13,11 +13,11 @@ kubectl config use-context <your-cluster>
 
 | File | Target | What it verifies |
 |------|--------|-----------------|
-| `pod-kill.yaml` | gateway, bff, telemetry-service | HPA respawns within 30s; readiness probe gates traffic |
-| `kafka-consumer-pause.sh` | read-model-builder, cdc-transformer | Consumer lag ≤ 10 000 after resume; no messages lost |
-| `redis-outage.sh` | bff (cache), saga-orchestrator (lock) | BFF falls back to DB; saga retries with backoff |
-| `projection-lag.sh` | read-model-builder | Lag alert fires within 2 min; catches up within 5 min |
-| `network-partition.yaml` | telemetry-service → Kafka | Messages buffered in producer; delivered after heal |
+| `pod-kill.yaml` | gateway, bff, telemetry-service | Replacement pods become ready and traffic is gated by readiness checks |
+| `kafka-consumer-pause.sh` | read-model-builder, cdc-transformer | Consumer lag stays within the defined threshold after resume |
+| `redis-outage.sh` | bff (cache), saga-orchestrator (lock) | GraphQL stays healthy via DB fallback and saga-orchestrator avoids panic/fatal crashes |
+| `projection-lag.sh` | read-model-builder | Projection lag is detected and returns to the expected threshold after recovery |
+| `network-partition.yaml` | telemetry-service → Kafka | The system recovers cleanly once connectivity is restored |
 
 ## Running
 
