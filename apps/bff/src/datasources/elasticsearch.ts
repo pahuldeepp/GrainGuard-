@@ -44,9 +44,7 @@ export const search = {
           },
         },
       };
-      console.log("[ES] searching:", JSON.stringify(params));
       const result = await (es.search as (p: typeof params) => Promise<{ hits: { total: unknown; hits: ESHit[] } }>)(params);
-      console.log("[ES] hits:", result.hits.total);
 
       return result.hits.hits.map((hit: ESHit) => ({
         deviceId:     hit._source.device_id,

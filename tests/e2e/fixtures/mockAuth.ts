@@ -2,14 +2,14 @@ import { Page } from "@playwright/test";
 
 // ─── Fake JWT ─────────────────────────────────────────────────────────────────
 // A base64url-encoded JWT with GrainGuard claims.
-// No real signature needed — the dashboard just reads it from localStorage
-// and the API calls are mocked by page.route(), so nothing validates it.
+// No real signature needed — the dashboard just reads it from a test-only
+// window global, and the API calls are mocked by page.route(), so nothing
+// validates it.
 
 function b64(obj: object): string {
   return Buffer.from(JSON.stringify(obj)).toString("base64url");
 }
 
-const CLIENT_ID = process.env.VITE_AUTH0_CLIENT_ID || "e2e-client-id";
 const AUDIENCE = process.env.VITE_AUTH0_AUDIENCE || "https://api.grainguard.test";
 
 const HEADER = b64({ alg: "RS256", typ: "JWT" });
@@ -21,6 +21,7 @@ const TOKEN_PAYLOAD = {
   aud:    AUDIENCE,
   iat:    Math.floor(Date.now() / 1000),
   exp:    Math.floor(Date.now() / 1000) + 86400, // 24h
+  // Keep both claim namespaces until the dashboard fully drops the legacy one.
   "https://grainguard.com/tenant_id": "00000000-0000-0000-0000-000000000001",
   "https://grainguard.com/roles":     ["admin", "superadmin"],
   "https://grainguard/tenant_id": "00000000-0000-0000-0000-000000000001",
@@ -30,36 +31,16 @@ const PAYLOAD = b64(TOKEN_PAYLOAD);
 
 export const FAKE_TOKEN = `${HEADER}.${PAYLOAD}.fake_signature`;
 
-// ─── Auth0 localStorage cache key ────────────────────────────────────────────
-// auth0-spa-js reads from this key to decide if the user is authenticated.
+type GraphQLRequestBody = {
+  operationName?: string;
+  query?: string;
+} | null;
 
-const AUTH0_CACHE_KEY = `@@auth0spajs@@::${CLIENT_ID}::${AUDIENCE}::openid profile email`;
-
-const AUTH0_CACHE_VALUE = JSON.stringify({
-  body: {
-    access_token:  FAKE_TOKEN,
-    id_token:      FAKE_TOKEN,
-    scope:         "openid profile email",
-    expires_in:    86400,
-    token_type:    "Bearer",
-    decodedToken: {
-      encoded: { header: HEADER, payload: PAYLOAD, signature: "fake" },
-      header:  { alg: "RS256", typ: "JWT" },
-      user: {
-        sub: TOKEN_PAYLOAD.sub,
-        email: TOKEN_PAYLOAD.email,
-        name: TOKEN_PAYLOAD.name,
-        "https://grainguard.com/tenant_id": "00000000-0000-0000-0000-000000000001",
-        "https://grainguard.com/roles": ["admin", "superadmin"],
-        "https://grainguard/tenant_id": "00000000-0000-0000-0000-000000000001",
-        "https://grainguard/roles": ["admin", "superadmin"],
-      },
-    },
-    audience:  AUDIENCE,
-    client_id: CLIENT_ID,
-  },
-  expiresAt: Math.floor(Date.now() / 1000) + 86400,
-});
+function getOperationName(body: GraphQLRequestBody): string {
+  if (body?.operationName) return body.operationName;
+  const match = body?.query?.match(/\b(?:query|mutation)\s+([A-Za-z0-9_]+)/);
+  return match?.[1] ?? "";
+}
 
 // ─── Mock API responses ───────────────────────────────────────────────────────
 
@@ -118,21 +99,23 @@ export async function injectMockAuth(page: Page): Promise<void> {
 
   // 3. Intercept GraphQL (BFF) — return mock data
   await page.route("**/graphql", (route) => {
-    const body = route.request().postDataJSON() as { query?: string } | null;
-    const query = body?.query ?? "";
+    const body = route.request().postDataJSON() as GraphQLRequestBody;
+    const operationName = getOperationName(body);
 
-    if (query.includes("devices") || query.includes("Devices")) {
+    if (["GetDevices", "GetDevice", "GetDeviceTelemetryHistory"].includes(operationName)) {
       return route.fulfill({
         json: {
           data: {
             devices: MOCK_DEVICES,
             deviceTelemetry: [],
+            deviceTelemetryHistory: [],
+            device: MOCK_DEVICES[0],
           },
         },
       });
     }
 
-    if (query.includes("me") || query.includes("tenant")) {
+    if (["GetMe", "GetTenant"].includes(operationName)) {
       return route.fulfill({
         json: {
           data: {
@@ -158,6 +141,11 @@ export async function injectMockAuth(page: Page): Promise<void> {
 
   // 5. Intercept REST devices endpoint
   await page.route("**/devices**", (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (!pathname.startsWith("/devices")) {
+      return route.fallback();
+    }
+
     if (route.request().method() === "GET") {
       return route.fulfill({ json: MOCK_DEVICES });
     }
@@ -173,12 +161,15 @@ export async function injectMockAuth(page: Page): Promise<void> {
     });
   });
 
-  // 6. Inject Auth0 cache into localStorage before app loads
+  // 6. Inject the fake token before the app loads.
   await page.addInitScript(
-    ({ key, value, token }) => {
-      localStorage.setItem(key, value);
-      localStorage.setItem("__e2e_access_token", token);
+    ({ token }) => {
+      Object.defineProperty(window, "__e2e_access_token__", {
+        value: token,
+        writable: true,
+        configurable: true,
+      });
     },
-    { key: AUTH0_CACHE_KEY, value: AUTH0_CACHE_VALUE, token: FAKE_TOKEN }
+    { token: FAKE_TOKEN }
   );
 }

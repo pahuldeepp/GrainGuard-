@@ -1,7 +1,6 @@
 import {
   createContext,
   useContext,
-  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -44,9 +43,24 @@ type Auth0ContextValue = {
   getAccessTokenSilently: (options?: { authorizationParams?: AuthorizationParams }) => Promise<string>;
 };
 
-const TOKEN_KEY = "__e2e_access_token";
-
 const Auth0Context = createContext<Auth0ContextValue | null>(null);
+
+type E2EWindow = Window & {
+  __e2e_access_token__?: string;
+};
+
+function readToken(): string | null {
+  return (window as E2EWindow).__e2e_access_token__ ?? null;
+}
+
+function writeToken(token: string | null): void {
+  if (token) {
+    (window as E2EWindow).__e2e_access_token__ = token;
+    return;
+  }
+
+  delete (window as E2EWindow).__e2e_access_token__;
+}
 
 function parseTokenPayload(token: string): MockUser | undefined {
   try {
@@ -89,15 +103,7 @@ export function Auth0Provider({
   cacheLocation?: string;
   onRedirectCallback?: (appState?: RedirectAppState) => void;
 }) {
-  const [token, setToken] = useState<string | null>(() =>
-    window.localStorage.getItem(TOKEN_KEY)
-  );
-
-  useEffect(() => {
-    const onStorage = () => setToken(window.localStorage.getItem(TOKEN_KEY));
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, []);
+  const [token, setToken] = useState<string | null>(() => readToken());
 
   const value = useMemo<Auth0ContextValue>(() => {
     const user = token ? parseTokenPayload(token) : undefined;
@@ -117,14 +123,14 @@ export function Auth0Provider({
         onRedirectCallback?.({ returnTo });
       },
       logout(options) {
-        window.localStorage.removeItem(TOKEN_KEY);
+        writeToken(null);
         setToken(null);
         const returnTo = toSameOriginPath(options?.logoutParams?.returnTo ?? "/");
         navigateTo(returnTo, "replace");
         onRedirectCallback?.({ returnTo });
       },
       async getAccessTokenSilently() {
-        const nextToken = token ?? window.localStorage.getItem(TOKEN_KEY);
+        const nextToken = token ?? readToken();
         if (!nextToken) throw new Error("Not authenticated");
         return nextToken;
       },

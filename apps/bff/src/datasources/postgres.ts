@@ -33,8 +33,24 @@ export async function tenantQuery(
   return postgresCircuitBreaker.execute(async () => {
     const client = await pool.connect();
     try {
-      await client.query('SET LOCAL app.current_tenant_id = $1', [tenantId]);
-      return await client.query(text, values as unknown[]) as QueryResult;
+      await client.query("BEGIN");
+      await client.query(
+        "SELECT set_config('app.current_tenant_id', $1, true)",
+        [tenantId]
+      );
+      const result = await client.query(
+        text,
+        values as unknown[] | undefined
+      ) as QueryResult;
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // Release the client even if rollback fails.
+      }
+      throw error;
     } finally {
       client.release();
     }

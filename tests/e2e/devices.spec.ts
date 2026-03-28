@@ -29,6 +29,7 @@ test.describe("Devices page", () => {
 
   test("modal closes on backdrop click", async ({ page }) => {
     await page.getByRole("button", { name: "+ Register Device" }).click();
+    // The dialog role is applied to the overlay, so a corner click exercises the backdrop.
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
     await dialog.click({ position: { x: 5, y: 5 } });
@@ -78,7 +79,7 @@ test.describe("Devices page", () => {
     const refreshRequest = page.waitForResponse((response) =>
       response.url().includes("/graphql") &&
       response.request().method() === "POST" &&
-      /devices|Devices/.test(response.request().postData() ?? "")
+      response.request().postDataJSON()?.operationName === "GetDevices"
     );
     await refreshBtn.click();
     await refreshRequest;
