@@ -2,6 +2,10 @@ version: "2"
 
 run:
   timeout: 5m
+  exclude-dirs:
+    - vendor
+    - node_modules
+    - dist
 
 linters:
   default: none
@@ -13,7 +17,3 @@ linters:
 issues:
   max-issues-per-linter: 50
   max-same-issues: 5
-  exclude-dirs:
-    - vendor
-    - node_modules
-    - dist
