@@ -284,8 +284,7 @@ func handleIngest(w http.ResponseWriter, r *http.Request) {
 	// ── Read body ───────────────────────────────────────────────────────────
 	buf := bodyPool.Get().([]byte)
 	defer func() {
-		//nolint:staticcheck // sync.Pool stores []byte values for reuse in this hot path.
-		bodyPool.Put(buf[:0])
+		bodyPool.Put(buf[:0]) //nolint:staticcheck // SA6002: []byte stored by value; acceptable on this hot path
 	}()
 
 	lr := io.LimitReader(r.Body, 4096)

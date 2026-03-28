@@ -28,33 +28,25 @@ auditLogRouter.get(
     const eventType= req.query.event_type as string | undefined;
     const actorId  = req.query.actor_id   as string | undefined;
 
-    // Build WHERE clauses dynamically — parameterised to prevent SQL injection
-    const conditions: string[] = ["tenant_id = $1"];
-    const params: any[]        = [tenantId];
-
-    if (before) {
-      params.push(new Date(before).toISOString());
-      conditions.push(`created_at < $${params.length}`);
-    }
-    if (eventType) {
-      params.push(eventType);
-      conditions.push(`event_type = $${params.length}`);
-    }
-    if (actorId) {
-      params.push(actorId);
-      conditions.push(`actor_id = $${params.length}`);
-    }
-
-    params.push(limit + 1); // fetch one extra to know if there's a next page
-
+    // Static parameterised query — no user data is interpolated into the SQL string.
+    // Optional filters use IS NULL OR col = $N so CodeQL can verify the taint boundary.
     const { rows } = await pool.query(
       `SELECT id, event_type, actor_id, resource_type, resource_id,
               payload, ip_address, user_agent, created_at
        FROM audit_events
-       WHERE ${conditions.join(" AND ")}
+       WHERE tenant_id = $1
+         AND ($2::timestamptz IS NULL OR created_at < $2)
+         AND ($3::text        IS NULL OR event_type = $3)
+         AND ($4::text        IS NULL OR actor_id   = $4)
        ORDER BY created_at DESC
-       LIMIT $${params.length}`,
-      params
+       LIMIT $5`,
+      [
+        tenantId,
+        before    ? new Date(before).toISOString() : null,
+        eventType ?? null,
+        actorId   ?? null,
+        limit + 1,
+      ]
     );
 
     // Pagination: if we got limit+1 rows there are more
@@ -85,26 +77,16 @@ auditLogRouter.get(
     const eventType = req.query.event_type as string | undefined;
     const actorId   = req.query.actor_id   as string | undefined;
 
-    const conditions: string[] = ["tenant_id = $1"];
-    const params: any[]        = [tenantId];
-
-    if (eventType) {
-      params.push(eventType);
-      conditions.push(`event_type = $${params.length}`);
-    }
-    if (actorId) {
-      params.push(actorId);
-      conditions.push(`actor_id = $${params.length}`);
-    }
-
     const { rows } = await pool.query(
       `SELECT id, event_type, actor_id, resource_type, resource_id,
               ip_address, created_at
        FROM audit_events
-       WHERE ${conditions.join(" AND ")}
+       WHERE tenant_id = $1
+         AND ($2::text IS NULL OR event_type = $2)
+         AND ($3::text IS NULL OR actor_id   = $3)
        ORDER BY created_at DESC
        LIMIT 10000`,   // cap at 10k rows for export safety
-      params
+      [tenantId, eventType ?? null, actorId ?? null]
     );
 
     // Build CSV string in memory — these are small enough
