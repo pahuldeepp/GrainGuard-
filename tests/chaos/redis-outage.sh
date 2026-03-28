@@ -15,6 +15,13 @@ GATEWAY_URL="${GATEWAY_URL:-http://localhost:3000}"
 OUTAGE_SECONDS="${OUTAGE_SECONDS:-45}"
 REDIS_DEPLOY="${REDIS_DEPLOY:-redis}"
 
+# Guarantee Redis is restored even if the script exits early (fail, signal, etc.)
+_restore_redis() {
+  echo "[chaos] EXIT trap — ensuring Redis is restored to 1 replica"
+  kubectl scale deployment "$REDIS_DEPLOY" -n "$NAMESPACE" --replicas=1 2>/dev/null || true
+}
+trap _restore_redis EXIT
+
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 
 log()  { echo -e "${GREEN}[chaos]${NC} $*"; }
@@ -82,7 +89,8 @@ panic_count=$(kubectl logs -n "$NAMESPACE" deploy/saga-orchestrator \
 log "  ✓ saga-orchestrator — no panics"
 
 log "Waiting remaining outage window (${OUTAGE_SECONDS}s total)..."
-sleep "$(( OUTAGE_SECONDS - 15 ))"
+remaining=$(( OUTAGE_SECONDS - 15 ))
+(( remaining > 0 )) && sleep "$remaining"
 
 # ── action: restore Redis ─────────────────────────────────────────────────────
 

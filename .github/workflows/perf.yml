@@ -8,6 +8,9 @@ on:
       - "apps/bff/**"
       - "scripts/load-tests/**"
 
+permissions:
+  contents: read
+
 jobs:
   perf:
     name: k6 Performance Budget
@@ -54,19 +57,29 @@ jobs:
         run: npm ci
         working-directory: apps/gateway
 
+      - name: Ensure Postgres client is available
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y postgresql-client
+          fi
+
       - name: Start gateway in background
         run: npx ts-node src/server.ts &
         working-directory: apps/gateway
         env:
           PORT: 3000
+          NODE_ENV: test
+          AUTH_ENABLED: "false"
           DATABASE_URL: postgres://grainguard:grainguard@localhost:5432/grainguard
+          READ_DATABASE_URL: postgres://grainguard:grainguard@localhost:5432/grainguard
           REDIS_URL: redis://localhost:6379
-          JWKS_URL: ${{ secrets.PERF_JWKS_URL }}
-          JWT_ISSUER: ${{ secrets.PERF_JWT_ISSUER }}
-          JWT_AUDIENCE: ${{ secrets.PERF_JWT_AUDIENCE }}
+          JWKS_URL: https://example.com/.well-known/jwks.json
+          JWT_ISSUER: https://example.com/
+          JWT_AUDIENCE: grainguard
           ALLOWED_ORIGINS: http://localhost:5173
-          STRIPE_SECRET_KEY: sk_test_placeholder
-          STRIPE_WEBHOOK_SECRET: whsec_placeholder
+          STRIPE_SECRET_KEY: test_placeholder
+          STRIPE_WEBHOOK_SECRET: webhook_placeholder
           STRIPE_PRICE_STARTER: price_placeholder
           STRIPE_PRICE_PROFESSIONAL: price_placeholder
           STRIPE_PRICE_ENTERPRISE: price_placeholder
@@ -79,7 +92,7 @@ jobs:
         run: npm ci
         working-directory: apps/bff
 
-      - name: Create minimal read-model tables for BFF startup
+      - name: Create minimal read-model tables for startup
         run: |
           PGPASSWORD=grainguard psql \
             -h localhost \
@@ -93,7 +106,29 @@ jobs:
                   recorded_at timestamptz,
                   updated_at timestamptz,
                   version bigint
-                );'
+                );
+                INSERT INTO device_telemetry_latest (
+                  device_id, tenant_id, temperature, humidity, recorded_at, updated_at, version
+                )
+                VALUES (
+                  '\''00000000-0000-0000-0000-000000000001'\'',
+                  '\''11111111-1111-1111-1111-111111111111'\'',
+                  21.5,
+                  48.2,
+                  NOW(),
+                  NOW(),
+                  1
+                )
+                ON CONFLICT (device_id) DO UPDATE
+                SET tenant_id = EXCLUDED.tenant_id,
+                    temperature = EXCLUDED.temperature,
+                    humidity = EXCLUDED.humidity,
+                    recorded_at = EXCLUDED.recorded_at,
+                    updated_at = EXCLUDED.updated_at,
+                    version = EXCLUDED.version;'
+
+      - name: Create performance results directory
+        run: mkdir -p scripts/load-tests/results
 
       - name: Start BFF in background
         run: npx ts-node-dev --transpile-only src/server.ts &
@@ -129,6 +164,10 @@ jobs:
           k6 run \
             --env GATEWAY_URL=http://localhost:3000 \
             --env BFF_URL=http://localhost:4000 \
+            --env GATEWAY_AUTH_DISABLED=true \
+            --env BFF_AUTH_DISABLED=true \
+            --env JWT=dummy-jwt \
+            --env TEST_DEVICE_ID=00000000-0000-0000-0000-000000000001 \
             scripts/load-tests/performance-budget.js
 
       - name: Upload performance results
