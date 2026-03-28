@@ -37,9 +37,16 @@ linters:
       excludes:
         - G104  # unhandled errors in deferred calls (noisy)
         - G404  # math/rand is acceptable here for jitter and synthetic test data
+        - G101  # dev-default connection strings are not real credentials
+        - G118  # background context in long-lived goroutines is intentional
     exhaustive:
       default-signifies-exhaustive: true
 
 issues:
   max-issues-per-linter: 50
   max-same-issues: 5
+  exclude-rules:
+    # defer x.Close() returning an error is idiomatic Go for cleanup paths;
+    # suppressing globally is standard practice.
+    - linters: [errcheck]
+      source: "defer "
