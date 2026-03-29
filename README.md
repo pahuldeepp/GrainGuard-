@@ -87,9 +87,10 @@ Risk Engine (Python) ── Workflow Alerts (Node.js) ── RabbitMQ ── Job
 |------|-------|
 | Local Docker stack | ✅ Validated end-to-end |
 | GitOps apps in repo | ✅ `dev`, `staging`, and `prod` ArgoCD apps committed |
-| Terraform environments in repo | ✅ `dev` and `staging` committed |
-| Dedicated staging environment | 🟡 Scaffold committed; deploy/validate next |
-| Production rollout strategy | 🟡 Safe rolling deploys now; canary planned for production |
+| Terraform environments in repo | ✅ `dev`, `staging`, `prod`, and `dr` committed |
+| Production canary manifests | ✅ Argo Rollouts + AnalysisTemplate committed |
+| Active AWS infrastructure | ⚪ None (intentionally torn down to stop billing, Mar 29, 2026) |
+| Live production traffic | 🟡 Pending infra re-apply + DNS/TLS + secrets bootstrap |
 
 ---
 
@@ -116,8 +117,8 @@ Risk Engine (Python) ── Workflow Alerts (Node.js) ── RabbitMQ ── Job
 
 ### Prerequisites
 - Docker + Docker Compose
-- Go 1.24+
-- Node.js 20+
+- Go 1.25+
+- Node.js 24+
 - Python 3.12+
 
 ### Start all services
@@ -181,24 +182,27 @@ go run tools/publish-telemetry/main.go
 ## Testing
 
 ```bash
-# Go unit + integration tests
-go test -race -count=1 ./...
+# Full local CI mirror
+make ci
 
-# Go lint
-go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.0 run --timeout=5m
+# Targeted suites
+make test-go
+make test-gateway
+make test-dashboard
+make test-e2e
 
-# k6 load tests (requires running stack)
-k6 run tests/load/spike.js
-k6 run tests/load/soak.js
-k6 run tests/load/stress.js
+# k6 load tests
+make test-load
+k6 run scripts/load-tests/performance-budget.js
+k6 run scripts/load-tests/mixed-stack-stress.js
 
-# Replay + idempotency test
-./scripts/replay/replay_test.sh
+# Chaos suite (Kubernetes environment)
+./tests/chaos/run-all.sh
 ```
 
 Note:
-- The core load-test scripts above are committed in `tests/load/`.
-- Cluster-level chaos automation is not currently committed on `master`; add or restore it before relying on README-driven chaos drills.
+- Load and perf scripts live in `scripts/load-tests/`.
+- Chaos scenarios are committed in `tests/chaos/`.
 
 ## Code Review Automation
 
@@ -257,7 +261,24 @@ terraform apply -var="db_password=yourpassword"
 
 Provisions: VPC · EKS · RDS Postgres · Elasticache Redis · MSK Kafka · DynamoDB · ECR · Secrets Manager
 
-Today, `dev` and `staging` Terraform environments are committed in-repo. The next step is to deploy and validate `staging` before treating the rollout path as production-ready.
+Terraform environments in-repo:
+- `infra/terraform/environments/dev`
+- `infra/terraform/environments/staging`
+- `infra/terraform/environments/prod`
+- `infra/terraform/environments/dr`
+
+### AWS cost shutdown (used in this repo)
+
+If you want zero ongoing cloud cost, destroy the active environment and remove backend/state artifacts:
+
+```bash
+# Example: staging teardown
+cd infra/terraform/environments/staging
+terraform destroy -auto-approve -var="db_password=placeholder"
+
+# Optional: remove Terraform backend artifacts (S3 state bucket + lock table)
+# only if you are done and do not need remote state history
+```
 
 ---
 
@@ -281,8 +302,8 @@ Committed applications today:
 - `grainguard-staging` -> `grainguard-staging`
 - `grainguard-prod` -> `grainguard-prod`
 
-Recommended next environment:
-- `grainguard-staging` -> deploy and validate ingress, TLS, DNS, secrets, restore drills, and production-like auth/billing flows before first prod rollout
+Recommended next rollout:
+- `grainguard-prod` -> apply infra, bootstrap secrets, wire DNS/TLS, then promote traffic through canary gates (5% -> 20% -> 50% -> 100%) only when analysis passes
 
 ---
 
@@ -313,8 +334,8 @@ Recommended next environment:
 | R4 — Observability | SLOs, burn-rate alerts, Grafana dashboard, runbooks | ✅ Done |
 | R5 — Security | CSRF, rate limiting, audit logging, RBAC, API keys | ✅ Done |
 | R6 — SaaS billing | Stripe, tenant onboarding, team management, SSO, webhooks | ✅ Done |
-| R7 — Staging environment | Dedicated Argo app, Terraform env, deployed validation | 🟡 Scaffolded |
-| R8 — Production hardening | Canary rollout, restore proof, deployed auth/webhook validation | 🔜 Next |
+| R7 — Staging environment | Dedicated Argo app, Terraform env, deployed validation | ✅ Done (environment can be recreated on demand) |
+| R8 — Production hardening | Canary rollout, restore proof, deployed auth/webhook validation | 🟡 Canary implemented; live prod rollout pending |
 
 ---
 
