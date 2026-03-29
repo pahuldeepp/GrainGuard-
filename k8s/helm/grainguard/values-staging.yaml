@@ -13,9 +13,11 @@ services:
     image:
       tag: staging-bootstrap
     env:
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
       REDIS_HOST: master.grainguard-staging.2vbpuh.use1.cache.amazonaws.com
       REDIS_PORT: "6379"
       READ_DB_SSL_REJECT_UNAUTHORIZED: "false"
+      STRIPE_SECRET_KEY: sk_test_staging_placeholder
       WRITE_DB_SSL_REJECT_UNAUTHORIZED: "false"
     autoscaling:
       enabled: true
@@ -27,6 +29,7 @@ services:
     image:
       tag: staging-bootstrap
     env:
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
       PORT: "4000"
       REDIS_HOST: master.grainguard-staging.2vbpuh.use1.cache.amazonaws.com
       REDIS_PORT: "6379"
