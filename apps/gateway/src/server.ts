@@ -42,7 +42,7 @@ function isAllowedOrigin(origin: string): boolean {
     if (!allowedOrigin.includes("*")) return false;
 
     const pattern = new RegExp(
-      `^${allowedOrigin.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\\\*/g, ".*")}$`
+      `^${allowedOrigin.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`
     );
     return pattern.test(origin);
   });
