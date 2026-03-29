@@ -4,6 +4,7 @@ import amqp from "amqplib";
 import { writePool as pool } from "../lib/db";
 import { authMiddleware } from "../lib/auth";
 import { writeAuditLog } from "../lib/audit";
+import { apiRateLimiter } from "../middleware/rateLimiting";
 
 const RABBITMQ_URL = process.env.RABBITMQ_URL || "amqp://grainguard:grainguard@rabbitmq:5672/grainguard";
 const STRIPE_BILLING_QUEUE = "grainguard.stripe.billing";
@@ -62,6 +63,7 @@ function parseCurrentPeriodEnd(value: unknown): number | null {
 billingRouter.get(
   "/billing/subscription",
   authMiddleware,
+  apiRateLimiter,
   async (req: Request, res: Response) => {
     const { rows } = await pool.query(
       `SELECT tb.stripe_customer_id,
@@ -121,6 +123,7 @@ billingRouter.get(
 billingRouter.post(
   "/billing/checkout",
   authMiddleware,
+  apiRateLimiter,
   async (req: Request, res: Response) => {
     const { plan } = req.body as { plan: string };
 
@@ -188,6 +191,7 @@ billingRouter.post(
 billingRouter.post(
   "/billing/portal",
   authMiddleware,
+  apiRateLimiter,
   async (req: Request, res: Response) => {
     const { rows } = await pool.query(
       `SELECT stripe_customer_id FROM tenant_billing WHERE tenant_id = $1`,
