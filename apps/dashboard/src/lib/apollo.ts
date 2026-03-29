@@ -16,6 +16,8 @@ import { getAccessTokenSilently } from "./auth0";
  */
 const BFF_URL =
   import.meta.env.VITE_BFF_URL || "http://localhost:4000/graphql";
+const INSECURE_AUTH_ENABLED = import.meta.env.VITE_ALLOW_INSECURE_AUTH === "true";
+const INSECURE_TENANT_ID = import.meta.env.VITE_INSECURE_TENANT_ID ?? "";
 
 /**
  * Build WS URL safely
@@ -30,22 +32,26 @@ const WS_URL = wsUrlObj.toString();
 const authLink = new ApolloLink((operation, forward) => {
   return new Observable((observer) => {
     (async () => {
+      let token = "";
       try {
-        const token = await getAccessTokenSilently({
+        token = await getAccessTokenSilently({
           authorizationParams: {
             audience: import.meta.env.VITE_AUTH0_AUDIENCE,
           },
         });
-
-        operation.setContext(({ headers = {} }) => ({
-          headers: {
-            ...headers,
-            authorization: token ? `Bearer ${token}` : "",
-          },
-        }));
       } catch {
         // silently continue without token
       }
+
+      operation.setContext(({ headers = {} }) => ({
+        headers: {
+          ...headers,
+          authorization: token ? `Bearer ${token}` : "",
+          ...(INSECURE_AUTH_ENABLED && INSECURE_TENANT_ID
+            ? { "x-tenant-id": INSECURE_TENANT_ID }
+            : {}),
+        },
+      }));
 
       forward(operation).subscribe(observer);
     })();
@@ -74,9 +80,16 @@ const wsLink = new GraphQLWsLink(
             audience: import.meta.env.VITE_AUTH0_AUDIENCE,
           },
         });
-        return { authorization: token ? `Bearer ${token}` : "" };
+        return {
+          authorization: token ? `Bearer ${token}` : "",
+          ...(INSECURE_AUTH_ENABLED && INSECURE_TENANT_ID
+            ? { "x-tenant-id": INSECURE_TENANT_ID }
+            : {}),
+        };
       } catch {
-        return {};
+        return INSECURE_AUTH_ENABLED && INSECURE_TENANT_ID
+          ? { "x-tenant-id": INSECURE_TENANT_ID }
+          : {};
       }
     },
   })

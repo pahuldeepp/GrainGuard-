@@ -1,6 +1,8 @@
 import { getAccessTokenSilently } from "./auth0";
 
 const GW = import.meta.env.VITE_GATEWAY_URL ?? "";
+const INSECURE_AUTH_ENABLED = import.meta.env.VITE_ALLOW_INSECURE_AUTH === "true";
+const INSECURE_TENANT_ID = import.meta.env.VITE_INSECURE_TENANT_ID ?? "";
 const CSRF_COOKIE  = "_csrf";
 const CSRF_HEADER  = "x-csrf-token";
 const MUTATING     = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -35,6 +37,9 @@ export async function apiFetch(path: string, options: RequestInit = {}) {
       "Content-Type": "application/json",
       Authorization:  `Bearer ${token}`,
       ...(isMutating ? { [CSRF_HEADER]: getCsrfToken() } : {}),
+      ...(INSECURE_AUTH_ENABLED && INSECURE_TENANT_ID
+        ? { "x-tenant-id": INSECURE_TENANT_ID }
+        : {}),
       ...(options.headers as Record<string, string>),
     };
   }

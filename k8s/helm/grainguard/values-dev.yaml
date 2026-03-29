@@ -1,3 +1,5 @@
+namespace: grainguard-dev
+
 # Dev environment overrides — lower replicas, no autoscaling
 image:
   tag: latest

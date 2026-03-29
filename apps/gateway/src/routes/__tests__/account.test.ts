@@ -75,18 +75,31 @@ describe("DELETE /account/me", () => {
       .mockResolvedValueOnce(undefined as any) // BEGIN
       .mockResolvedValueOnce({ rows: [{ id: "a1" }] } as any) // only admin
       .mockResolvedValueOnce({ rows: [{ id: "u1", role: "admin" }] } as any) // user
-      .mockResolvedValueOnce(undefined as any) // DELETE invites
-      .mockResolvedValueOnce(undefined as any) // DELETE api_keys
-      .mockResolvedValueOnce(undefined as any) // DELETE alert_rules
-      .mockResolvedValueOnce(undefined as any) // DELETE audit_events
+      .mockResolvedValueOnce(undefined as any) // DELETE telemetry_readings
       .mockResolvedValueOnce(undefined as any) // DELETE devices
-      .mockResolvedValueOnce(undefined as any) // DELETE tenant_users
+      .mockResolvedValueOnce({ rows: [{ count: 0 }] } as any) // COUNT audit_events
       .mockResolvedValueOnce(undefined as any) // DELETE tenants
       .mockResolvedValueOnce(undefined as any); // COMMIT
 
     const res = await request(app).delete("/account/me");
     expect(res.status).toBe(200);
     expect(res.body.scope).toBe("tenant");
+  });
+
+  it("reports retained immutable audit events when present", async () => {
+    mockPool.query
+      .mockResolvedValueOnce(undefined as any) // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: "a1" }] } as any) // only admin
+      .mockResolvedValueOnce({ rows: [{ id: "u1", role: "admin" }] } as any) // user
+      .mockResolvedValueOnce(undefined as any) // DELETE telemetry_readings
+      .mockResolvedValueOnce(undefined as any) // DELETE devices
+      .mockResolvedValueOnce({ rows: [{ count: 3 }] } as any) // COUNT audit_events
+      .mockResolvedValueOnce(undefined as any) // DELETE tenants
+      .mockResolvedValueOnce(undefined as any); // COMMIT
+
+    const res = await request(app).delete("/account/me");
+    expect(res.status).toBe(200);
+    expect(res.body.message).toContain("Immutable audit events");
   });
 });
 

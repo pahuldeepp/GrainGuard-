@@ -557,6 +557,8 @@ services:
       dockerfile: apps/gateway/Dockerfile
     container_name: grainguard-gateway
     restart: unless-stopped
+    env_file:
+      - ../../.env
     volumes:
       - ../certs:/certs
     environment:
@@ -578,17 +580,6 @@ services:
       WRITE_DB_NAME: grainguard
       WRITE_DB_USER: postgres
       WRITE_DB_PASSWORD: postgres
-      # Stripe — override via root .env
-      STRIPE_SECRET_KEY: "${STRIPE_SECRET_KEY:-sk_test_placeholder}"
-      STRIPE_WEBHOOK_SECRET: "${STRIPE_WEBHOOK_SECRET:-whsec_placeholder}"
-      STRIPE_PRICE_STARTER: "${STRIPE_PRICE_STARTER:-price_starter_placeholder}"
-      STRIPE_PRICE_PROFESSIONAL: "${STRIPE_PRICE_PROFESSIONAL:-price_pro_placeholder}"
-      STRIPE_PRICE_ENTERPRISE: "${STRIPE_PRICE_ENTERPRISE:-price_enterprise_placeholder}"
-      # Auth0 M2M — override via root .env
-      AUTH0_DOMAIN: "${AUTH0_DOMAIN:-dev-dz6bl3nngdeib7ro.us.auth0.com}"
-      AUTH0_MANAGEMENT_CLIENT_ID: "${AUTH0_MANAGEMENT_CLIENT_ID:-}"
-      AUTH0_MANAGEMENT_CLIENT_SECRET: "${AUTH0_MANAGEMENT_CLIENT_SECRET:-}"
-      AUTH0_M2M_AUDIENCE: "${AUTH0_MANAGEMENT_AUDIENCE:-https://dev-dz6bl3nngdeib7ro.us.auth0.com/api/v2/}"
     depends_on:
       redis:
         condition: service_started
@@ -620,11 +611,12 @@ services:
     container_name: grainguard-grafana
     ports:
       - "3000:3000"
+    env_file:
+      - ../../.env
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_UNIFIED_ALERTING_ENABLED=true
-      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK}
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning
@@ -764,12 +756,11 @@ services:
       dockerfile: apps/jobs-worker/Dockerfile
     container_name: grainguard-jobs-worker
     restart: unless-stopped
+    env_file:
+      - ../../.env
     environment:
       RABBITMQ_URL: amqp://grainguard:grainguard@rabbitmq:5672/grainguard
       DATABASE_URL: postgres://postgres:postgres@pgbouncer-write:5432/grainguard?sslmode=disable
-      # Set RESEND_API_KEY and EMAIL_FROM via root .env to enable real email delivery
-      RESEND_API_KEY: "${RESEND_API_KEY:-}"
-      EMAIL_FROM: "${EMAIL_FROM:-GrainGuard <noreply@grainguard.com>}"
     depends_on:
       rabbitmq:
         condition: service_healthy

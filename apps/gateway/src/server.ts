@@ -36,8 +36,20 @@ const ALLOWED_ORIGINS = (
   .split(",")
   .map((o) => o.trim());
 
-const BFF_HOST = "grainguard-bff";
-const BFF_PORT = 4000;
+function isAllowedOrigin(origin: string): boolean {
+  return ALLOWED_ORIGINS.some((allowedOrigin) => {
+    if (allowedOrigin === origin) return true;
+    if (!allowedOrigin.includes("*")) return false;
+
+    const pattern = new RegExp(
+      `^${allowedOrigin.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`
+    );
+    return pattern.test(origin);
+  });
+}
+
+const BFF_HOST = process.env.BFF_HOST || "grainguard-bff";
+const BFF_PORT = parseInt(process.env.BFF_PORT || "4000", 10);
 
 /**
  * Helmet
@@ -69,7 +81,7 @@ app.use(
   cors({
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
-      if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+      if (isAllowedOrigin(origin)) return cb(null, true);
       return cb(new Error(`CORS blocked for ${origin}`));
     },
     credentials: true,
@@ -104,6 +116,12 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
   );
   next();
 });
+
+app.get("/health", (_req, res) => {
+  res.json({ status: "ok" });
+});
+
+app.get("/metrics", metricsHandler());
 
 /**
  * GraphQL Reverse Proxy — manual node http proxy (bypasses hpm v3 issues)
@@ -230,12 +248,6 @@ app.get(
     }
   }
 );
-
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok" });
-});
-
-app.get("/metrics", metricsHandler());
 
 process.on("SIGTERM", async () => {
   await redis.quit();

@@ -33,6 +33,14 @@ function RegisterDeviceModalContent({ onClose, onRegistered }: Omit<Props, "open
     return () => window.clearTimeout(focusTimer);
   }, [reset]);
 
+  useEffect(() => {
+    const onWindowKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onWindowKeyDown);
+    return () => window.removeEventListener("keydown", onWindowKeyDown);
+  }, [onClose]);
+
   const validate = (value: string): string | null => {
     if (!value.trim()) return "Serial number is required";
     if (!SERIAL_REGEX.test(value.trim()))
@@ -100,8 +108,9 @@ function RegisterDeviceModalContent({ onClose, onRegistered }: Omit<Props, "open
             type="text"
             value={serial}
             onChange={(e) => {
-              setSerial(e.target.value);
-              setValidationError(null);
+              const nextSerial = e.target.value.toUpperCase();
+              setSerial(nextSerial);
+              setValidationError(nextSerial.trim() ? validate(nextSerial) : null);
             }}
             placeholder="e.g. GG-SILO-001"
             className="w-full px-3 py-2 border rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500 border-gray-300 dark:border-gray-700"
@@ -110,7 +119,10 @@ function RegisterDeviceModalContent({ onClose, onRegistered }: Omit<Props, "open
           />
 
           {(validationError || error) && (
-            <p className="mt-2 text-sm text-red-600 dark:text-red-400">
+            <p
+              role="alert"
+              className="mt-2 text-sm text-red-600 dark:text-red-400"
+            >
               {validationError || error}
             </p>
           )}
@@ -130,7 +142,7 @@ function RegisterDeviceModalContent({ onClose, onRegistered }: Omit<Props, "open
             </button>
             <button
               type="submit"
-              disabled={loading || !serial.trim()}
+              disabled={loading || validate(serial) !== null}
               className="flex-1 px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {loading ? (

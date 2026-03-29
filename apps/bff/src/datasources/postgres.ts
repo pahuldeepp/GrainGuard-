@@ -4,17 +4,38 @@ import { cache } from "./redis";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+function shouldUseInsecureTls(connectionString: string | undefined): boolean {
+  if (!connectionString) return false;
+  return /sslmode=(require|verify-ca|verify-full)/i.test(connectionString);
+}
+
+function buildPoolOptions() {
+  const connectionString =
+    process.env.READ_DATABASE_URL ||
+    `postgres://${process.env.READ_DB_USER ?? "postgres"}:${process.env.READ_DB_PASSWORD ?? "postgres"}@${process.env.READ_DB_HOST ?? "postgres-read"}:${process.env.READ_DB_PORT ?? "5432"}/${process.env.READ_DB_NAME ?? "grainguard_read"}`;
+
+  const rejectUnauthorized =
+    process.env.READ_DB_SSL_REJECT_UNAUTHORIZED !== "false";
+
+  return {
+    connectionString,
+    max: 50,
+    ...(shouldUseInsecureTls(connectionString)
+      ? {
+          ssl: {
+            rejectUnauthorized,
+          },
+        }
+      : {}),
+  };
+}
+
 /** Returns true for valid UUID v4 strings — guards against bad JWT claims */
 export function isValidUuid(value: unknown): value is string {
   return typeof value === "string" && UUID_RE.test(value);
 }
 
-const pool = new Pool({
-  connectionString:
-    process.env.READ_DATABASE_URL ||
-    `postgres://${process.env.READ_DB_USER ?? "postgres"}:${process.env.READ_DB_PASSWORD ?? "postgres"}@${process.env.READ_DB_HOST ?? "postgres-read"}:${process.env.READ_DB_PORT ?? "5432"}/${process.env.READ_DB_NAME ?? "grainguard_read"}`,
-  max: 50,
-});
+const pool = new Pool(buildPoolOptions());
 
 type Row = Record<string, unknown>;
 type QueryResult = import("pg").QueryResult<Row>;

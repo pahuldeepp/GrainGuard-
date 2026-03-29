@@ -236,25 +236,32 @@ export function BillingPage() {
                   </li>
                 ))}
               </ul>
-              <button
-                onClick={() => handleUpgrade(plan.key)}
-                disabled={loading === plan.key || isCurrent}
-                className={`w-full py-2 px-4 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                  isCurrent
-                    ? "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 cursor-default"
-                    : plan.highlighted
-                    ? "bg-green-600 text-white hover:bg-green-700"
-                    : "bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-700"
-                }`}
-              >
-                {loading === plan.key
-                  ? "Redirecting..."
-                  : isCurrent
-                  ? "Current plan"
-                  : plan.key === "enterprise"
-                  ? "Contact Sales"
-                  : "Upgrade"}
-              </button>
+              {plan.key === "enterprise" && !isCurrent ? (
+                <a
+                  href="mailto:sales@grainguard.com?subject=Enterprise Plan"
+                  className="block w-full py-2 px-4 rounded-lg text-sm font-medium text-center transition-colors bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-700"
+                >
+                  Contact Sales
+                </a>
+              ) : (
+                <button
+                  onClick={() => handleUpgrade(plan.key)}
+                  disabled={loading === plan.key || isCurrent}
+                  className={`w-full py-2 px-4 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                    isCurrent
+                      ? "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 cursor-default"
+                      : plan.highlighted
+                      ? "bg-green-600 text-white hover:bg-green-700"
+                      : "bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-700"
+                  }`}
+                >
+                  {loading === plan.key
+                    ? "Redirecting..."
+                    : isCurrent
+                    ? "Current plan"
+                    : "Upgrade"}
+                </button>
+              )}
             </div>
           );
         })}

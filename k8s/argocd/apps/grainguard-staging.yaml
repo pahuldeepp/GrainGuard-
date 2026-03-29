@@ -1,0 +1,36 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: grainguard-staging
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  labels:
+    environment: staging
+spec:
+  project: grainguard
+  source:
+    repoURL: https://github.com/pahuldeepp/GrainGuard-.git
+    targetRevision: HEAD
+    path: k8s/helm/grainguard
+    helm:
+      valueFiles:
+        - values.yaml
+        - values-staging.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: grainguard-staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 4
+      backoff:
+        duration: 8s
+        factor: 2
+        maxDuration: 2m
+  revisionHistoryLimit: 7

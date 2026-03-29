@@ -1,5 +1,8 @@
 {{- range $name, $svc := .Values.services }}
 {{- if $svc.enabled }}
+{{- $rolloutCfg := (index $.Values.rollouts $name) | default dict }}
+{{- $rolloutEnabled := $rolloutCfg.enabled | default false }}
+{{- if and (not $rolloutEnabled) (or (ne $name "gateway") (not ($rolloutCfg.strategy | default "" | eq "canary"))) }}
 ---
 apiVersion: v1
 kind: Service
@@ -26,5 +29,59 @@ spec:
       targetPort: {{ $svc.grpcPort }}
       protocol: TCP
     {{- end }}
+{{- else if and $rolloutEnabled (eq ($rolloutCfg.strategy | default "canary") "canary") (eq $name "gateway") }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+    helm.sh/chart: {{ $.Chart.Name }}-{{ $.Chart.Version }}
+spec:
+  type: {{ $svc.serviceType | default "ClusterIP" }}
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+  ports:
+    - name: http
+      port: {{ $svc.port }}
+      targetPort: {{ $svc.port }}
+      protocol: TCP
+    {{- if $svc.grpcPort }}
+    - name: grpc
+      port: {{ $svc.grpcPort }}
+      targetPort: {{ $svc.grpcPort }}
+      protocol: TCP
+    {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-canary
+  namespace: {{ $.Values.namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+    helm.sh/chart: {{ $.Chart.Name }}-{{ $.Chart.Version }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+  ports:
+    - name: http
+      port: {{ $svc.port }}
+      targetPort: {{ $svc.port }}
+      protocol: TCP
+    {{- if $svc.grpcPort }}
+    - name: grpc
+      port: {{ $svc.grpcPort }}
+      targetPort: {{ $svc.grpcPort }}
+      protocol: TCP
+    {{- end }}
+{{- end }}
 {{- end }}
 {{- end }}

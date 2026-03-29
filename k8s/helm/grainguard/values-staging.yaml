@@ -1,0 +1,109 @@
+namespace: grainguard-staging
+
+# Staging environment overrides — production-like topology with slightly
+# reduced capacity so we can validate rollouts, ingress, and restores safely.
+image:
+  registry: 658362403982.dkr.ecr.us-east-1.amazonaws.com/grainguard
+  pullPolicy: Always
+  tag: staging-bootstrap
+
+services:
+  gateway:
+    replicaCount: 2
+    image:
+      tag: staging-bootstrap
+    healthPort: 3000
+    healthPath: /health
+    probeTimeoutSeconds: 5
+    readinessPath: /health
+    env:
+      ALLOWED_ORIGINS: "http://localhost:5173,http://*.elb.amazonaws.com:8080"
+      AUTH_ENABLED: "false"
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
+      REDIS_HOST: master.grainguard-staging.2vbpuh.use1.cache.amazonaws.com
+      REDIS_PORT: "6379"
+      READ_DB_SSL_REJECT_UNAUTHORIZED: "false"
+      STRIPE_SECRET_KEY: sk_test_staging_placeholder
+      WRITE_DB_SSL_REJECT_UNAUTHORIZED: "false"
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 8
+
+  bff:
+    replicaCount: 2
+    image:
+      tag: staging-bootstrap
+    healthPath: /metrics
+    readinessPath: /metrics
+    env:
+      ALLOWED_ORIGINS: "http://localhost:5173,http://*.elb.amazonaws.com:8080"
+      AUTH_ENABLED: "false"
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
+      PORT: "4000"
+      REDIS_HOST: master.grainguard-staging.2vbpuh.use1.cache.amazonaws.com
+      REDIS_PORT: "6379"
+      READ_DB_SSL_REJECT_UNAUTHORIZED: "false"
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 6
+
+  dashboard:
+    enabled: true
+    replicaCount: 1
+    port: 8080
+    healthPath: /
+    readinessPath: /
+    serviceType: LoadBalancer
+    image:
+      tag: staging-dashboard
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 250m
+        memory: 128Mi
+    autoscaling:
+      enabled: false
+    pdb:
+      enabled: false
+    networkPolicy:
+      enabled: true
+      allowExternal: true
+      allowFromSameNamespace: true
+      allowFromServices: []
+
+  telemetry-service:
+    enabled: false
+
+  saga-orchestrator:
+    enabled: false
+
+  read-model-builder:
+    enabled: false
+
+  asset-registry:
+    enabled: false
+
+  risk-engine:
+    enabled: false
+
+  search-indexer:
+    enabled: false
+
+  workflow-alerts:
+    enabled: false
+
+  jobs-worker:
+    enabled: false
+
+  cassandra-writer:
+    enabled: false
+
+  cdc-transformer:
+    enabled: false
+
+  dlq-reprocessor:
+    enabled: false

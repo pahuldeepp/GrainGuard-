@@ -17,7 +17,7 @@ test.describe("Devices page", () => {
   test("Register Device modal opens on click", async ({ page }) => {
     await page.getByRole("button", { name: "+ Register Device" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
-    await expect(page.getByText("Register a Device")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Register Device", exact: true })).toBeVisible();
   });
 
   test("modal closes on Escape", async ({ page }) => {
@@ -37,29 +37,28 @@ test.describe("Devices page", () => {
 
   test("serial number input normalises to uppercase", async ({ page }) => {
     await page.getByRole("button", { name: "+ Register Device" }).click();
-    const input = page.getByLabel("Serial Number");
+    const input = page.getByLabel("Serial Number", { exact: true });
     await input.fill("sn12345678");
     await expect(input).toHaveValue("SN12345678");
   });
 
   test("submit button disabled when serial is too short", async ({ page }) => {
     await page.getByRole("button", { name: "+ Register Device" }).click();
-    const submitBtn = page.getByRole("button", { name: "Register Device" });
+    const submitBtn = page.getByRole("button", { name: "Register Device", exact: true });
     await expect(submitBtn).toBeDisabled();
 
-    await page.getByLabel("Serial Number").fill("SN1");
+    await page.getByLabel("Serial Number", { exact: true }).fill("SN");
     await expect(submitBtn).toBeDisabled();
 
-    await page.getByLabel("Serial Number").fill("SN12");
+    await page.getByLabel("Serial Number", { exact: true }).fill("SN12");
     await expect(submitBtn).toBeEnabled();
   });
 
   test("invalid serial shows validation error", async ({ page }) => {
     await page.getByRole("button", { name: "+ Register Device" }).click();
-    await page.getByLabel("Serial Number").fill("AB!@#");
-    await page.getByRole("button", { name: "Register Device" }).click();
+    await page.getByLabel("Serial Number", { exact: true }).fill("AB!@#");
     await expect(page.getByRole("alert")).toBeVisible();
-    await expect(page.getByRole("alert")).toContainText("4–30 uppercase");
+    await expect(page.getByRole("alert")).toContainText("Only letters, numbers, hyphens and underscores allowed");
   });
 
   test("CSV Export button is present", async ({ page }) => {

@@ -22,12 +22,14 @@ jest.mock("../../lib/auth0Management", () => ({
 
 import { ssoRouter } from "../sso";
 import { writePool as pool } from "../../database/db";
+import { listOrgConnections } from "../../lib/auth0Management";
 
 const app = express();
 app.use(express.json());
 app.use(ssoRouter);
 
 const mockPool = pool as unknown as { query: jest.Mock };
+const mockListOrgConnections = listOrgConnections as jest.Mock;
 
 describe("GET /tenants/me/sso", () => {
   it("returns unconfigured state when no org exists", async () => {
@@ -43,6 +45,16 @@ describe("GET /tenants/me/sso", () => {
     expect(res.status).toBe(200);
     expect(res.body.configured).toBe(true);
     expect(res.body.connections).toHaveLength(1);
+  });
+
+  it("returns a soft warning when Auth0 management is unavailable", async () => {
+    mockPool.query.mockResolvedValue({ rows: [{ auth0_org_id: "org-123" }] } as any);
+    mockListOrgConnections.mockRejectedValueOnce(new Error("SSO not configured"));
+    const res = await request(app).get("/tenants/me/sso");
+    expect(res.status).toBe(200);
+    expect(res.body.configured).toBe(true);
+    expect(res.body.connections).toEqual([]);
+    expect(res.body.warning).toContain("Auth0 management API");
   });
 });
 

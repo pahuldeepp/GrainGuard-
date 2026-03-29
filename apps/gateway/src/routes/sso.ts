@@ -43,9 +43,19 @@ ssoRouter.get(
     }
 
     const orgId = rows[0].auth0_org_id;
-    const connections = await listOrgConnections(orgId);
+    try {
+      const connections = await listOrgConnections(orgId);
 
-    return res.json({ configured: true, orgId, connections });
+      return res.json({ configured: true, orgId, connections });
+    } catch (error) {
+      console.error("[sso] failed to list org connections:", error);
+      return res.json({
+        configured: true,
+        orgId,
+        connections: [],
+        warning: "Auth0 management API is unavailable for the gateway right now.",
+      });
+    }
   }
 );
 

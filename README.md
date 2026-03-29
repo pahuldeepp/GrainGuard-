@@ -2,7 +2,7 @@
 
 > Production-grade, polyglot microservices SaaS platform for grain and agri operations.
 
-GrainGuard ingests high-volume device telemetry, computes spoilage risk scores, triggers automated alert workflows, and ships with full multi-tenant billing, SSO, team management, audit logging, observability, CI/CD, chaos testing, SLO monitoring, and operational runbooks.
+GrainGuard ingests high-volume device telemetry, computes spoilage risk scores, triggers automated alert workflows, and ships with multi-tenant billing, SSO, team management, audit logging, observability, CI/CD, load testing, and operational runbooks.
 
 ---
 
@@ -78,6 +78,18 @@ Risk Engine (Python) ── Workflow Alerts (Node.js) ── RabbitMQ ── Job
 **Security:** Auth0 · JWT/RBAC · CSRF · mTLS · Postgres RLS · Audit logging · Helmet/CORS
 
 **SaaS:** Stripe (Checkout + Webhooks + Customer Portal) · Resend (transactional email) · Auth0 Organizations (SSO/SAML/OIDC)
+
+---
+
+## Current Deployment Status
+
+| Area | State |
+|------|-------|
+| Local Docker stack | ✅ Validated end-to-end |
+| GitOps apps in repo | ✅ `dev`, `staging`, and `prod` ArgoCD apps committed |
+| Terraform environments in repo | ✅ `dev` and `staging` committed |
+| Dedicated staging environment | 🟡 Scaffold committed; deploy/validate next |
+| Production rollout strategy | 🟡 Safe rolling deploys now; canary planned for production |
 
 ---
 
@@ -172,17 +184,21 @@ go run tools/publish-telemetry/main.go
 # Go unit + integration tests
 go test -race -count=1 ./...
 
+# Go lint
+go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.0 run --timeout=5m
+
 # k6 load tests (requires running stack)
 k6 run tests/load/spike.js
 k6 run tests/load/soak.js
 k6 run tests/load/stress.js
 
-# Chaos tests (requires kubectl + live cluster)
-bash tests/chaos/run-all.sh
-
 # Replay + idempotency test
 ./scripts/replay/replay_test.sh
 ```
+
+Note:
+- The core load-test scripts above are committed in `tests/load/`.
+- Cluster-level chaos automation is not currently committed on `master`; add or restore it before relying on README-driven chaos drills.
 
 ## Code Review Automation
 
@@ -215,35 +231,15 @@ Notes:
 
 ---
 
-## Chaos Testing
-
-Five experiments covering the critical failure modes:
-
-| Experiment | What it kills | Pass condition |
-|------------|--------------|----------------|
-| `pod-kill` | gateway, bff, telemetry-service pods | Respawns within 30s |
-| `kafka-consumer-pause` | read-model-builder + cdc-transformer | Lag ≤ 10 000 within 5 min |
-| `redis-outage` | Redis | BFF falls back to DB, no panics |
-| `projection-lag` | read-model-builder | Alert fires, lag recovers in 5 min |
-| `network-partition` | telemetry-service → Kafka egress | Messages buffered, delivered after heal |
-
-```bash
-# Run all experiments
-bash tests/chaos/run-all.sh
-
-# Or trigger via GitHub Actions (manual dispatch)
-# .github/workflows/chaos.yml — also runs weekly on Saturdays
-```
-
----
-
 ## Operational Runbooks
 
 | Runbook | Trigger |
 |---------|---------|
+| [Postgres Backup / Restore](docs/runbooks/postgres-backup-restore.md) | Backup verification, restore drill, data recovery |
 | [Postgres Failover](docs/runbooks/postgres-failover.md) | Primary down, replica lag high |
 | [Kafka Loss](docs/runbooks/kafka-loss.md) | Broker down, under-replicated partitions |
 | [DLQ Spike](docs/runbooks/dlq-spike.md) | `DLQMessagesAccumulating` alert |
+| [Redis Backup / Restore](docs/runbooks/redis-backup-restore.md) | Cache restore drill, persistence recovery |
 | [Redis Failover](docs/runbooks/redis-failover.md) | Cache miss 100%, lock timeouts |
 | [Projection Lag](docs/runbooks/projection-lag.md) | `ProjectionLagHigh` alert |
 | [gRPC Outage](docs/runbooks/grpc-outage.md) | Circuit breaker open, 503 upstream |
@@ -261,6 +257,8 @@ terraform apply -var="db_password=yourpassword"
 
 Provisions: VPC · EKS · RDS Postgres · Elasticache Redis · MSK Kafka · DynamoDB · ECR · Secrets Manager
 
+Today, `dev` and `staging` Terraform environments are committed in-repo. The next step is to deploy and validate `staging` before treating the rollout path as production-ready.
+
 ---
 
 ## Kubernetes (GitOps)
@@ -277,6 +275,14 @@ helm diff upgrade grainguard k8s/helm/grainguard \
 ```
 
 ArgoCD watches `k8s/argocd/apps/` and auto-syncs on every push to master.
+
+Committed applications today:
+- `grainguard-dev` -> `grainguard-dev`
+- `grainguard-staging` -> `grainguard-staging`
+- `grainguard-prod` -> `grainguard-prod`
+
+Recommended next environment:
+- `grainguard-staging` -> deploy and validate ingress, TLS, DNS, secrets, restore drills, and production-like auth/billing flows before first prod rollout
 
 ---
 
@@ -303,21 +309,26 @@ ArgoCD watches `k8s/argocd/apps/` and auto-syncs on every push to master.
 |-------|------|--------|
 | R1 — Core loop | Ingest, CQRS, outbox, saga | ✅ Done |
 | R2 — CDC + Search | Debezium, Elasticsearch, RabbitMQ | ✅ Done |
-| R3 — Reliability | Helm, ArgoCD, k6 load tests, chaos tests | ✅ Done |
+| R3 — Reliability baseline | Helm, ArgoCD scaffolding, k6 load tests, runbooks | ✅ Done |
 | R4 — Observability | SLOs, burn-rate alerts, Grafana dashboard, runbooks | ✅ Done |
 | R5 — Security | CSRF, rate limiting, audit logging, RBAC, API keys | ✅ Done |
 | R6 — SaaS billing | Stripe, tenant onboarding, team management, SSO, webhooks | ✅ Done |
-| R7 — DB migrations | Flyway/Knex migration framework, schema versioning | 🔜 Next |
-| R8 — Secret management | HashiCorp Vault / AWS Secrets Manager integration | 🔜 Planned |
+| R7 — Staging environment | Dedicated Argo app, Terraform env, deployed validation | 🟡 Scaffolded |
+| R8 — Production hardening | Canary rollout, restore proof, deployed auth/webhook validation | 🔜 Next |
 
 ---
 
-## Load test results
+## Latest Local Validation
 
-- Kafka ingest: **1,700 events/sec**
-- Gateway p95 latency: **5.89ms**
-- Read model builder: **2,500–3,000 events/sec** sustained
+Latest mixed read/write validation on `master` (local Docker stack):
+
+- **35,077** total requests
+- **438 req/s** aggregate throughput
+- **0%** HTTP failure rate
+- Gateway GraphQL p95: **11.5 ms**
+- Ingest p95: **10.8 ms**
+- Kafka consumer groups drained back to **0 lag** after the run
 
 ---
 
-*Built to demonstrate end-to-end DDIA patterns, distributed systems, GitOps, SRE practices, and production multi-tenant SaaS architecture.*
+*Built to demonstrate end-to-end DDIA patterns, distributed systems, GitOps, SRE practices, and production-style multi-tenant SaaS architecture.*

@@ -22,12 +22,26 @@ const ISSUER = process.env.JWT_ISSUER!;
 const AUDIENCE = process.env.JWT_AUDIENCE!;
 const ALLOWED_ORIGINS =
   (process.env.ALLOWED_ORIGINS ||
-    "http://localhost:5173,http://localhost:5174,http://localhost:8086").split(",");
+    "http://localhost:5173,http://localhost:5174,http://localhost:8086")
+    .split(",")
+    .map((origin) => origin.trim());
 if (!JWKS_URL || !ISSUER || !AUDIENCE) {
   throw new Error("JWKS_URL, JWT_ISSUER, JWT_AUDIENCE must be set");
 }
 
 const jwks = createRemoteJWKSet(new URL(JWKS_URL));
+
+function isAllowedOrigin(origin: string): boolean {
+  return ALLOWED_ORIGINS.some((allowedOrigin) => {
+    if (allowedOrigin === origin) return true;
+    if (!allowedOrigin.includes("*")) return false;
+
+    const pattern = new RegExp(
+      `^${allowedOrigin.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`
+    );
+    return pattern.test(origin);
+  });
+}
 
 async function verifyToken(token: string) {
   const { payload } = await jwtVerify(token, jwks, {
@@ -133,7 +147,7 @@ async function startServer() {
     cors<cors.CorsRequest>({
       origin: (origin, callback) => {
         if (!origin) return callback(null, true);
-        if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+        if (isAllowedOrigin(origin)) return callback(null, true);
         callback(new Error(`CORS: origin ${origin} not allowed`));
       },
       credentials: true,
