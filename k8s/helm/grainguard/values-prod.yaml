@@ -4,6 +4,15 @@ namespace: grainguard-prod
 image:
   pullPolicy: Always
 
+rollouts:
+  gateway:
+    enabled: true
+    strategy: canary
+    autoPromotionEnabled: false
+    analysis:
+      enabled: true
+      templateName: gateway-slo
+
 services:
   gateway:
     replicaCount: 3

@@ -5,6 +5,29 @@ image:
   tag: latest
   pullPolicy: IfNotPresent
 
+rollouts:
+  gateway:
+    enabled: false
+    strategy: canary
+    maxSurge: 1
+    maxUnavailable: 0
+    autoPromotionEnabled: false
+    steps:
+      - setWeight: 5
+      - pause:
+          duration: 5m
+      - setWeight: 20
+      - pause:
+          duration: 10m
+      - setWeight: 50
+      - pause:
+          duration: 10m
+      - setWeight: 100
+    analysis:
+      enabled: false
+      templateName: gateway-slo
+      prometheusAddress: http://prometheus.monitoring.svc.cluster.local:9090
+
 # ─── Services ────────────────────────────────────────────────────────────────
 services:
 

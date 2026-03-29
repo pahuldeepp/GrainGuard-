@@ -82,7 +82,7 @@ function hasGraphqlErrors(response) {
   try {
     const errors = response.json("errors");
     return Array.isArray(errors) && errors.length > 0;
-  } catch {
+  } catch (error) {
     return true;
   }
 }

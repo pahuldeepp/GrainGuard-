@@ -1,0 +1,37 @@
+{{- $gatewayRollout := (index .Values.rollouts "gateway") | default dict }}
+{{- if and ($gatewayRollout.enabled | default false) (eq ($gatewayRollout.strategy | default "canary") "canary") ($gatewayRollout.analysis.enabled | default false) }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ $gatewayRollout.analysis.templateName | default "gateway-slo" }}
+  namespace: {{ .Values.namespace }}
+spec:
+  metrics:
+    - name: gateway-success-rate
+      interval: 1m
+      count: 3
+      successCondition: result[0] >= 0.99
+      provider:
+        prometheus:
+          address: {{ $gatewayRollout.analysis.prometheusAddress | default "http://prometheus.monitoring.svc.cluster.local:9090" | quote }}
+          query: |
+            sum(rate(http_requests_total{service="gateway",status!~"5.."}[2m]))
+            /
+            sum(rate(http_requests_total{service="gateway"}[2m]))
+
+    - name: gateway-p95-latency
+      interval: 1m
+      count: 3
+      successCondition: result[0] <= 0.5
+      provider:
+        prometheus:
+          address: {{ $gatewayRollout.analysis.prometheusAddress | default "http://prometheus.monitoring.svc.cluster.local:9090" | quote }}
+          query: |
+            histogram_quantile(
+              0.95,
+              sum by (le) (
+                rate(http_request_duration_seconds_bucket{service="gateway"}[2m])
+              )
+            )
+{{- end }}

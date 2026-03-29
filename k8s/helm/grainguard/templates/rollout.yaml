@@ -1,34 +1,55 @@
-{{- range $name, $svc := .Values.services }}
-{{- if $svc.enabled }}
-{{- $rolloutCfg := (index $.Values.rollouts $name) | default dict }}
-{{- if not ($rolloutCfg.enabled | default false) }}
-{{- $rollingUpdate := $svc.rollingUpdate | default dict }}
+{{- $name := "gateway" }}
+{{- $svc := index .Values.services $name }}
+{{- $rollout := (index .Values.rollouts $name) | default dict }}
+{{- if and $svc.enabled ($rollout.enabled | default false) (eq ($rollout.strategy | default "canary") "canary") }}
 ---
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
 metadata:
   name: {{ $name }}
-  namespace: {{ $.Values.namespace }}
+  namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: {{ $name }}
-    app.kubernetes.io/instance: {{ $.Release.Name }}
-    helm.sh/chart: {{ $.Chart.Name }}-{{ $.Chart.Version }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
 spec:
   replicas: {{ $svc.replicaCount | default 1 }}
-  strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxUnavailable: {{ $rollingUpdate.maxUnavailable | default 0 }}
-      maxSurge: {{ $rollingUpdate.maxSurge | default 1 }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ $name }}
-      app.kubernetes.io/instance: {{ $.Release.Name }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  strategy:
+    canary:
+      canaryService: {{ $name }}-canary
+      stableService: {{ $name }}
+      maxSurge: {{ $rollout.maxSurge | default 1 }}
+      maxUnavailable: {{ $rollout.maxUnavailable | default 0 }}
+      autoPromotionEnabled: {{ $rollout.autoPromotionEnabled | default false }}
+      {{- if $rollout.analysis.enabled }}
+      analysis:
+        templates:
+          - templateName: {{ $rollout.analysis.templateName | default "gateway-slo" }}
+      {{- end }}
+      steps:
+{{- if $rollout.steps }}
+{{ toYaml $rollout.steps | indent 8 }}
+{{- else }}
+        - setWeight: 5
+        - pause:
+            duration: 5m
+        - setWeight: 20
+        - pause:
+            duration: 10m
+        - setWeight: 50
+        - pause:
+            duration: 10m
+        - setWeight: 100
+{{- end }}
   template:
     metadata:
       labels:
         app.kubernetes.io/name: {{ $name }}
-        app.kubernetes.io/instance: {{ $.Release.Name }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: {{ $svc.metricsPort | default $svc.port | quote }}
@@ -39,8 +60,8 @@ spec:
         runAsUser: 1000
       containers:
         - name: {{ $name }}
-          image: "{{ $.Values.image.registry }}/{{ $name }}:{{ $svc.image.tag | default $.Values.image.tag }}"
-          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          image: "{{ .Values.image.registry }}/{{ $name }}:{{ $svc.image.tag | default .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
           {{- $httpPort := int $svc.port }}
           {{- $grpcPort := int ($svc.grpcPort | default 0) }}
           {{- $healthPort := int ($svc.healthPort | default 0) }}
@@ -93,6 +114,4 @@ spec:
             limits:
               cpu: {{ $svc.resources.limits.cpu | default "500m" }}
               memory: {{ $svc.resources.limits.memory | default "256Mi" }}
-{{- end }}
-{{- end }}
 {{- end }}

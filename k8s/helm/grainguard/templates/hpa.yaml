@@ -1,5 +1,7 @@
 {{- range $name, $svc := .Values.services }}
 {{- if and $svc.enabled $svc.autoscaling.enabled }}
+{{- $rolloutCfg := (index $.Values.rollouts $name) | default dict }}
+{{- $rolloutEnabled := $rolloutCfg.enabled | default false }}
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
@@ -12,8 +14,13 @@ metadata:
     helm.sh/chart: {{ $.Chart.Name }}-{{ $.Chart.Version }}
 spec:
   scaleTargetRef:
+    {{- if $rolloutEnabled }}
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
+    {{- else }}
     apiVersion: apps/v1
     kind: Deployment
+    {{- end }}
     name: {{ $name }}
   minReplicas: {{ $svc.autoscaling.minReplicas | default 1 }}
   maxReplicas: {{ $svc.autoscaling.maxReplicas | default 5 }}
