@@ -105,6 +105,12 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
   next();
 });
 
+app.get("/health", (_req, res) => {
+  res.json({ status: "ok" });
+});
+
+app.get("/metrics", metricsHandler());
+
 /**
  * GraphQL Reverse Proxy — manual node http proxy (bypasses hpm v3 issues)
  */
@@ -230,12 +236,6 @@ app.get(
     }
   }
 );
-
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok" });
-});
-
-app.get("/metrics", metricsHandler());
 
 process.on("SIGTERM", async () => {
   await redis.quit();
