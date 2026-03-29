@@ -14,6 +14,7 @@ services:
       tag: staging-bootstrap
     healthPort: 3000
     healthPath: /health
+    probeTimeoutSeconds: 5
     readinessPath: /health
     env:
       NODE_TLS_REJECT_UNAUTHORIZED: "0"
