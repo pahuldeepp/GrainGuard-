@@ -108,7 +108,7 @@ function recordResult(ok) {
 function hasGraphqlErrors(response) {
   try {
     const body = response.json();
-    return Array.isArray(body?.errors) && body.errors.length > 0;
+    return Array.isArray(body && body.errors) && body.errors.length > 0;
   } catch (error) {
     return true;
   }
