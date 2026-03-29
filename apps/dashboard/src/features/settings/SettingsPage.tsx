@@ -114,7 +114,7 @@ export function SettingsPage() {
       const a = document.createElement("a");
       a.href = url;
       const disposition = res.headers.get("content-disposition") ?? "";
-      const filenameMatch = disposition.match(/filename=\"?([^"]+)\"?/i);
+      const filenameMatch = disposition.match(/filename="?([^"]+)"?/i);
       a.download = filenameMatch?.[1] ?? `grainguard-export-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
