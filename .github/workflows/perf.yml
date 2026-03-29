@@ -170,7 +170,17 @@ jobs:
             --env BFF_URL=http://localhost:4000 \
             --env GATEWAY_AUTH_DISABLED=true \
             --env BFF_AUTH_DISABLED=true \
+            --env GATEWAY_SAMPLE_PATH=/health \
             --env TEST_DEVICE_ID=00000000-0000-0000-0000-000000000001 \
+            --env BASELINE_RATE=20 \
+            --env BASELINE_DURATION=30s \
+            --env BASELINE_PREALLOCATED_VUS=20 \
+            --env BASELINE_MAX_VUS=40 \
+            --env SPIKE_TARGET=40 \
+            --env SPIKE_RAMP_UP=15s \
+            --env SPIKE_HOLD=15s \
+            --env SPIKE_RAMP_DOWN=15s \
+            --env THINK_TIME_SECONDS=0.05 \
             scripts/load-tests/performance-budget.js
 
       - name: Upload performance results

@@ -128,7 +128,7 @@ export async function injectMockAuth(page: Page): Promise<void> {
   );
 
   // 3. Intercept GraphQL (BFF) — return mock data
-  await page.route("**/graphql", (route) => {
+  await page.route("**/*graphql*", (route) => {
     const body = route.request().postDataJSON() as { query?: string } | null;
     const query = body?.query ?? "";
 

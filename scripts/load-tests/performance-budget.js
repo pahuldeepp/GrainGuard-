@@ -27,6 +27,16 @@ const DEV_TENANT_ID =
   __ENV.DEV_TENANT_ID || "11111111-1111-1111-1111-111111111111";
 const GATEWAY_AUTH_DISABLED = (__ENV.GATEWAY_AUTH_DISABLED || "false") === "true";
 const BFF_AUTH_DISABLED = (__ENV.BFF_AUTH_DISABLED || "false") === "true";
+const GATEWAY_SAMPLE_PATH = __ENV.GATEWAY_SAMPLE_PATH || "";
+const THINK_TIME_SECONDS = Number(__ENV.THINK_TIME_SECONDS || "0.1");
+const BASELINE_RATE = Number(__ENV.BASELINE_RATE || "50");
+const BASELINE_DURATION = __ENV.BASELINE_DURATION || "2m";
+const BASELINE_PREALLOCATED_VUS = Number(__ENV.BASELINE_PREALLOCATED_VUS || "60");
+const BASELINE_MAX_VUS = Number(__ENV.BASELINE_MAX_VUS || "100");
+const SPIKE_TARGET = Number(__ENV.SPIKE_TARGET || "200");
+const SPIKE_RAMP_UP = __ENV.SPIKE_RAMP_UP || "30s";
+const SPIKE_HOLD = __ENV.SPIKE_HOLD || "30s";
+const SPIKE_RAMP_DOWN = __ENV.SPIKE_RAMP_DOWN || "30s";
 
 function gatewayHeaders() {
   if (JWT) return { Authorization: `Bearer ${JWT}` };
@@ -61,26 +71,24 @@ export const options = {
   },
 
   scenarios: {
-    // Baseline: steady 50 RPS for 2 minutes
     baseline: {
       executor:       "constant-arrival-rate",
-      rate:           50,
+      rate:           BASELINE_RATE,
       timeUnit:       "1s",
-      duration:       "2m",
-      preAllocatedVUs:60,
-      maxVUs:         100,
+      duration:       BASELINE_DURATION,
+      preAllocatedVUs:BASELINE_PREALLOCATED_VUS,
+      maxVUs:         BASELINE_MAX_VUS,
     },
 
-    // Spike: ramp from 0 to 200 VU in 30s, hold 30s, ramp down
     spike: {
       executor: "ramping-vus",
       startVUs: 0,
       stages: [
-        { duration: "30s", target: 200 },
-        { duration: "30s", target: 200 },
-        { duration: "30s", target: 0 },
+        { duration: SPIKE_RAMP_UP, target: SPIKE_TARGET },
+        { duration: SPIKE_HOLD, target: SPIKE_TARGET },
+        { duration: SPIKE_RAMP_DOWN, target: 0 },
       ],
-      startTime: "2m",   // starts after baseline finishes
+      startTime: BASELINE_DURATION,
     },
   },
 };
@@ -99,8 +107,8 @@ function recordResult(ok) {
 
 function hasGraphqlErrors(response) {
   try {
-    const errors = response.json("errors");
-    return Array.isArray(errors) && errors.length > 0;
+    const body = response.json();
+    return Array.isArray(body?.errors) && body.errors.length > 0;
   } catch (error) {
     return true;
   }
@@ -115,8 +123,17 @@ export default function () {
   recordResult(healthOk);
   gatewayP95.add(healthRes.timings.duration);
 
-  // 2. Gateway: GET /devices/:id/latest
-  if (JWT || GATEWAY_AUTH_DISABLED) {
+  // 2. Gateway: hit a deterministic route that matches the environment.
+  if (GATEWAY_SAMPLE_PATH) {
+    const gatewaySampleRes = http.get(
+      `${GATEWAY_URL}${GATEWAY_SAMPLE_PATH}`,
+      { tags: { endpoint: "gateway" } }
+    );
+    const ok = gatewaySampleRes.status === 200;
+    check(gatewaySampleRes, { "gateway sample ok": () => ok });
+    recordResult(ok);
+    gatewayP95.add(gatewaySampleRes.timings.duration);
+  } else if (JWT || GATEWAY_AUTH_DISABLED) {
     const devRes = http.get(
       `${GATEWAY_URL}/devices/${TEST_DEVICE_ID}/latest`,
       { headers: gatewayHeaders(), tags: { endpoint: "gateway" } }
@@ -154,7 +171,7 @@ export default function () {
     bffP95.add(gqlRes.timings.duration);
   }
 
-  sleep(0.1); // 100ms think time between requests
+  sleep(THINK_TIME_SECONDS);
 }
 
 // ── Summary output ────────────────────────────────────────────────────────────

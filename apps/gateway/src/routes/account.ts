@@ -5,13 +5,12 @@ import { writePool as pool } from "../database/db";
 
 export const accountRouter = Router();
 
-accountRouter.use(apiRateLimiter);
-
 // ── GET /account/me ─────────────────────────────────────────────────────────
 // Returns the current user's profile and tenant info.
 accountRouter.get(
   "/account/me",
   authMiddleware,
+  apiRateLimiter,
   async (req: Request, res: Response) => {
     const tenantId = req.user!.tenantId;
     const userId = req.user!.sub;
@@ -46,8 +45,8 @@ accountRouter.get(
 // If the user is the last admin, the entire tenant is deleted.
 accountRouter.delete(
   "/account/me",
-  apiRateLimiter,
   authMiddleware,
+  apiRateLimiter,
   async (req: Request, res: Response) => {
     const tenantId = req.user!.tenantId;
     const userId = req.user!.sub;
@@ -132,8 +131,8 @@ accountRouter.delete(
 // GDPR Article 20 — Right to Data Portability. Returns all user data as JSON.
 accountRouter.get(
   "/account/export",
-  apiRateLimiter,
   authMiddleware,
+  apiRateLimiter,
   async (req: Request, res: Response) => {
     try {
       const tenantId = req.user!.tenantId;
