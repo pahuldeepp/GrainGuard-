@@ -69,6 +69,8 @@ jobs:
         working-directory: apps/gateway
         env:
           PORT: 3000
+          BFF_HOST: localhost
+          BFF_PORT: "4000"
           NODE_ENV: test
           AUTH_ENABLED: "false"
           DATABASE_URL: postgres://grainguard:grainguard@localhost:5432/grainguard
@@ -168,7 +170,6 @@ jobs:
             --env BFF_URL=http://localhost:4000 \
             --env GATEWAY_AUTH_DISABLED=true \
             --env BFF_AUTH_DISABLED=true \
-            --env JWT=dummy-jwt \
             --env TEST_DEVICE_ID=00000000-0000-0000-0000-000000000001 \
             scripts/load-tests/performance-budget.js
 

@@ -36,8 +36,8 @@ const ALLOWED_ORIGINS = (
   .split(",")
   .map((o) => o.trim());
 
-const BFF_HOST = "grainguard-bff";
-const BFF_PORT = 4000;
+const BFF_HOST = process.env.BFF_HOST || "grainguard-bff";
+const BFF_PORT = parseInt(process.env.BFF_PORT || "4000", 10);
 
 /**
  * Helmet

@@ -18,6 +18,8 @@ const PAYLOAD = b64({
   aud:    "https://api.grainguard.com",
   iat:    Math.floor(Date.now() / 1000),
   exp:    Math.floor(Date.now() / 1000) + 86400, // 24h
+  "https://grainguard.com/tenant_id": "00000000-0000-0000-0000-000000000001",
+  "https://grainguard.com/roles":     ["admin"],
   "https://grainguard/tenant_id": "00000000-0000-0000-0000-000000000001",
   "https://grainguard/roles":     ["admin"],
 });
@@ -29,13 +31,15 @@ export const FAKE_TOKEN = `${HEADER}.${PAYLOAD}.fake_signature`;
 
 const CLIENT_ID = process.env.VITE_AUTH0_CLIENT_ID || "6DwwDrUpsC4LckBieVQdlGYtguTPnYys";
 const AUDIENCE  = process.env.VITE_AUTH0_AUDIENCE  || "https://api.grainguard.com";
-const AUTH0_CACHE_KEY = `@@auth0spajs@@::${CLIENT_ID}::${AUDIENCE}::openid profile email`;
+const SCOPE = "openid profile email offline_access";
+const MOCK_TENANT_ID = "00000000-0000-0000-0000-000000000001";
+const AUTH0_CACHE_KEY = `@@auth0spajs@@::${CLIENT_ID}::${AUDIENCE}::${SCOPE}`;
 
 const AUTH0_CACHE_VALUE = JSON.stringify({
   body: {
     access_token:  FAKE_TOKEN,
     id_token:      FAKE_TOKEN,
-    scope:         "openid profile email",
+    scope:         SCOPE,
     expires_in:    86400,
     token_type:    "Bearer",
     decodedToken: {
@@ -45,6 +49,10 @@ const AUTH0_CACHE_VALUE = JSON.stringify({
         sub:   "auth0|e2e-test-user",
         email: "e2e@grainguard.com",
         name:  "E2E Test User",
+        "https://grainguard.com/tenant_id": MOCK_TENANT_ID,
+        "https://grainguard/tenant_id": MOCK_TENANT_ID,
+        "https://grainguard.com/roles": ["admin"],
+        "https://grainguard/roles": ["admin"],
       },
     },
     audience:  AUDIENCE,
@@ -56,26 +64,45 @@ const AUTH0_CACHE_VALUE = JSON.stringify({
 // ─── Mock API responses ───────────────────────────────────────────────────────
 
 const MOCK_DEVICES = [
-  { id: "dev-1", serialNumber: "SN00100001", status: "online",  lastSeen: new Date().toISOString() },
-  { id: "dev-2", serialNumber: "SN00100002", status: "offline", lastSeen: new Date().toISOString() },
+  {
+    deviceId: "00000000-0000-0000-0000-000000000001",
+    tenantId: MOCK_TENANT_ID,
+    serialNumber: "SN00100001",
+    temperature: 21.5,
+    humidity: 48.2,
+    recordedAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+  },
+  {
+    deviceId: "00000000-0000-0000-0000-000000000002",
+    tenantId: MOCK_TENANT_ID,
+    serialNumber: "SN00100002",
+    temperature: null,
+    humidity: null,
+    recordedAt: null,
+    createdAt: new Date().toISOString(),
+  },
 ];
 
 const MOCK_SUBSCRIPTION = {
   plan: "professional",
-  subscription_status: "active",
-  trial_ends_at: null,
-  current_period_end: new Date(Date.now() + 30 * 86400 * 1000).toISOString(),
+  status: "active",
+  trialEndsAt: null,
+  currentPeriodEnd: Math.floor((Date.now() + 30 * 86400 * 1000) / 1000),
+  cancelAtPeriodEnd: false,
+  paymentFailed: false,
 };
 
 const MOCK_DEVICES_CONNECTION = {
   edges: MOCK_DEVICES.map((device) => ({
-    cursor: device.id,
+    cursor: device.deviceId,
     node: device,
   })),
   pageInfo: {
-    endCursor: MOCK_DEVICES.at(-1)?.id ?? null,
+    endCursor: MOCK_DEVICES.at(-1)?.deviceId ?? null,
     hasNextPage: false,
   },
+  totalCount: MOCK_DEVICES.length,
 };
 
 // ─── injectMockAuth ───────────────────────────────────────────────────────────
@@ -155,9 +182,9 @@ export async function injectMockAuth(page: Page): Promise<void> {
         json: {
           data: {
             me: {
-              id:       "00000000-0000-0000-0000-000000000001",
+              id:       MOCK_TENANT_ID,
               email:    "e2e@grainguard.com",
-              tenantId: "00000000-0000-0000-0000-000000000001",
+              tenantId: MOCK_TENANT_ID,
               plan:     "professional",
             },
           },
@@ -187,15 +214,24 @@ export async function injectMockAuth(page: Page): Promise<void> {
     if (route.request().method() === "GET") {
       return route.fulfill({ json: MOCK_DEVICES });
     }
-    return route.fulfill({ json: { deviceId: "dev-new", serialNumber: "SNNEW001" } });
+    return route.fulfill({
+      json: {
+        deviceId: "00000000-0000-0000-0000-000000000099",
+        tenantId: MOCK_TENANT_ID,
+        serialNumber: "SNNEW001",
+      },
+    });
   });
 
   // 6. Inject Auth0 cache into localStorage before app loads
   await page.addInitScript(
-    ({ key, value, token }) => {
+    ({ clientId, key, value, token }) => {
       localStorage.setItem(key, value);
+      localStorage.setItem("auth0.is.authenticated", "true");
+      document.cookie = `auth0.is.authenticated=true; path=/`;
+      document.cookie = `auth0.${clientId}.is.authenticated=true; path=/`;
       localStorage.setItem("__e2e_access_token", token);
     },
-    { key: AUTH0_CACHE_KEY, value: AUTH0_CACHE_VALUE, token: FAKE_TOKEN }
+    { clientId: CLIENT_ID, key: AUTH0_CACHE_KEY, value: AUTH0_CACHE_VALUE, token: FAKE_TOKEN }
   );
 }

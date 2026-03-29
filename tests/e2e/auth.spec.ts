@@ -38,12 +38,12 @@ test.describe("Authenticated user", () => {
 
   test("devices page loads after login", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: "Devices" })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("heading", { name: "Devices", exact: true })).toBeVisible({ timeout: 15_000 });
   });
 
   test("billing page shows plan cards", async ({ page }) => {
     await page.goto("/billing");
-    await expect(page.getByText("Starter")).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText("Professional")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Starter", exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole("heading", { name: "Professional", exact: true })).toBeVisible();
   });
 });

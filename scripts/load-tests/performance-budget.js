@@ -23,8 +23,27 @@ const BFF_URL = __ENV.BFF_URL || "http://localhost:8086";
 const JWT = __ENV.JWT || "";
 const TEST_DEVICE_ID =
   __ENV.TEST_DEVICE_ID || "00000000-0000-0000-0000-000000000001";
+const DEV_TENANT_ID =
+  __ENV.DEV_TENANT_ID || "11111111-1111-1111-1111-111111111111";
 const GATEWAY_AUTH_DISABLED = (__ENV.GATEWAY_AUTH_DISABLED || "false") === "true";
 const BFF_AUTH_DISABLED = (__ENV.BFF_AUTH_DISABLED || "false") === "true";
+
+function gatewayHeaders() {
+  if (JWT) return { Authorization: `Bearer ${JWT}` };
+  if (GATEWAY_AUTH_DISABLED) return { "x-tenant-id": DEV_TENANT_ID };
+  return {};
+}
+
+function graphqlHeaders() {
+  if (JWT) return COMMON_HEADERS;
+  if (BFF_AUTH_DISABLED) {
+    return {
+      "Content-Type": "application/json",
+      "x-tenant-id": DEV_TENANT_ID,
+    };
+  }
+  return { "Content-Type": "application/json" };
+}
 
 // ── Thresholds (performance budget) ──────────────────────────────────────────
 // If any threshold fails, k6 exits with code 99 and CI marks the step as failed.
@@ -98,10 +117,9 @@ export default function () {
 
   // 2. Gateway: GET /devices/:id/latest
   if (JWT || GATEWAY_AUTH_DISABLED) {
-    const gatewayHeaders = JWT ? COMMON_HEADERS : undefined;
     const devRes = http.get(
       `${GATEWAY_URL}/devices/${TEST_DEVICE_ID}/latest`,
-      { headers: gatewayHeaders, tags: { endpoint: "gateway" } }
+      { headers: gatewayHeaders(), tags: { endpoint: "gateway" } }
     );
     const ok = devRes.status === 200 || devRes.status === 404;
     recordResult(ok);
@@ -110,9 +128,6 @@ export default function () {
 
   // 3. BFF: GraphQL telemetry query
   if (JWT || BFF_AUTH_DISABLED) {
-    const graphqlHeaders = JWT
-      ? COMMON_HEADERS
-      : { "Content-Type": "application/json" };
     const gqlRes = http.post(
       `${BFF_URL}/graphql`,
       JSON.stringify({
@@ -130,7 +145,7 @@ export default function () {
           deviceId: TEST_DEVICE_ID,
         },
       }),
-      { headers: graphqlHeaders, tags: { endpoint: "bff" } }
+      { headers: graphqlHeaders(), tags: { endpoint: "bff" } }
     );
 
     const bffOk = gqlRes.status === 200 && !hasGraphqlErrors(gqlRes);

@@ -10,9 +10,9 @@ test.describe("Billing page", () => {
   });
 
   test("shows three plan cards", async ({ page }) => {
-    await expect(page.getByText("Starter")).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText("Professional")).toBeVisible();
-    await expect(page.getByText("Enterprise")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Starter", exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole("heading", { name: "Professional", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Enterprise", exact: true })).toBeVisible();
   });
 
   test("shows plan prices", async ({ page }) => {

@@ -53,11 +53,11 @@ resource "aws_cloudwatch_log_group" "msk" {
 resource "aws_msk_cluster" "main" {
   cluster_name           = "${var.project}-${var.environment}"
   kafka_version          = "3.6.0"
-  number_of_broker_nodes = var.environment == "prod" ? 3 : 1
+  number_of_broker_nodes = var.environment == "prod" ? 3 : 2
 
   broker_node_group_info {
     instance_type   = var.instance_type
-    client_subnets  = slice(var.private_subnet_ids, 0, var.environment == "prod" ? 3 : 1)
+    client_subnets  = slice(var.private_subnet_ids, 0, var.environment == "prod" ? 3 : 2)
     security_groups = [aws_security_group.msk.id]
 
     storage_info {
@@ -86,7 +86,7 @@ resource "aws_msk_cluster" "main" {
 
   open_monitoring {
     prometheus {
-      jmx_exporter  { enabled_in_broker = true }
+      jmx_exporter { enabled_in_broker = true }
       node_exporter { enabled_in_broker = true }
     }
   }
