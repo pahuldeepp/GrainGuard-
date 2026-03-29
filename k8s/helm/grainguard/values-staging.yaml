@@ -4,6 +4,7 @@ namespace: grainguard-staging
 # reduced capacity so we can validate rollouts, ingress, and restores safely.
 image:
   pullPolicy: Always
+  tag: staging-bootstrap
 
 services:
   gateway:
@@ -11,6 +12,8 @@ services:
     env:
       REDIS_HOST: master.grainguard-staging.2vbpuh.use1.cache.amazonaws.com
       REDIS_PORT: "6379"
+      READ_DB_SSL_REJECT_UNAUTHORIZED: "false"
+      WRITE_DB_SSL_REJECT_UNAUTHORIZED: "false"
     autoscaling:
       enabled: true
       minReplicas: 2
@@ -22,6 +25,7 @@ services:
       PORT: "4000"
       REDIS_HOST: master.grainguard-staging.2vbpuh.use1.cache.amazonaws.com
       REDIS_PORT: "6379"
+      READ_DB_SSL_REJECT_UNAUTHORIZED: "false"
     autoscaling:
       enabled: true
       minReplicas: 2

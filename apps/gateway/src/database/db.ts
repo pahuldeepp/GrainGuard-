@@ -1,5 +1,25 @@
 import { Pool } from "pg";
 
+function shouldUseTls(connectionString: string | undefined): boolean {
+  if (!connectionString) return false;
+  return /sslmode=(require|verify-ca|verify-full)/i.test(connectionString);
+}
+
+function buildPoolConfig(connectionString: string | undefined, envVar: string) {
+  const rejectUnauthorized = process.env[envVar] !== "false";
+
+  return {
+    connectionString,
+    ...(shouldUseTls(connectionString)
+      ? {
+          ssl: {
+            rejectUnauthorized,
+          },
+        }
+      : {}),
+  };
+}
+
 function buildWriteConnectionString(): string {
   if (process.env.WRITE_DATABASE_URL) {
     return process.env.WRITE_DATABASE_URL;
@@ -19,13 +39,18 @@ function buildWriteConnectionString(): string {
 }
 
 export const pool = new Pool({
-  connectionString:
+  ...buildPoolConfig(
     process.env.READ_DATABASE_URL ||
-    "postgres://postgres:postgres@postgres-read:5432/grainguard_read",
+      "postgres://postgres:postgres@postgres-read:5432/grainguard_read",
+    "READ_DB_SSL_REJECT_UNAUTHORIZED"
+  ),
 });
 
 export const writePool = new Pool({
-  connectionString: buildWriteConnectionString(),
+  ...buildPoolConfig(
+    buildWriteConnectionString(),
+    "WRITE_DB_SSL_REJECT_UNAUTHORIZED"
+  ),
 });
 
 pool.on("connect", () => {
