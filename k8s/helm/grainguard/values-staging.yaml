@@ -10,6 +10,8 @@ image:
 services:
   gateway:
     replicaCount: 2
+    image:
+      tag: staging-bootstrap
     env:
       REDIS_HOST: master.grainguard-staging.2vbpuh.use1.cache.amazonaws.com
       REDIS_PORT: "6379"
@@ -22,6 +24,8 @@ services:
 
   bff:
     replicaCount: 2
+    image:
+      tag: staging-bootstrap
     env:
       PORT: "4000"
       REDIS_HOST: master.grainguard-staging.2vbpuh.use1.cache.amazonaws.com
