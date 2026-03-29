@@ -3,6 +3,7 @@ namespace: grainguard-staging
 # Staging environment overrides — production-like topology with slightly
 # reduced capacity so we can validate rollouts, ingress, and restores safely.
 image:
+  registry: 658362403982.dkr.ecr.us-east-1.amazonaws.com/grainguard
   pullPolicy: Always
   tag: staging-bootstrap
 
