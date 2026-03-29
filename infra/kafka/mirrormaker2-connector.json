@@ -1,0 +1,39 @@
+{
+  "name": "grainguard-mm2-primary-to-dr",
+  "config": {
+    "connector.class": "org.apache.kafka.connect.mirror.MirrorSourceConnector",
+
+    "source.cluster.alias": "primary",
+    "target.cluster.alias": "dr",
+
+    "source.cluster.bootstrap.servers": "${PRIMARY_KAFKA_BOOTSTRAP}",
+    "target.cluster.bootstrap.servers": "${DR_KAFKA_BOOTSTRAP}",
+
+    "topics": "telemetry.raw,device.events,risk.scores,saga.commands,saga.events",
+
+    "replication.factor": 3,
+
+    "sync.topic.acls.enabled": "false",
+    "sync.group.offsets.enabled": "true",
+    "sync.group.offsets.interval.seconds": "30",
+
+    "refresh.topics.interval.seconds": "30",
+
+    "source.cluster.sasl.mechanism": "SCRAM-SHA-512",
+    "source.cluster.security.protocol": "SASL_SSL",
+    "source.cluster.sasl.jaas.config": "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"${KAFKA_USERNAME}\" password=\"${KAFKA_PASSWORD}\";",
+
+    "target.cluster.sasl.mechanism": "SCRAM-SHA-512",
+    "target.cluster.security.protocol": "SASL_SSL",
+    "target.cluster.sasl.jaas.config": "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"${KAFKA_USERNAME}\" password=\"${KAFKA_PASSWORD}\";",
+
+    "tasks.max": "4",
+
+    "checkpoints.topic.replication.factor": "3",
+    "heartbeats.topic.replication.factor": "3",
+    "offset-syncs.topic.replication.factor": "3",
+
+    "emit.heartbeats.interval.seconds": "5",
+    "emit.checkpoints.interval.seconds": "30"
+  }
+}

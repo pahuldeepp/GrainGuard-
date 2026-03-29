@@ -77,6 +77,7 @@ teamRouter.post(
     );
 
     // Send Auth0 org invite so the user gets an email and lands in the org
+    // Auth0 org invite — requires auth0_org_id from tenant table
     pool.query("SELECT auth0_org_id FROM tenants WHERE id = $1", [tenantId])
       .then((result: { rows: Array<{ auth0_org_id?: string }> }) => {
         const rows = result.rows;
@@ -85,7 +86,7 @@ teamRouter.post(
           orgId:       rows[0].auth0_org_id,
           email:       email.trim().toLowerCase(),
           role:        memberRole,
-          inviterName: req.user!.sub,
+          inviterName: "GrainGuard",
         });
       })
       .catch((_e: unknown) =>

@@ -1,11 +1,15 @@
 /**
  * Circuit Breaker — protects BFF from Postgres failures
  *
+ * Hybrid: local state for fast decisions + Redis for cross-pod coordination.
+ * If Redis is unavailable, falls back to local-only (same as before).
+ *
  * States:
  *   CLOSED    → normal operation, requests flow through
  *   OPEN      → Postgres unhealthy, requests fail fast
  *   HALF_OPEN → testing recovery, one request allowed
  */
+import { cache } from "../datasources/redis";
 
 type State = "CLOSED" | "OPEN" | "HALF_OPEN";
 
@@ -33,7 +37,39 @@ export class CircuitBreaker {
     this.name             = opts.name             ?? "circuit-breaker";
   }
 
+  /** Sync shared state from Redis (best-effort) */
+  private async syncFromRedis(): Promise<void> {
+    try {
+      const shared = await cache.get<{ state: State; failureCount: number; lastFailureTime: number }>(
+        `cb:${this.name}`
+      );
+      if (shared && shared.failureCount > this.failureCount) {
+        this.state = shared.state;
+        this.failureCount = shared.failureCount;
+        this.lastFailureTime = shared.lastFailureTime;
+      }
+    } catch {
+      // Redis unavailable — use local state only
+    }
+  }
+
+  /** Publish local state to Redis (best-effort) */
+  private async syncToRedis(): Promise<void> {
+    try {
+      await cache.set(`cb:${this.name}`, {
+        state: this.state,
+        failureCount: this.failureCount,
+        lastFailureTime: this.lastFailureTime,
+      }, 120);
+    } catch {
+      // Redis unavailable — local state only
+    }
+  }
+
   async execute<T>(fn: () => Promise<T>): Promise<T> {
+    // Sync shared circuit state from Redis before checking
+    await this.syncFromRedis();
+
     // OPEN — check if timeout has elapsed to move to HALF_OPEN
     if (this.state === "OPEN") {
       const elapsed = Date.now() - this.lastFailureTime;
@@ -43,7 +79,6 @@ export class CircuitBreaker {
           `[${this.name}] Circuit OPEN — Postgres unavailable. Retry in ${remaining}s`
         );
       }
-      // Timeout elapsed — test with one request
       console.warn(
         JSON.stringify({
           level: "warn",
@@ -85,6 +120,7 @@ export class CircuitBreaker {
       if (this.successCount >= this.successThreshold) {
         this.state = "CLOSED";
         this.successCount = 0;
+        this.syncToRedis();
         console.log(
           JSON.stringify({
             level: "info",
@@ -103,9 +139,9 @@ export class CircuitBreaker {
     this.lastFailureTime = Date.now();
 
     if (this.state === "HALF_OPEN") {
-      // Failed during test — reopen immediately
       this.state = "OPEN";
       this.successCount = 0;
+      this.syncToRedis();
       console.error(
         JSON.stringify({
           level: "error",
@@ -120,6 +156,7 @@ export class CircuitBreaker {
 
     if (this.failureCount >= this.failureThreshold) {
       this.state = "OPEN";
+      this.syncToRedis();
       console.error(
         JSON.stringify({
           level: "error",

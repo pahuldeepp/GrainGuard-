@@ -7,6 +7,8 @@ import { createDevice } from "./services/device";
 import { getDeviceLatestTelemetry } from "./services/device-query";
 import { redis } from "./cache/redis";
 import { pool } from "./database/db";
+import { writeAuditLog as logAuditEvent } from "./lib/audit";
+
 import { metricsHandler, requestLatency } from "./observability/metrics";
 import { requestIdMiddleware } from "./middleware/requestId";
 import { authMiddleware } from "./middleware/auth";
@@ -188,10 +190,26 @@ app.post(
         userId,
         authHeader
       );
-
+      logAuditEvent({
+        eventType: "device.created",
+        actorId: userId,
+        tenantId,
+        resourceType: "device",
+        resourceId: result?.deviceId || serialNumber,
+        meta: { serialNumber, requestId },
+        ipAddress: req.ip,
+      });
       return res.json(result);
     } catch (err) {
       console.error(err);
+      logAuditEvent({
+        eventType: "device.creation_failed",
+        actorId: req.user?.sub || "unknown",
+        tenantId: req.user?.tenantId || "00000000-0000-0000-0000-000000000000",
+        resourceType: "device",
+        meta: { serialNumber: req.body?.serialNumber, error: String(err) },
+        ipAddress: req.ip,
+      });
       return res.status(500).json({ error: "Failed to create device" });
     }
   }

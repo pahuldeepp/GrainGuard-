@@ -35,3 +35,16 @@ type Saga struct {
 	PayloadJSON   []byte // raw JSON payload stored in DB
 	LastError     string
 }
+
+var validStatuses = map[SagaStatus]bool{
+	StatusStarted:      true,
+	StatusInProgress:   true,
+	StatusCompensating: true,
+	StatusCompleted:    true,
+	StatusFailed:       true,
+}
+
+// IsValidStatus checks whether a status string is a known SagaStatus.
+func IsValidStatus(s SagaStatus) bool {
+	return validStatuses[s]
+}

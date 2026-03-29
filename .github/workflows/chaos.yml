@@ -1,0 +1,122 @@
+name: Chaos Tests
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      experiment:
+        description: 'Experiment to run'
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - pod-kill
+          - kafka-consumer-pause
+          - redis-outage
+          - projection-lag
+          - network-partition
+      namespace:
+        description: 'Target namespace'
+        required: true
+        default: grainguard-dev
+  schedule:
+    # Run full suite every Saturday at 02:00 UTC (off-peak)
+    - cron: '0 2 * * 6'
+
+env:
+  NAMESPACE: ${{ github.event.inputs.namespace || 'grainguard-dev' }}
+
+jobs:
+  chaos:
+    name: Chaos — ${{ github.event.inputs.experiment || 'all' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.29.0'
+
+      - name: Set kubeconfig
+        run: |
+          mkdir -p "${HOME}/.kube"
+          echo "${{ secrets.KUBECONFIG_DEV }}" | base64 -d > "${HOME}/.kube/config"
+          chmod 600 "${HOME}/.kube/config"
+
+      - name: Install Chaos Toolkit
+        run: |
+          pip install --quiet \
+            chaostoolkit==1.19.0 \
+            chaostoolkit-kubernetes==0.26.4 \
+            chaostoolkit-verification==0.3.0
+
+      - name: Make scripts executable
+        run: chmod +x tests/chaos/*.sh
+
+      - name: Run — all experiments
+        if: ${{ github.event.inputs.experiment == 'all' || github.event_name == 'schedule' }}
+        env:
+          NAMESPACE: ${{ env.NAMESPACE }}
+          KAFKA_BOOTSTRAP: kafka:9092
+          GATEWAY_URL: ${{ secrets.CHAOS_GATEWAY_URL }}
+          PROMETHEUS_URL: ${{ secrets.CHAOS_PROMETHEUS_URL }}
+          TEST_JWT: ${{ secrets.CHAOS_TEST_JWT }}
+        run: bash tests/chaos/run-all.sh
+
+      - name: Run — pod-kill
+        if: ${{ github.event.inputs.experiment == 'pod-kill' }}
+        run: chaos run tests/chaos/pod-kill.yaml
+
+      - name: Run — kafka-consumer-pause
+        if: ${{ github.event.inputs.experiment == 'kafka-consumer-pause' }}
+        env:
+          NAMESPACE: ${{ env.NAMESPACE }}
+          KAFKA_BOOTSTRAP: kafka:9092
+        run: bash tests/chaos/kafka-consumer-pause.sh
+
+      - name: Run — redis-outage
+        if: ${{ github.event.inputs.experiment == 'redis-outage' }}
+        env:
+          NAMESPACE: ${{ env.NAMESPACE }}
+          GATEWAY_URL: ${{ secrets.CHAOS_GATEWAY_URL }}
+          TEST_JWT: ${{ secrets.CHAOS_TEST_JWT }}
+        run: bash tests/chaos/redis-outage.sh
+
+      - name: Run — projection-lag
+        if: ${{ github.event.inputs.experiment == 'projection-lag' }}
+        env:
+          NAMESPACE: ${{ env.NAMESPACE }}
+          KAFKA_BOOTSTRAP: kafka:9092
+          PROMETHEUS_URL: ${{ secrets.CHAOS_PROMETHEUS_URL }}
+        run: bash tests/chaos/projection-lag.sh
+
+      - name: Run — network-partition
+        if: ${{ github.event.inputs.experiment == 'network-partition' }}
+        run: chaos run tests/chaos/network-partition.yaml
+
+      - name: Upload chaos logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaos-results-${{ github.run_number }}
+          path: tests/chaos/results/
+          retention-days: 30
+
+      - name: Notify Slack on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "text": ":fire: Chaos experiment *${{ github.event.inputs.experiment || 'all' }}* FAILED on `${{ env.NAMESPACE }}` — <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_CHAOS_WEBHOOK }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

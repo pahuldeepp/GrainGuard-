@@ -12,6 +12,7 @@ const protoCandidates = [
   path.resolve(process.cwd(), "libs/proto/device.proto"),
   path.resolve(__dirname, "../../libs/proto/device.proto"),
   path.resolve(__dirname, "../../../libs/proto/device.proto"),
+  path.resolve(__dirname, "../../../../libs/proto/device.proto"),
   "/app/libs/proto/device.proto",
   "/libs/proto/device.proto",
 ];
@@ -108,6 +109,10 @@ export function createDevice(
       (err: any, response: any) => {
         if (err) {
           return reject(err);
+        }
+        // Validate response structure
+        if (!response || !response.device_id) {
+          return reject(new Error("Invalid gRPC response: missing device_id"));
         }
         resolve(response);
       }

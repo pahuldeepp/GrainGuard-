@@ -1,0 +1,77 @@
+name: E2E Tests
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: Playwright E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/dashboard/package-lock.json
+
+      - name: Install dashboard deps
+        run: npm ci
+        working-directory: apps/dashboard
+
+      - name: Install E2E deps
+        run: npm install --save-dev @playwright/test typescript ts-node
+        working-directory: tests/e2e
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox
+        working-directory: tests/e2e
+
+      - name: Build dashboard
+        run: npm run build
+        working-directory: apps/dashboard
+        env:
+          VITE_AUTH0_DOMAIN:    ${{ secrets.VITE_AUTH0_DOMAIN }}
+          VITE_AUTH0_CLIENT_ID: ${{ secrets.VITE_AUTH0_CLIENT_ID }}
+          VITE_AUTH0_AUDIENCE:  ${{ secrets.VITE_AUTH0_AUDIENCE }}
+          VITE_BFF_URL:         ${{ secrets.E2E_BFF_URL }}
+          VITE_GATEWAY_URL:     ${{ secrets.E2E_GATEWAY_URL }}
+
+      - name: Serve dashboard
+        run: npx serve -s dist -l 5173 &
+        working-directory: apps/dashboard
+
+      - name: Wait for server
+        run: npx wait-on http://localhost:5173 --timeout 30000
+
+      - name: Run Playwright tests
+        run: npx playwright test --config playwright.config.ts
+        working-directory: tests/e2e
+        env:
+          E2E_BASE_URL:         http://localhost:5173
+          VITE_AUTH0_CLIENT_ID: ${{ secrets.VITE_AUTH0_CLIENT_ID }}
+          VITE_AUTH0_AUDIENCE:  ${{ secrets.VITE_AUTH0_AUDIENCE }}
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report-${{ github.run_number }}
+          path: tests/e2e/playwright-report/
+          retention-days: 14
+
+      - name: Upload test results (JUnit)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-results-${{ github.run_number }}
+          path: tests/e2e/playwright-results.xml

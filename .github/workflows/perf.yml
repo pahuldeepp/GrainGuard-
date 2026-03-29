@@ -1,0 +1,181 @@
+name: Performance Budget
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - "apps/gateway/**"
+      - "apps/bff/**"
+      - "scripts/load-tests/**"
+
+permissions:
+  contents: read
+
+jobs:
+  perf:
+    name: k6 Performance Budget
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: grainguard
+          POSTGRES_PASSWORD: grainguard
+          POSTGRES_DB: grainguard
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            apps/gateway/package-lock.json
+            apps/bff/package-lock.json
+
+      - name: Install gateway deps
+        run: npm ci
+        working-directory: apps/gateway
+
+      - name: Ensure Postgres client is available
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y postgresql-client
+          fi
+
+      - name: Start gateway in background
+        run: npx ts-node src/server.ts &
+        working-directory: apps/gateway
+        env:
+          PORT: 3000
+          NODE_ENV: test
+          AUTH_ENABLED: "false"
+          DATABASE_URL: postgres://grainguard:grainguard@localhost:5432/grainguard
+          WRITE_DATABASE_URL: postgres://grainguard:grainguard@localhost:5432/grainguard
+          READ_DATABASE_URL: postgres://grainguard:grainguard@localhost:5432/grainguard
+          REDIS_HOST: localhost
+          REDIS_PORT: "6379"
+          JWKS_URL: https://example.com/.well-known/jwks.json
+          JWT_ISSUER: https://example.com/
+          JWT_AUDIENCE: grainguard
+          ALLOWED_ORIGINS: http://localhost:5173
+          STRIPE_SECRET_KEY: test_placeholder
+          STRIPE_WEBHOOK_SECRET: webhook_placeholder
+          STRIPE_PRICE_STARTER: price_placeholder
+          STRIPE_PRICE_PROFESSIONAL: price_placeholder
+          STRIPE_PRICE_ENTERPRISE: price_placeholder
+          DASHBOARD_URL: http://localhost:5173
+          AUTH0_DOMAIN: placeholder.auth0.com
+          AUTH0_MANAGEMENT_CLIENT_ID: placeholder
+          AUTH0_MANAGEMENT_CLIENT_SECRET: placeholder
+
+      - name: Install BFF deps
+        run: npm ci
+        working-directory: apps/bff
+
+      - name: Create minimal read-model tables for startup
+        run: |
+          PGPASSWORD=grainguard psql \
+            -h localhost \
+            -U grainguard \
+            -d grainguard \
+            -c 'CREATE TABLE IF NOT EXISTS device_telemetry_latest (
+                  device_id uuid PRIMARY KEY,
+                  tenant_id uuid,
+                  temperature double precision,
+                  humidity double precision,
+                  recorded_at timestamptz,
+                  updated_at timestamptz,
+                  version bigint
+                );
+                INSERT INTO device_telemetry_latest (
+                  device_id, tenant_id, temperature, humidity, recorded_at, updated_at, version
+                )
+                VALUES (
+                  '\''00000000-0000-0000-0000-000000000001'\'',
+                  '\''11111111-1111-1111-1111-111111111111'\'',
+                  21.5,
+                  48.2,
+                  NOW(),
+                  NOW(),
+                  1
+                )
+                ON CONFLICT (device_id) DO UPDATE
+                SET tenant_id = EXCLUDED.tenant_id,
+                    temperature = EXCLUDED.temperature,
+                    humidity = EXCLUDED.humidity,
+                    recorded_at = EXCLUDED.recorded_at,
+                    updated_at = EXCLUDED.updated_at,
+                    version = EXCLUDED.version;'
+
+      - name: Create performance results directory
+        run: mkdir -p scripts/load-tests/results
+
+      - name: Start BFF in background
+        run: npx ts-node-dev --transpile-only src/server.ts &
+        working-directory: apps/bff
+        env:
+          PORT: 4000
+          NODE_ENV: test
+          AUTH_ENABLED: "false"
+          READ_DATABASE_URL: postgres://grainguard:grainguard@localhost:5432/grainguard
+          REDIS_HOST: localhost
+          REDIS_PORT: "6379"
+          ELASTICSEARCH_URL: http://localhost:9200
+          CASSANDRA_HOSTS: localhost
+          CASSANDRA_KEYSPACE: grainguard_telemetry
+          JWKS_URL: https://example.com/.well-known/jwks.json
+          JWT_ISSUER: https://example.com/
+          JWT_AUDIENCE: grainguard
+          ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
+
+      - name: Wait for gateway
+        run: npx wait-on http://localhost:3000/health --timeout 30000
+
+      - name: Wait for BFF
+        run: npx wait-on tcp:4000 --timeout 30000
+
+      - name: Install k6
+        run: |
+          curl -L https://github.com/grafana/k6/releases/download/v0.51.0/k6-v0.51.0-linux-amd64.tar.gz | tar xz
+          sudo mv k6-v0.51.0-linux-amd64/k6 /usr/local/bin/k6
+
+      - name: Run performance budget
+        run: |
+          k6 run \
+            --env GATEWAY_URL=http://localhost:3000 \
+            --env BFF_URL=http://localhost:4000 \
+            --env GATEWAY_AUTH_DISABLED=true \
+            --env BFF_AUTH_DISABLED=true \
+            --env JWT=dummy-jwt \
+            --env TEST_DEVICE_ID=00000000-0000-0000-0000-000000000001 \
+            scripts/load-tests/performance-budget.js
+
+      - name: Upload performance results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-results-${{ github.run_number }}
+          path: scripts/load-tests/results/
+          retention-days: 30
