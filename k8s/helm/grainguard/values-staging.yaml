@@ -17,6 +17,7 @@ services:
     probeTimeoutSeconds: 5
     readinessPath: /health
     env:
+      ALLOWED_ORIGINS: "http://localhost:5173,http://*.elb.amazonaws.com:8080"
       NODE_TLS_REJECT_UNAUTHORIZED: "0"
       REDIS_HOST: master.grainguard-staging.2vbpuh.use1.cache.amazonaws.com
       REDIS_PORT: "6379"
@@ -44,6 +45,32 @@ services:
       enabled: true
       minReplicas: 2
       maxReplicas: 6
+
+  dashboard:
+    enabled: true
+    replicaCount: 1
+    port: 8080
+    healthPath: /
+    readinessPath: /
+    serviceType: LoadBalancer
+    image:
+      tag: staging-dashboard
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 250m
+        memory: 128Mi
+    autoscaling:
+      enabled: false
+    pdb:
+      enabled: false
+    networkPolicy:
+      enabled: true
+      allowExternal: true
+      allowFromSameNamespace: true
+      allowFromServices: []
 
   telemetry-service:
     enabled: false

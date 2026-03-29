@@ -36,6 +36,18 @@ const ALLOWED_ORIGINS = (
   .split(",")
   .map((o) => o.trim());
 
+function isAllowedOrigin(origin: string): boolean {
+  return ALLOWED_ORIGINS.some((allowedOrigin) => {
+    if (allowedOrigin === origin) return true;
+    if (!allowedOrigin.includes("*")) return false;
+
+    const pattern = new RegExp(
+      `^${allowedOrigin.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\\\*/g, ".*")}$`
+    );
+    return pattern.test(origin);
+  });
+}
+
 const BFF_HOST = process.env.BFF_HOST || "grainguard-bff";
 const BFF_PORT = parseInt(process.env.BFF_PORT || "4000", 10);
 
@@ -69,7 +81,7 @@ app.use(
   cors({
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
-      if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+      if (isAllowedOrigin(origin)) return cb(null, true);
       return cb(new Error(`CORS blocked for ${origin}`));
     },
     credentials: true,

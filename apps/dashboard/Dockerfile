@@ -8,10 +8,17 @@ ARG VITE_AUTH0_CLIENT_ID
 ARG VITE_AUTH0_AUDIENCE
 ARG VITE_BFF_URL
 ARG VITE_GATEWAY_URL
+ENV VITE_AUTH0_DOMAIN=$VITE_AUTH0_DOMAIN
+ENV VITE_AUTH0_CLIENT_ID=$VITE_AUTH0_CLIENT_ID
+ENV VITE_AUTH0_AUDIENCE=$VITE_AUTH0_AUDIENCE
+ENV VITE_BFF_URL=$VITE_BFF_URL
+ENV VITE_GATEWAY_URL=$VITE_GATEWAY_URL
 RUN npm run build
 
-FROM nginx:alpine
-COPY --from=builder /app/dist /usr/share/nginx/html
-COPY apps/dashboard/nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+FROM node:20-alpine
+WORKDIR /app
+RUN npm install -g serve
+COPY --from=builder /app/dist ./dist
+USER node
+EXPOSE 8080
+CMD ["serve", "-s", "dist", "-l", "8080"]
