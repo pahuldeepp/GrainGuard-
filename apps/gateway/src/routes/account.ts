@@ -46,6 +46,7 @@ accountRouter.get(
 // If the user is the last admin, the entire tenant is deleted.
 accountRouter.delete(
   "/account/me",
+  apiRateLimiter,
   authMiddleware,
   async (req: Request, res: Response) => {
     const tenantId = req.user!.tenantId;
@@ -131,6 +132,7 @@ accountRouter.delete(
 // GDPR Article 20 — Right to Data Portability. Returns all user data as JSON.
 accountRouter.get(
   "/account/export",
+  apiRateLimiter,
   authMiddleware,
   async (req: Request, res: Response) => {
     try {
