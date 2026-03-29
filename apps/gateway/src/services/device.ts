@@ -8,10 +8,21 @@ import fs from "fs";
    📦 Load Proto
 ========================================= */
 
-const protoPath = path.resolve(
-  __dirname,
-  "../../libs/proto/device.proto"
-);
+const protoCandidates = [
+  path.resolve(process.cwd(), "libs/proto/device.proto"),
+  path.resolve(__dirname, "../../libs/proto/device.proto"),
+  path.resolve(__dirname, "../../../libs/proto/device.proto"),
+  "/app/libs/proto/device.proto",
+  "/libs/proto/device.proto",
+];
+
+const protoPath = protoCandidates.find((candidate) => fs.existsSync(candidate));
+
+if (!protoPath) {
+  throw new Error(
+    `device.proto not found; checked: ${protoCandidates.join(", ")}`
+  );
+}
 
 const packageDefinition = protoLoader.loadSync(protoPath, {
   keepCase: true,

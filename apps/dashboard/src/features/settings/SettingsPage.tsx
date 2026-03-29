@@ -103,16 +103,24 @@ export function SettingsPage() {
       const res = await fetch(`${GW}/account/export`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(
+          typeof body?.error === "string" ? body.error : `HTTP ${res.status}`
+        );
+      }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `grainguard-export-${new Date().toISOString().slice(0, 10)}.json`;
+      const disposition = res.headers.get("content-disposition") ?? "";
+      const filenameMatch = disposition.match(/filename=\"?([^"]+)\"?/i);
+      a.download = filenameMatch?.[1] ?? `grainguard-export-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
       toast.success("Data exported");
-    } catch {
-      toast.error("Export failed");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Export failed");
     }
   }
 

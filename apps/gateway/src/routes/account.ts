@@ -76,17 +76,37 @@ accountRouter.delete(
         admins.length === 1;
 
       if (isLastAdmin) {
-        // Delete the entire tenant and all associated data
-        await client.query("DELETE FROM tenant_invites WHERE tenant_id = $1", [tenantId]);
-        await client.query("DELETE FROM api_keys WHERE tenant_id = $1", [tenantId]);
-        await client.query("DELETE FROM alert_rules WHERE tenant_id = $1", [tenantId]);
-        await client.query("DELETE FROM audit_events WHERE tenant_id = $1", [tenantId]);
+        // Delete tenant-owned device data first because telemetry_readings
+        // references devices without ON DELETE CASCADE.
+        await client.query(
+          `DELETE FROM telemetry_readings tr
+           USING devices d
+           WHERE tr.device_id = d.id
+             AND d.tenant_id = $1`,
+          [tenantId]
+        );
         await client.query("DELETE FROM devices WHERE tenant_id = $1", [tenantId]);
-        await client.query("DELETE FROM tenant_users WHERE tenant_id = $1", [tenantId]);
+
+        const { rows: auditEventRows } = await client.query(
+          "SELECT COUNT(*)::int AS count FROM audit_events WHERE tenant_id = $1",
+          [tenantId]
+        );
+
+        // Most tenant-linked tables cascade from tenants, so deleting the
+        // tenant removes them automatically. Immutable audit_events are
+        // intentionally retained for compliance and cannot be deleted.
         await client.query("DELETE FROM tenants WHERE id = $1", [tenantId]);
 
         await client.query("COMMIT");
-        return res.json({ deleted: true, scope: "tenant", message: "Tenant and all data deleted" });
+        const immutableAuditEvents = auditEventRows[0]?.count ?? 0;
+        return res.json({
+          deleted: true,
+          scope: "tenant",
+          message:
+            immutableAuditEvents > 0
+              ? "Tenant deleted. Immutable audit events were retained for compliance."
+              : "Tenant and all mutable data deleted",
+        });
       }
 
       // Just remove this user from the tenant
@@ -113,33 +133,38 @@ accountRouter.get(
   "/account/export",
   authMiddleware,
   async (req: Request, res: Response) => {
-    const tenantId = req.user!.tenantId;
+    try {
+      const tenantId = req.user!.tenantId;
 
-    const [tenantResult, usersResult, devicesResult, alertsResult, auditResult, keysResult] =
-      await Promise.all([
-        pool.query("SELECT id, name, slug, plan, email, created_at FROM tenants WHERE id = $1", [tenantId]),
-        pool.query("SELECT id, email, role, created_at FROM tenant_users WHERE tenant_id = $1", [tenantId]),
-        pool.query("SELECT id, serial_number, created_at FROM devices WHERE tenant_id = $1", [tenantId]),
-        pool.query("SELECT id, name, metric, operator, threshold, enabled, created_at FROM alert_rules WHERE tenant_id = $1", [tenantId]),
-        pool.query("SELECT id, event_type, actor_id, resource_type, payload, created_at FROM audit_events WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT 1000", [tenantId]),
-        pool.query("SELECT id, name, created_at, expires_at, revoked_at FROM api_keys WHERE tenant_id = $1", [tenantId]),
-      ]);
+      const [tenantResult, usersResult, devicesResult, alertsResult, auditResult, keysResult] =
+        await Promise.all([
+          pool.query("SELECT id, name, slug, plan, email, created_at FROM tenants WHERE id = $1", [tenantId]),
+          pool.query("SELECT id, email, role, created_at FROM tenant_users WHERE tenant_id = $1", [tenantId]),
+          pool.query("SELECT id, serial_number, created_at FROM devices WHERE tenant_id = $1", [tenantId]),
+          pool.query("SELECT id, name, metric, operator, threshold, enabled, created_at FROM alert_rules WHERE tenant_id = $1", [tenantId]),
+          pool.query("SELECT id, event_type, actor_id, resource_type, payload, created_at FROM audit_events WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT 1000", [tenantId]),
+          pool.query("SELECT id, name, created_at, expires_at, revoked_at FROM api_keys WHERE tenant_id = $1", [tenantId]),
+        ]);
 
-    const exportData = {
-      exportedAt: new Date().toISOString(),
-      tenant: tenantResult.rows[0] || null,
-      users: usersResult.rows,
-      devices: devicesResult.rows,
-      alertRules: alertsResult.rows,
-      auditEvents: auditResult.rows,
-      apiKeys: keysResult.rows,
-    };
+      const exportData = {
+        exportedAt: new Date().toISOString(),
+        tenant: tenantResult.rows[0] || null,
+        users: usersResult.rows,
+        devices: devicesResult.rows,
+        alertRules: alertsResult.rows,
+        auditEvents: auditResult.rows,
+        apiKeys: keysResult.rows,
+      };
 
-    res.setHeader("Content-Type", "application/json");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="grainguard-export-${tenantId}-${new Date().toISOString().slice(0, 10)}.json"`
-    );
-    return res.json(exportData);
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="grainguard-export-${tenantId}-${new Date().toISOString().slice(0, 10)}.json"`
+      );
+      return res.json(exportData);
+    } catch (err) {
+      console.error("[account] export error:", err);
+      return res.status(500).json({ error: "internal_error" });
+    }
   }
 );

@@ -10,6 +10,8 @@ spec:
   destinations:
     - namespace: grainguard-dev
       server: https://kubernetes.default.svc
+    - namespace: grainguard-staging
+      server: https://kubernetes.default.svc
     - namespace: grainguard-prod
       server: https://kubernetes.default.svc
     - namespace: argocd
@@ -31,3 +33,8 @@ spec:
       policies:
         - p, proj:grainguard:prod-deployer, applications, sync, grainguard/grainguard-prod, allow
         - p, proj:grainguard:prod-deployer, applications, get,  grainguard/grainguard-prod, allow
+    - name: staging-deployer
+      description: Can sync staging for pre-production validation
+      policies:
+        - p, proj:grainguard:staging-deployer, applications, sync, grainguard/grainguard-staging, allow
+        - p, proj:grainguard:staging-deployer, applications, get,  grainguard/grainguard-staging, allow

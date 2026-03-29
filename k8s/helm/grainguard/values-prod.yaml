@@ -1,3 +1,5 @@
+namespace: grainguard-prod
+
 # Prod environment overrides — higher replicas, aggressive autoscaling
 image:
   pullPolicy: Always
