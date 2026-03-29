@@ -3,6 +3,7 @@ import { createClient, createCluster } from "redis";
 // REDIS_CLUSTER_NODES = "redis-cluster-0:6379,redis-cluster-1:6379,..."
 // When set, uses Redis Cluster. Otherwise falls back to single-node (local dev).
 const REDIS_CLUSTER_NODES = process.env.REDIS_CLUSTER_NODES;
+const REDIS_PASSWORD = process.env.REDIS_PASSWORD;
 
 const client = (() => {
   if (REDIS_CLUSTER_NODES) {
@@ -13,7 +14,10 @@ const client = (() => {
       };
     });
     console.log(`Redis cluster mode: ${rootNodes.length} nodes`);
-    return createCluster({ rootNodes });
+    return createCluster({
+      rootNodes,
+      defaults: REDIS_PASSWORD ? { password: REDIS_PASSWORD } : undefined,
+    });
   }
 
   // Single-node (local dev / docker-compose default)
@@ -23,6 +27,7 @@ const client = (() => {
       host: process.env.REDIS_HOST || "localhost",
       port: parseInt(process.env.REDIS_PORT || "6379", 10),
     },
+    password: REDIS_PASSWORD || undefined,
   });
 })();
 

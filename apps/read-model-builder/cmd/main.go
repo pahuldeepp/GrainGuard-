@@ -96,6 +96,7 @@ func main() {
 
 	redisClient := redis.NewUniversalClient(&redis.UniversalOptions{
 		Addrs:          addrs,
+		Password:       os.Getenv("REDIS_PASSWORD"),
 		PoolSize:       getenvInt("REDIS_POOL_SIZE", 20),
 		MinIdleConns:   5,
 		ReadTimeout:    2 * time.Second,
@@ -198,4 +199,3 @@ func main() {
 	wg.Wait()
 	log.Info().Msg("all consumers drained — exiting")
 }
-

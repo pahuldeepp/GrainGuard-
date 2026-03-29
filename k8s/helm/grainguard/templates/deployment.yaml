@@ -39,16 +39,19 @@ spec:
         - name: {{ $name }}
           image: "{{ $.Values.image.registry }}/{{ $name }}:{{ $svc.image.tag | default $.Values.image.tag }}"
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          {{- $httpPort := int $svc.port }}
+          {{- $grpcPort := int ($svc.grpcPort | default 0) }}
+          {{- $healthPort := int ($svc.healthPort | default 0) }}
           ports:
             - name: http
               containerPort: {{ $svc.port }}
               protocol: TCP
-            {{- if $svc.grpcPort }}
+            {{- if and $svc.grpcPort (ne $grpcPort $httpPort) }}
             - name: grpc
               containerPort: {{ $svc.grpcPort }}
               protocol: TCP
             {{- end }}
-            {{- if $svc.healthPort }}
+            {{- if and $svc.healthPort (ne $healthPort $httpPort) (or (not $svc.grpcPort) (ne $healthPort $grpcPort)) }}
             - name: health
               containerPort: {{ $svc.healthPort }}
               protocol: TCP

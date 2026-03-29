@@ -21,18 +21,29 @@ services:
     env:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      BFF_HOST: bff
+      BFF_PORT: "4000"
       GRPC_TARGET: "telemetry-service:50051"
       OTEL_EXPORTER_OTLP_ENDPOINT: "otel-collector:4317"
     envFromSecret:
       - name: READ_DATABASE_URL
         secretName: postgres-read-secret
         secretKey: READ_DATABASE_URL
+      - name: WRITE_DATABASE_URL
+        secretName: postgres-secret
+        secretKey: WRITE_DB_URL
       - name: JWKS_URL
         secretName: auth-secret
         secretKey: JWKS_URL
       - name: JWT_ISSUER
         secretName: auth-secret
         secretKey: JWT_ISSUER
+      - name: JWT_AUDIENCE
+        secretName: auth-secret
+        secretKey: JWT_AUDIENCE
+      - name: REDIS_PASSWORD
+        secretName: redis-secret
+        secretKey: REDIS_PASSWORD
     resources:
       requests:
         cpu: 100m
@@ -72,9 +83,24 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
     envFromSecret:
+      - name: READ_DATABASE_URL
+        secretName: postgres-read-secret
+        secretKey: READ_DATABASE_URL
       - name: READ_DB_PASSWORD
         secretName: postgres-read-secret
         secretKey: POSTGRES_PASSWORD
+      - name: JWKS_URL
+        secretName: auth-secret
+        secretKey: JWKS_URL
+      - name: JWT_ISSUER
+        secretName: auth-secret
+        secretKey: JWT_ISSUER
+      - name: JWT_AUDIENCE
+        secretName: auth-secret
+        secretKey: JWT_AUDIENCE
+      - name: REDIS_PASSWORD
+        secretName: redis-secret
+        secretKey: REDIS_PASSWORD
     resources:
       requests:
         cpu: 100m
@@ -279,7 +305,7 @@ services:
       KAFKA_BROKERS: "kafka:9092"
       OTEL_EXPORTER_OTLP_ENDPOINT: "otel-collector:4317"
     envFromSecret:
-      - name: WRITE_DB_URL
+      - name: DATABASE_URL
         secretName: postgres-secret
         secretKey: WRITE_DB_URL
     resources:
@@ -317,6 +343,10 @@ services:
       KAFKA_BROKERS: "kafka:9092"
       RABBITMQ_URL: "amqp://rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "otel-collector:4317"
+    envFromSecret:
+      - name: DATABASE_URL
+        secretName: postgres-secret
+        secretKey: WRITE_DB_URL
     resources:
       requests:
         cpu: 200m
@@ -379,6 +409,10 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       OTEL_EXPORTER_OTLP_ENDPOINT: "otel-collector:4317"
+    envFromSecret:
+      - name: DATABASE_URL
+        secretName: postgres-secret
+        secretKey: WRITE_DB_URL
     resources:
       requests:
         cpu: 100m
@@ -414,6 +448,10 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       OTEL_EXPORTER_OTLP_ENDPOINT: "otel-collector:4317"
+    envFromSecret:
+      - name: DATABASE_URL
+        secretName: postgres-secret
+        secretKey: WRITE_DB_URL
     resources:
       requests:
         cpu: 100m
