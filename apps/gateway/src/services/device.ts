@@ -8,10 +8,9 @@ import fs from "fs";
    📦 Load Proto
 ========================================= */
 
-const protoPath = path.resolve(
-  __dirname,
-  "../../../../libs/proto/device.proto"
-);
+const protoPath = fs.existsSync("/app/libs/proto/device.proto")
+  ? "/app/libs/proto/device.proto"
+  : path.resolve(__dirname, "../../libs/proto/device.proto");
 
 const packageDefinition = protoLoader.loadSync(protoPath, {
   keepCase: true,
