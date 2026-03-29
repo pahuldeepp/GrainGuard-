@@ -18,6 +18,7 @@ services:
     readinessPath: /health
     env:
       ALLOWED_ORIGINS: "http://localhost:5173,http://*.elb.amazonaws.com:8080"
+      AUTH_ENABLED: "false"
       NODE_TLS_REJECT_UNAUTHORIZED: "0"
       REDIS_HOST: master.grainguard-staging.2vbpuh.use1.cache.amazonaws.com
       REDIS_PORT: "6379"
@@ -36,6 +37,8 @@ services:
     healthPath: /metrics
     readinessPath: /metrics
     env:
+      ALLOWED_ORIGINS: "http://localhost:5173,http://*.elb.amazonaws.com:8080"
+      AUTH_ENABLED: "false"
       NODE_TLS_REJECT_UNAUTHORIZED: "0"
       PORT: "4000"
       REDIS_HOST: master.grainguard-staging.2vbpuh.use1.cache.amazonaws.com
