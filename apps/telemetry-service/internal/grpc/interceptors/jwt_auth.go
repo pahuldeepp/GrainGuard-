@@ -82,9 +82,7 @@ func (v *JWTVerifier) UnaryAuthInterceptor() grpc.UnaryServerInterceptor {
 
 		claims := jwt.MapClaims{}
 
-		parser := jwt.Parser{
-			ValidMethods: []string{"RS256"},
-		}
+		parser := jwt.NewParser(jwt.WithValidMethods([]string{"RS256"}))
 
 		tok, err := parser.ParseWithClaims(tokenStr, claims, v.JWKS.Keyfunc)
 		if err != nil || tok == nil || !tok.Valid {
